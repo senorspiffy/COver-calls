@@ -1,0 +1,14 @@
+# 04 Build plan - 004
+Fit verdict: FIT
+Fits a ~$3k account: text/process change only, no new costs, no trading.
+## Extra research (with sources)
+None needed; all inputs are repo files.
+## Files to create/change
+work/001/03-handoff.md; scripts/check_handoff.py; templates/research-handoff.md; .claude/agents/r3-fact-checker.md, i3-verifier.md, a1-auditor.md; logs/research/2026-10-30.md; README.md
+## Tests and checks
+- `python3 scripts/check_handoff.py 001` → PASS
+- `python3 scripts/check_handoff.py 004` → PASS
+- Old 001 hand-off (main 0ca80e8) → FAIL (for 002-004)
+- grep each new instruction in its file
+## Expected result
+Map steps in 03-handoff.md all applied.

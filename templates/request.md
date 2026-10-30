@@ -1,5 +1,6 @@
 # Work item <ID>
 Type: IDEA | BUG | EFFICIENCY
+Scope: FULL | RESEARCH ONLY
 Opened by: person | A1
 Date:
 ## What we want
