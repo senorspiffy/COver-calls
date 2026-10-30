@@ -1,4 +1,5 @@
-"""CSV loaders with strict checks. Schema: date,close[,iv][,dividend][,earnings]."""
+"""CSV loaders with strict checks. Schema: date,close[,iv][,dividend][,earnings].
+An absent optional column is NaN and named in PriceSeries.missing (policy: missing.py)."""
 import json
 import math
 from dataclasses import dataclass, replace
@@ -11,6 +12,8 @@ class DataError(ValueError):
     pass
 
 
+OPTIONAL_CSV_COLUMNS = ("iv", "dividend", "earnings")
+OPTIONAL_SNAPSHOT_FIELDS = ("oi", "next_earnings", "ex_div_date", "iv")
 SNAPSHOT_COLUMNS = [
     "ts", "underlying", "underlying_price", "symbol", "expiry", "strike", "type",
     "bid", "ask", "iv", "delta", "oi", "next_earnings", "ex_div_date", "asset_type",
@@ -23,6 +26,7 @@ class PriceSeries:
     meta: dict
     vol: pd.Series            # annualised decimal vol input, already multiplied by k
     k: float = 1.0
+    missing: tuple = ()       # absent dividend/earnings columns (NaN, never 0)
 
     @property
     def ticker(self):
@@ -75,8 +79,9 @@ def load_prices(path, k=1.0, rv_window=20):
     df = pd.DataFrame(index=pd.DatetimeIndex(dates, name="date"))
     num = lambda c: pd.to_numeric(raw[c], errors="coerce").to_numpy()  # noqa: E731
     df["close"] = num("close")
-    df["dividend"] = num("dividend") if "dividend" in raw else 0.0
-    df["earnings"] = num("earnings") if "earnings" in raw else 0
+    missing = tuple(c for c in ("dividend", "earnings") if c not in raw)
+    for c in ("dividend", "earnings"):
+        df[c] = float("nan") if c in missing else num(c)
     if "iv" in raw:
         df["iv"] = num("iv")
     for i, (_, r) in enumerate(df.iterrows()):
@@ -84,13 +89,14 @@ def load_prices(path, k=1.0, rv_window=20):
             _fail(i, f"close must be > 0 (got {raw['close'][i]})")
         if "iv" in df and not 0 < r["iv"] < 5:
             _fail(i, f"iv must be in (0, 5) (got {raw['iv'][i]})")
-        if r["earnings"] not in (0, 1):
+        if "earnings" not in missing and r["earnings"] not in (0, 1):
             _fail(i, f"earnings must be 0 or 1 (got {raw['earnings'][i]})")
-        if not r["dividend"] >= 0:
+        if "dividend" not in missing and not r["dividend"] >= 0:
             _fail(i, f"dividend must be >= 0 (got {raw['dividend'][i]})")
-    df["earnings"] = df["earnings"].astype(int)
+    if "earnings" not in missing:
+        df["earnings"] = df["earnings"].astype(int)
     base = df["iv"] if "iv" in df else realized_vol(df["close"], rv_window)
-    return PriceSeries(df=df, meta=load_meta(path), vol=base * k, k=k)
+    return PriceSeries(df=df, meta=load_meta(path), vol=base * k, k=k, missing=missing)
 
 
 def load_snapshots(path):

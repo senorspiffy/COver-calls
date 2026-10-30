@@ -11,7 +11,7 @@ from .broker.base import NoQuote, OptionOrder, chunk
 from .data import SNAPSHOT_COLUMNS
 from .report import daily_report, weekly_report
 from .rules import Market, apply_fill, decide_entry, decide_exit, equity
-from .screen import feasible_universe, universe_banner
+from .screen import feasible_universe, pass_history, universe_banner
 from .variants import BY_ID, REGISTRY
 
 TRADE_COLUMNS = ["date", "variant", "ticker", "action", "reason", "contract", "qty", "limit", "tif", "fill",
@@ -23,7 +23,7 @@ class BrokerMarket(Market):
     Every quote read is appended to `log` (state/paper_snapshots.csv)."""
 
     def __init__(self, broker, ticker, asof, log):
-        cal = expiries.scan_calendar(asof)
+        cal = broker.calendar(asof)
         super().__init__(expiries.third_fridays(cal), expiries.fridays(cal))
         self.broker, self.ticker, self.log, self._cache = broker, ticker, log, {}
 
@@ -103,6 +103,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
             return scan
     v = BY_ID[variant]
     dry = broker.dry_run
+    calendar = broker.calendar(date)  # raises outside the holiday table before any state changes
     rows = [_row(date, variant, broker.get_positions().ticker, contract=e.get("contract"),
                  dry_run=dry, **{"action": e["action"], "reason": "OK", "status": e.get("status", "FILLED"),
                                  "fill": e.get("fill", e.get("price")), "fees": e.get("fees"),
@@ -126,7 +127,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
         markets[state.ticker] = BrokerMarket(broker, state.ticker, date, log)
     capital = equity(state, days[state.ticker], cfg) if holding else state.cash
     snaps = pd.DataFrame(log, columns=SNAPSHOT_COLUMNS)
-    passing, rejects = feasible_universe(cfg, snaps, capital, date)
+    passing, rejects = feasible_universe(cfg, snaps, capital, date, calendar, broker.quotes_have_oi)
     banner = universe_banner(passing, rejects)
     ticker = state.ticker if holding else (passing[0] if passing else None)
     allowed = ticker is not None and ticker in passing
@@ -164,6 +165,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
             break
         context = {"ticker": ticker, "price": day.close, "vol_pct": _nan_to_none(day.vol_pct),
                    "spread": chosen_spread, "next_earnings": day.next_earnings and day.next_earnings.isoformat(),
+                   "earnings_known": day.asset_type == "etf" or day.earnings_known,
                    "ex_div_date": day.ex_div_date and day.ex_div_date.isoformat()}
     state = broker.get_positions()
     would = {x.label: _would_act(start, days[ticker], x, cfg, markets[ticker], allowed) if ticker else
@@ -171,9 +173,13 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
     _append_csv(trades_path, rows, TRADE_COLUMNS)
     _append_csv(state_dir / "paper_snapshots.csv", log, SNAPSHOT_COLUMNS)
     final_eq = equity(state, days[state.ticker], cfg) if (state.shares or state.option) else state.cash
+    prior = [json.loads(p.read_text()) for p in sorted((state_dir / "scans").glob("*.json")) if p.stem < date.isoformat()]
+    history = {t: list(pass_history(prior + [{"passing": passing}], t)) for t in cfg["universe"]}
     scan = {"date": date.isoformat(), "variant": variant, "broker": broker.name, "skipped": False,
             "synthetic": broker.synthetic, "modelled": broker.modelled, "dry_run": dry, "banner": banner,
-            "passing": passing, "rejects": rejects, "positions": state.to_dict(), "equity": final_eq,
+            "passing": passing, "rejects": rejects, "pass_history": history,
+            "early_close": date.isoformat() in expiries.load_holidays()["early_closes"],
+            "positions": state.to_dict(), "equity": final_eq,
             "decisions": [{k: _nan_to_none(r[k]) for k in ("action", "reason", "contract", "limit", "tif",
                                                            "delta", "in_band", "in_window", "status", "fill")}
                           for r in rows], "context": context, "would_act": would}

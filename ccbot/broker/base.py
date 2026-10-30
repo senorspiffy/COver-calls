@@ -4,6 +4,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from .. import expiries
 from ..rules import CONTRACT
 
 SIDES = ("SELL_TO_OPEN", "BUY_TO_CLOSE")
@@ -105,6 +106,11 @@ class Broker(ABC):
     modelled = False      # True when quotes come from the BS model or synthetic snapshots
     synthetic = False
     dry_run = False       # True when orders are only validated/previewed, never filled
+    quotes_have_oi = True  # False only for model quotes (no OI field): the screen then skips OI
+
+    def calendar(self, asof):
+        """Trading days used for expiries on `asof` (NYSE holidays; raises outside the table)."""
+        return expiries.scan_calendar(asof)
 
     @abstractmethod
     def advance(self, date):

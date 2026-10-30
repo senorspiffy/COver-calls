@@ -89,3 +89,15 @@ def test_synth_a_shape(synth_a):
     df = synth_a.df
     assert len(df) == 2520 and df["close"].iloc[0] == 24.0
     assert df["earnings"].sum() == 0 and (df["dividend"] > 0).sum() >= 36
+
+
+def test_absent_optional_columns_are_flagged(tmp_path):
+    """005: an absent dividend/earnings column is NaN and named, never 0."""
+    p = tmp_path / "x.csv"
+    p.write_text("date,close\n2026-01-05,10\n2026-01-06,11\n")
+    s = load_prices(p)
+    assert s.missing == ("dividend", "earnings")
+    assert s.df["dividend"].isna().all() and s.df["earnings"].isna().all()
+    good = tmp_path / "g.csv"
+    good.write_text(GOOD)
+    assert load_prices(good).missing == ()

@@ -82,3 +82,51 @@ def test_weekly_report_only_on_friday(tmp_path, cfg):
         broker = SimBroker(cfg, snapshots=df, meta=meta, ledger_path=d / "state" / "l.json")
         run_daily(thursday, broker, cfg, weekly=weekly, state_dir=d / "state", reports_dir=d / "reports")
         assert (d / "reports" / f"weekly_{thursday}.md").exists() is expect
+
+
+def _passing_b(df):
+    """SYNTH_B's rows at $14 with a $0.05 spread, so only the earnings test can reject it."""
+    b = df[df["underlying"] == "SYNTH_B"].copy()
+    b["ask"] = (b["bid"] + 0.05).round(2)
+    return b
+
+
+def test_blank_oi_is_rejected_oi_unknown(cfg):
+    df, _ = _snaps()
+    a = df[df["underlying"] == "SYNTH_A"].copy()
+    assert feasible_universe(cfg, a, 3000, DATE)[0] == ["SYNTH_A"]
+    a["oi"] = float("nan")
+    assert feasible_universe(cfg, a, 3000, DATE)[1]["SYNTH_A"] == "OI_UNKNOWN"
+
+
+def test_blank_earnings_stock_rejected_earnings_unknown(cfg):
+    df, _ = _snaps()
+    b = _passing_b(df)
+    assert feasible_universe(cfg, b, 3000, DATE)[0] == ["SYNTH_B"]     # control: passes with a date
+    b["next_earnings"] = None
+    assert feasible_universe(cfg, b, 3000, DATE)[1]["SYNTH_B"] == "EARNINGS_UNKNOWN"
+
+
+def test_scan_outside_holiday_table_changes_nothing(tmp_path, cfg):
+    """007: past the holiday table the scan refuses before the ledger or any log is written."""
+    import pytest
+    with pytest.raises(ValueError, match="holiday table covers"):
+        _run(tmp_path, cfg, date=dt.date(2028, 10, 2))
+    assert not (tmp_path / "state").exists()
+
+
+def test_pass_history_counts_last_10(tmp_path, cfg):
+    """003: the pass count is information only. It never blocks an order."""
+    from ccbot.screen import pass_history
+    scans = [{"passing": ["SYNTH_A"]}] * 2 + [{"passing": ["SYNTH_A"] if i % 3 == 0 else []} for i in range(10)]
+    assert len(scans) == 12 and pass_history(scans, "SYNTH_A") == (4, 10)
+    assert pass_history(scans[:3], "SYNTH_A") == (3, 3) and pass_history(scans[:3], "SYNTH_B") == (0, 3)
+    real, _ = _run(tmp_path / "seed", cfg)
+    scans_dir = tmp_path / "state" / "scans"
+    scans_dir.mkdir(parents=True)
+    for i in range(10):     # 10 earlier logged scans in which nothing passed
+        d = f"2026-10-{10 + i}"
+        (scans_dir / f"{d}.json").write_text(json.dumps({**real, "date": d, "passing": []}, default=str))
+    scan, _ = _run(tmp_path, cfg)
+    assert [d["action"] for d in scan["decisions"]] == ["BUY_SHARES", "SELL_CALL"]
+    assert scan["pass_history"] == {"SYNTH_A": [1, 10], "SYNTH_B": [0, 10], "SYNTH_C": [0, 10]}

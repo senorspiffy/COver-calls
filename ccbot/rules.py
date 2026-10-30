@@ -14,6 +14,7 @@ REASONS = (
     "OK", "HAS_POSITION", "NO_EXPIRY", "EARNINGS_BLACKOUT", "NOT_UP_DAY", "IV_FILTER",
     "NO_STRIKE_IN_TOLERANCE", "BASIS_ABOVE_BAND", "INSUFFICIENT_CASH", "UNIVERSE_EMPTY",
     "PROFIT_TARGET_HIT", "WINDOW_CLOSED_ROLL", "ASSIGNED_TODAY", "VOL_WARMUP",
+    "EARNINGS_UNKNOWN", "DIVIDEND_UNKNOWN",
 )
 ACTIONS = ("SELL_CALL", "SELL_PUT", "BUY_TO_CLOSE", "BUY_SHARES", "NONE")
 
@@ -79,6 +80,7 @@ class Day:
     ex_div_date: dt.date | None = None
     asset_type: str = "stock"
     vol_warmup: bool = False   # True while the trailing realised vol has too little history
+    earnings_known: bool = False   # False: next_earnings None means unknown, not "none" (missing.py)
 
 
 @dataclass
@@ -280,6 +282,10 @@ def _option_entry(state, day, variant, cfg, market, kind):
             rolled = state.target_expiry is not None and state.target_expiry != expiry
             state.target_expiry = expiry
             return none("WINDOW_CLOSED_ROLL" if rolled else "NOT_UP_DAY")
+    if day.asset_type != "etf" and not day.earnings_known:
+        return none("EARNINGS_UNKNOWN")
+    if math.isnan(day.q):
+        return none("DIVIDEND_UNKNOWN")
     if day.next_earnings is not None and day.next_earnings <= expiry:
         return none("EARNINGS_BLACKOUT")
     chain = [q for q in market.chain(day, expiry, kind) if q.bid > 0]

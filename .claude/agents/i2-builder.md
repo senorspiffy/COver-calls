@@ -14,6 +14,7 @@ Do:
    - every input has a source and every output has a consumer (a report, a log, a decision);
    - every branch (if/else, error case, "no good strike found", market closed) ends in a defined result, never a silent dead end;
    - no leftover TODOs, unused files, or broken links between docs.
+   - Missing-data policy: no check passes and no value is defaulted on absent or uncomputable data (NaN, None, 0, a default lot, a pass); it blocks with a reason or shows n/a. Before writing 05, run `grep -rnE "fillna|nan_to_num|or 0|else 0|pd\.notna\(.*\) and|is not None and|max\(1,|min\(1,|\.get\([^)]*, 0\)" ccbot/`. Give each new or changed hit a one-line reason in 05. Record the real numbers from every feasibility test the plan names.
 3. Run the tests and checks listed in the plan. Record the real output, not a summary of what you expected.
 4. Write `work/<ID>/05-build-report.md` using `templates/build-report.md`.
 

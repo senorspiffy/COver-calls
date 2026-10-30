@@ -44,11 +44,12 @@ def build_days(series):
     earn = _next_date(df["earnings"].to_numpy() == 1, dates)
     exdiv = _next_date(div > 0, dates)
     asset = series.meta.get("asset_type", "stock")
+    earnings_known = "earnings" not in series.missing or asset == "etf"
     days = []
     for i, d in enumerate(dates):
         days.append(Day(d, float(close.iloc[i]), float(close.iloc[i - 1]) if i else None, float(vol[i]),
                         float(q[i]), float(div[i]), float(div[i + 1]) if i + 1 < len(div) else 0.0,
-                        float(pct[i]), earn[i], exdiv[i], asset, bool(math.isnan(vol[i]))))
+                        float(pct[i]), earn[i], exdiv[i], asset, bool(math.isnan(vol[i])), earnings_known))
     return days
 
 
@@ -115,12 +116,35 @@ def run_backtest(series, variant, cfg, days=None):
     return Result(trades_df, equity_s, metrics(equity_s, trades_df, cfg), reasons)
 
 
-def buy_and_hold(series, cfg):
-    """Same start, cash and dividends; shares never sold."""
+BH_TOO_EXPENSIVE = "100 shares cost more than cash − buffer"
+
+
+def bh_lots(series, cfg):
+    """Whole 100-share lots B&H can buy at the first close (0 if it cannot afford one)."""
     s0 = float(series.df["close"].iloc[0])
-    shares = max(1, math.floor((cfg["cash"] - cfg["cash_buffer"]) / (s0 * CONTRACT))) * CONTRACT
-    cash = cfg["cash"] - shares * s0 + (series.df["dividend"] * shares).cumsum()
-    return (cash + shares * series.df["close"]).rename("equity")
+    return math.floor((cfg["cash"] - cfg["cash_buffer"]) / (s0 * CONTRACT))
+
+
+def bh_na_reason(series, cfg):
+    """Why B&H cannot be formed (it never borrows, 006), or None."""
+    if bh_lots(series, cfg) < 1:
+        return BH_TOO_EXPENSIVE
+    if "dividend" in series.missing:
+        return "dividend: not supplied"
+    return None
+
+
+def _bh_cash(series, cfg):
+    shares = bh_lots(series, cfg) * CONTRACT
+    return cfg["cash"] - shares * float(series.df["close"].iloc[0]) + (series.df["dividend"] * shares).cumsum()
+
+
+def buy_and_hold(series, cfg):
+    """Same start, cash and dividends; shares never sold. All NaN when bh_na_reason is set."""
+    if bh_na_reason(series, cfg):
+        return pd.Series(float("nan"), index=series.df.index, name="equity")
+    shares = bh_lots(series, cfg) * CONTRACT
+    return (_bh_cash(series, cfg) + shares * series.df["close"]).rename("equity")
 
 
 def metrics(equity_s, trades, cfg, rf=None):

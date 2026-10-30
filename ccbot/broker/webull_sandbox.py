@@ -141,7 +141,7 @@ class WebullSandboxBroker(Broker):
         price = _num(items[0], "price", "close", "last_price") if items else None
         if price is None:
             raise NoQuote(f"no sandbox quote for {ticker}")
-        return Day(self.date, price)
+        return Day(self.date, price)  # earnings unknown → blocked (ccbot/missing.py)
 
     def list_option_contracts(self, underlying, exp_from, exp_to, strike_lo, strike_hi):
         # SDK docs: start_date = exact expiration date, end_date = expiration lower bound.
@@ -162,7 +162,9 @@ class WebullSandboxBroker(Broker):
             raise
         except Exception as exc:  # endpoint unsupported on the sandbox (UNVERIFIED): build symbols
             log.warning("list_option_contracts failed (%s); building OCC symbols", type(exc).__name__)
-            exps = expiries.fridays(expiries.business_days(exp_from, exp_to))
+            # window runs past the Friday, so a holiday Friday moves back to its Thursday
+            exps = [e for e in expiries.fridays(expiries.scan_calendar(exp_from, days=(exp_to - exp_from).days + 7))
+                    if exp_from <= e <= exp_to]
             return [occ_symbol(underlying, e, kind, k) for e in exps for kind in ("C", "P")
                     for k in grid_range(strike_lo, strike_hi)]
 
