@@ -1,0 +1,7 @@
+{
+  "asset_type": "stock",
+  "notes": "GBM, 2-regime vol 35%/60%, earnings flag every 63 rows, no dividend",
+  "source": "synthetic, seed 42",
+  "synthetic": true,
+  "ticker": "SYNTH_B"
+}

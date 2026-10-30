@@ -1,0 +1,7 @@
+{
+  "asset_type": "etf",
+  "notes": "BS quotes +/- a fixed spread; SYNTH_A passes, SYNTH_B fails SPREAD, SYNTH_C fails PRICE_CAP",
+  "source": "synthetic, seed 42",
+  "synthetic": true,
+  "ticker": "SYNTH_SNAPSHOTS"
+}

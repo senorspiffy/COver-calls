@@ -50,3 +50,42 @@ Three teams of Claude Code agents that research, build, and audit your covered-c
 2. Create `work/001/request.md` from `templates/request.md`, e.g. "Build a strike picker for 30-45 day calls around 0.30 delta on stocks under $30".
 3. Run `/run-item 001`.
 4. Run `/daily-audit` once a day, or schedule it.
+
+## Covered-call backtester and paper bot (ccbot)
+
+Built in work item 002. Research, not financial advice. **Live trading is not built and needs the person's explicit go-ahead.**
+
+### Install and test
+
+```
+pip install -e .[dev]            # numpy, pandas, pytest
+python -m ccbot make-sample      # regenerate data/sample/ (deterministic; git diff stays empty)
+python -m pytest -q              # all tests run offline (sockets are blocked)
+```
+
+### Commands
+
+| Command | Writes |
+|---|---|
+| `python -m ccbot backtest --asof 2026-10-30` (add `--quick` for the base spread/k only) | `reports/backtest_SYNTH_A_2026-10-30.md` and `.csv` |
+| `python -m ccbot scan --date 2026-10-30` (defaults: `--broker sim`, `--snapshots data/sample/SYNTH_SNAPSHOTS.csv`, `--variant V0`) | `reports/daily_<date>.md`, `reports/weekly_<date>.md` on Fridays or with `--weekly`, `state/paper_trades.csv`, `state/paper_snapshots.csv`, `state/sim_ledger.json` |
+| `python -m ccbot report --date 2026-10-30 [--weekly]` | rebuilds the daily/weekly report from `state/` |
+
+Exit codes: 0 ok, 2 bad input, 3 refused (live trading or a non-sandbox Webull setting).
+
+The backtest runs six pre-registered variants (V0 baseline monthly, V1 50% buy-back, V2 weekly, V3 after an up day, V4 IV-percentile filter with θ chosen walk-forward, V5 wheel) across spread × k sweeps, then a walk-forward with the last two years held out, and a PBO overfitting check. Rows are always in registry order.
+
+### Use your own data
+
+Put a CSV with `date,close[,iv][,dividend][,earnings]` (ISO dates ascending, `iv` annualised decimal, `dividend` = $ on the ex-date, `earnings` = 1 on report dates) anywhere and run `python -m ccbot backtest --data path/to/TICKER.csv`. An optional `TICKER.meta.json` sidecar holds `{"ticker","source","synthetic","asset_type","notes"}`; without it the file counts as user-supplied, non-synthetic, `asset_type "stock"`. The vol input is the `iv` column × k when there is one; without it, it is the trailing 20-day realised vol × k, built only from closes up to that day. k scales both. Without an `iv` column the first 20 rows have no vol yet, so no option is sold on them (reason `VOL_WARMUP`). Shares can still be bought.
+
+### What the labels mean
+
+- **MODELLED**: option prices come from Black-Scholes on a volatility input, not market quotes. The multiplier k is UNCALIBRATED until real snapshots exist (the bot logs every quote it reads to `state/paper_snapshots.csv` for that).
+- **SYNTHETIC DATA**: the input is generated (`SYNTH_*` files), not a market history. Results from it say nothing about real markets.
+
+### Safety rules
+
+- No live trading. `--live` exits 3.
+- The Webull adapter (`--broker webull-sandbox`, `pip install -e .[webull]`) is sandbox-only and dry-run by default: it checks the SDK resolves the sandbox host before it builds any client, refuses unless `WEBULL_ENV=sandbox`, and only validates (optionally previews) orders. Positions and cash stay in the local paper ledger.
+- Credentials come only from environment variables (see `.env.example`); `.env`, `state/` and tokens are git-ignored. Whether the sandbox accepts options orders is UNVERIFIED: that smoke test runs on your own machine.

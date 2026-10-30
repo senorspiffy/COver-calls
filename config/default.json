@@ -1,0 +1,29 @@
+{
+  "cash": 3000,
+  "cash_buffer": 200,
+  "max_single_name_frac": 0.5,
+  "r": 0.04,
+  "target_delta": 0.275,
+  "band": [0.25, 0.30],
+  "tolerance": [0.20, 0.35],
+  "monthly_dte": [30, 45],
+  "monthly_slack_days": 7,
+  "weekly_dte": [5, 9],
+  "spread": {"model": "fixed", "value": 0.05, "floor": 0.01},
+  "k": 1.0,
+  "rv_window": 20,
+  "fees": {
+    "commission": 0,
+    "reg_per_contract": 0.10,
+    "sec_rate": 0.0000206,
+    "cat_rate": 0.000003,
+    "assignment_fee": 0,
+    "_unverified": ["reg_per_contract", "assignment_fee"]
+  },
+  "screen": {"max_spread": 0.05, "min_oi": 500},
+  "universe": ["SYNTH_A", "SYNTH_B", "SYNTH_C"],
+  "sweeps": {"spread": [0.01, 0.03, 0.05, 0.10], "k": [0.8, 1.0, 1.2], "v4_theta": [50, 66, 80]},
+  "walkforward": {"min_train_years": 3, "holdout_years": 2},
+  "broker": "sim",
+  "dry_run": true
+}

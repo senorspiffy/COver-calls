@@ -1,0 +1,14 @@
+# bot state, paper logs, Webull token, credentials
+state/
+conf/
+.env
+*.key
+webull_*_sdk.log
+# generated scan reports (the example backtest report is checked in)
+reports/daily_*.md
+reports/weekly_*.md
+# caches
+__pycache__/
+.pytest_cache/
+*.egg-info/
+build/
