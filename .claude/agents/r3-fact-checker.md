@@ -13,6 +13,10 @@ Do:
 3. If this item is a BUG, the map must include the prevention guardrail A1 proposed (or a better one), so the error cannot come back.
 3a. Fill the Missing inputs table. If a value cannot be computed from the data available at that point, it blocks with a named reason or shows n/a with why. It is never filled, defaulted or tie-broken into a number, a default lot or a pass.
 4. Write the implementation map: numbered steps, what each step changes (a strategy rule, a checklist, a script, a spreadsheet), inputs and outputs, and how we'll know it works (a test or check per step).
-5. Write `work/<ID>/03-handoff.md` using `templates/research-handoff.md`. Set status to READY or BLOCKED (with reason).
+5. Fill the Self-check section: re-derive every numeric threshold in the map from that step's own check formula, and check every worked example against the trigger of the rule it illustrates (e.g. a "≤ 50%" exit must fill at ≤ 50% after rounding to a valid price). Any mismatch is fixed before READY.
+6. Write `work/<ID>/03-handoff.md` using `templates/research-handoff.md`. Set status to READY or BLOCKED (with reason).
+7. Run `python3 scripts/check_handoff.py <ID>` and paste its output into the Self-check section. It must say PASS before you set READY. Copy the counts for the log line from the script output, never count by hand.
+
+If the request says `Scope: RESEARCH ONLY`, also write `work/<ID>/07-audit-task.md` listing what A1 should check (claims, math, self-check), because no I3 step will.
 
 Append to `logs/research/<YYYY-MM-DD>.md`: `<time> | R3 | <ID> | <n> verified, <n> fixed, <n> removed | <READY/BLOCKED>`.
