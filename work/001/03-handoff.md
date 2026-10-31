@@ -116,7 +116,7 @@ Math: half-spread × 100 shares × fills; e.g. $0.05/2 × 100 × 104 = $260; $26
 ## Implementation map (starter strategy — rules the person follows)
 Rules marked **[house rule]** are judgment calls, not sourced facts. Everything else cites the fact check above.
 
-> **Corrected 2026-10-30** (items 003, 004, 008): steps 1, 3, 4, 5, 6, 8, 9(a), 11, Alternative 1 and the worked example's 50% line are superseded by § Correction 2026-10-30 below.
+> **Corrected 2026-10-30** (items 003, 004, 005, 008): steps 1, 3, 4, 5, 6, 8, 9(a), 11, Alternative 1 and the worked example's 50% line are superseded by § Correction 2026-10-30 below.
 
 | Step | Change (rule) | Inputs | Outputs | How we check it |
 |---|---|---|---|---|
@@ -144,7 +144,7 @@ $3,000 account. A broad ETF "XYZ" at $27.00, monthly options, next earnings n/a.
 - 50% exception: GTC limit = 50% × $0.47 = $0.235 → rounded down to **$0.23**. On day 9 the call is $0.21 bid / $0.23 ask; the GTC fills at $0.23 (48.9% of $0.47) → profit (0.47 − 0.23) × 100 − $0.20 = **$23.80**; sell next month's call the same day.
 - At $5,600: two such positions → ≈ $93.80/month, same 1.74%, but a 20% drop in one ETF costs ≈ 9% of the account instead of 18%.
 
-## Correction 2026-10-30 (items 003, 004, 008)
+## Correction 2026-10-30 (items 003, 004, 005, 008)
 Found by A1/R3 on 2026-10-30. The rows above are kept as written; where they differ, this section wins.
 - **Step 1 (003).** At $3,000, trade **one** underlying that passes today's step-3 screen at the step-5 strike of the step-4 expiry and fits both caps: 100 sh ≤ cash − $200 (≤ $28/share) and, for a single stock, ≤ 50% of capital (≤ $15/share). Prefer a diversified ETF if one passes. **Feasibility, 2026-10-30:** 0 tickers confirmed on monthly quotes; no diversified ETF ≤ $28 passes (002/03 L114); F ($11.94, 39.8% of capital) passes only on an 11-06 weekly quote (003/03). Unproven until the paper bot logs monthly scans. If none passes: no trade that day (**UNIVERSE EMPTY**); options are (a) a CSP within the caps on a passing ticker, (b) add funds (two names from about $5.3k), (c) a covered-call ETF. The daily report shows how many of the last 10 logged scans each ticker passed (information, not a gate). [house rule] Check: `screen.feasible_universe` each scan; tests `test_universe_empty_blocks_orders`, `test_shipped_config_has_a_passing_ticker` (SYNTH data only), `test_pass_history_counts_last_10`.
 - **Step 1 and 9(a), person's decision 2026-10-31 (023).** At $3,000 you may hold **up to two different single stocks**, each ≤ 50% of capital (≤ $15/share at $3k), with (sum of price × 100) ≤ cash − $200. Each must pass today's step-3 screen on its own. Cap example from the 023 screen: F ($1,233) + VALE ($1,200) = $2,433 ≤ $2,800. On 2026-10-31 neither passes step 3: next earnings dates unpublished → `EARNINGS_UNKNOWN` (item 025). One ETF ≤ $28 alone is still allowed. The paper bot does the same since item 024 (`max_positions: 2`, `portfolio.entry_budget`). [house rule, set by the person]

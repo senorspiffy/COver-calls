@@ -1,6 +1,6 @@
 # Recurring issues
 
-Kept by A1. Read by R1 and R2 before every item. One entry per root cause.
+Kept by A1. Read by every R and I agent (R1, R2, R3, I1, I2, I3) before every item. One entry per root cause.
 Any entry with 3+ occurrences is ESCALATED: the guardrail didn't hold and the person is told.
 
 <!-- Entry format:
@@ -29,7 +29,7 @@ Guardrail(s) added:
 - Fix 005: `EARNINGS_UNKNOWN`, `OI_UNKNOWN`, `DIVIDEND_UNKNOWN`. `Day.earnings_known` (default False, so a bare Day fails safe). `PriceSeries.missing`. `## Missing inputs` report section.
 - Fix 006: `bh_lots` (no `max(1,`), `bh_na_reason`, B&H n/a with reason, weekly report n/a.
 - Guardrail (005/006): `ccbot/missing.py::MISSING_POLICY` (9 rows); `tests/test_missing_inputs.py::test_drop_each_input[9]` + `test_policy_lists_every_optional_input`; `test_benchmark_cash_never_negative`; the widened grep in i2; the r3 step 3a and i1 step 1a policy lines; the i3 mutation step. A1 re-ran the mutations in scratch: `max(1,` in `bh_lots` → 3 failed; `else 0` in data.py → 2 failed; removing the screen's `EARNINGS_UNKNOWN` → 2 failed.
-- Proposed (014): `Day.q/dividend/div_next` default to NaN; extend the enumeration test to every `Day` default and broker capability flag; make the cap tests fail closed (`not (… <= …)`).
+- Built (014, PR daily-fixes/2026-10-31-stuck; GUARDED for the code path once merged): `Day.q/dividend/div_next` default to NaN; sim sets dividend/div_next from the ex-date (unknown amount → NaN → `DIVIDEND_UNKNOWN` / `EARLY_ASSIGN_CHECK_NA` events); `q` is a labelled fallback; `_reject` returns `CAPITAL_UNKNOWN` and its cap tests fail closed; policy rows `broker.dividend`, `broker.q`, `model.oi`, `derived.capital`; tests `test_every_day_default_is_listed`, `test_day_float_defaults_are_nan`, `test_broker_capability_flags_have_policy_rows`, `test_drop_each_input[broker.*, model.oi, derived.capital]`. Mutations: q default 0.0 → 1 failed; no CAPITAL_UNKNOWN → 1 failed; `>` cap test → 1 failed; div_next 0.0 → 1 failed.
 - Proposed (025): r1/r3 report each screened ticker's bot reject code; an unpublished value stays UNKNOWN; test for blank `next_earnings` → `EARNINGS_UNKNOWN`.
 Why still ESCALATED: `test_policy_lists_every_optional_input` enumerates only `OPTIONAL_CSV_COLUMNS` and `OPTIONAL_SNAPSHOT_FIELDS`. Values that enter as dataclass defaults (`Day.q/dividend/div_next = 0.0`) or derived values (`capital`) are outside it, and the review grep cannot see them. I2 and I3 each flagged one (05 "Finding", 07 §1). A1 reproduced both. **Move to GUARDED when** 014's extended enumeration test is in and fails on the 0.0 defaults. 2026-10-31: the policy is enforced only in code. Research (023) filled an unknown earnings date with reasoning and told the person F and VALE pass. Also needs 025's research rule in r1/r3.
 Occurrences: 7

@@ -4,7 +4,7 @@ import pytest
 
 from ccbot.backtest import Result
 from ccbot.variants import expand
-from ccbot.walkforward import folds, pbo_cscv, walk_forward
+from ccbot.walkforward import folds, pbo_cscv, pbo_na_reason, walk_forward
 
 
 def test_folds_and_holdout():
@@ -59,3 +59,17 @@ def test_pbo_undefined_on_too_few_months(T):
     R = np.random.default_rng(3).normal(size=(T, 8))
     assert np.isnan(pbo_cscv(R))
     assert np.isnan(pbo_cscv(np.random.default_rng(3).normal(size=(24, 1))))   # one config: nothing to rank
+
+
+def test_pbo_na_names_each_cause():
+    """009: the n/a text names the condition that failed, one test per cause."""
+    rng = np.random.default_rng(5)
+    assert pbo_na_reason(rng.normal(size=(24, 4))) is None
+    assert pbo_na_reason(rng.normal(size=(7, 4))) == "needs >= 8 non-held-out months, have 7"
+    assert pbo_na_reason(rng.normal(size=(24, 1))) == "needs >= 2 configs, have 1"
+    R = rng.normal(size=(24, 4))
+    R[3, 2] = np.nan
+    assert pbo_na_reason(R) == "1 month(s) with a non-finite return"
+    assert np.isnan(pbo_cscv(R))
+    assert pbo_na_reason(np.full((5, 1), np.nan)) == ("needs >= 8 non-held-out months, have 5; "
+                                                     "needs >= 2 configs, have 1; 5 month(s) with a non-finite return")
