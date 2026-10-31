@@ -1,6 +1,7 @@
 # Work item <ID>
 Type: IDEA | BUG | EFFICIENCY
-Scope: FULL | RESEARCH ONLY
+Scope: FULL | RESEARCH ONLY | FAST (person, <date>)
+<!-- Optional: Waived: <steps> (<who>, <date>: <why>) -->
 Opened by: person | A1
 Date:
 ## What we want

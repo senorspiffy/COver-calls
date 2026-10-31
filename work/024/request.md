@@ -1,6 +1,7 @@
 # Work item 024
 Type: IDEA
 Scope: FULL
+Waived: 01 02 03 04 (A1, 2026-10-31, item 026: built and merged before the step check existed; the rule is the person's own decision in 001; I3 ran afterwards in 026)
 Opened by: person (via 023 thread)
 Date: 2026-10-31
 ## What we want

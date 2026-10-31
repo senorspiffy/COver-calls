@@ -34,7 +34,8 @@ Three teams of Claude Code agents that research, build, and audit your covered-c
 - `.claude/commands/run-item.md` - `/run-item <ID>` runs one item through all seven steps
 - `.claude/commands/daily-audit.md` - `/daily-audit` runs the daily review
 - `templates/` - the hand-off format for each step
-- `scripts/check_handoff.py` - `python3 scripts/check_handoff.py <ID>` checks a hand-off's counts and self-check (run by R3, I3, A1)
+- `scripts/check_handoff.py` - `python3 scripts/check_handoff.py <ID>` checks a hand-off's counts and self-check (run by R3, I3, A1); `--all` checks every item (A1)
+- `scripts/check_pipeline.py` - lists each work item's missing steps for its Scope; SKIPPED exits 1, STUCK items are listed (run by A1 daily, I3 per item)
 - `work/<ID>/` - every file for one item, numbered 01 to 07
 - `logs/<team>/<date>.md` - one line per agent action, read by R2 and A1
 
