@@ -65,10 +65,16 @@ class SimBroker(Broker):
         first = rows.iloc[0]
         opt = lambda x: x if pd.notna(x) else None  # noqa: E731
         next_earnings = opt(first["next_earnings"])
+        ex = opt(first["ex_div_date"])
+        nxt = next((d for d in self.calendar(self.date) if d > self.date), None)
+        # Snapshots give the ex-date but no amount: a known "not today/tomorrow" is 0.0,
+        # anything else is unknown (NaN), never 0.0 (014, missing.py broker.dividend/div_next).
         return Day(self.date, float(first["underlying_price"]),
                    float(older.iloc[-1]["underlying_price"]) if len(older) else None,
-                   float(rows["iv"].median()), next_earnings=next_earnings,
-                   ex_div_date=opt(first["ex_div_date"]), asset_type=first["asset_type"],
+                   float(rows["iv"].median()), q=0.0,   # labelled fallback: missing.py broker.q
+                   dividend=float("nan") if ex is None or ex == self.date else 0.0,
+                   div_next=float("nan") if ex is None or ex == nxt else 0.0,
+                   next_earnings=next_earnings, ex_div_date=ex, asset_type=first["asset_type"],
                    earnings_known=first["asset_type"] == "etf" or next_earnings is not None)
 
     def list_option_contracts(self, underlying, exp_from, exp_to, strike_lo, strike_hi):
