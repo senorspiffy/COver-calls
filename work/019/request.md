@@ -17,7 +17,7 @@ Root cause: R3 counts table rows by hand, and "fixed" vs "removed" has no writte
 Guardrail: add `scripts/check_handoff.py`, which counts the fact-check rows and compares them with the Totals line (exit code 1 on mismatch). R3 must run it and paste its output into the hand-off before logging; I3 and A1 re-run it. Define in the template: "fixed = claim kept with a correction or new source; removed = claim dropped".
 
 ## Recurring issue link (RI-#, if any)
-RI-017 (occurrence 1)
+RI-006 (occurrence 1)
 
 ## Done looks like
 Totals read 77 → 61 / 12 / 4; the removed list says which entries were replaced (counted as fixed); a correction line is appended to the research log; the script passes on 001 and fails on the old text.

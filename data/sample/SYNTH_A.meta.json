@@ -1,0 +1,7 @@
+{
+  "asset_type": "etf",
+  "notes": "GBM, 2-regime vol 25%/45%, drift 7%/yr, iv = regime vol x 1.1, $0.10 quarterly dividend",
+  "source": "synthetic, seed 42",
+  "synthetic": true,
+  "ticker": "SYNTH_A"
+}
