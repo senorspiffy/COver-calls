@@ -87,7 +87,7 @@ def test_no_option_sold_during_vol_warmup(tmp_path, cfg):
     p = tmp_path / "noiv.csv"
     # dividend/earnings supplied as 0: an absent column would block every entry (005 policy)
     p.write_text("date,close,dividend,earnings\n" + "".join(f"{d},{24 + 0.3 * (-1) ** i:.2f},0,0\n"
-                                                           for i, d in enumerate(days)))
+                                                           for i, d in enumerate(days)), encoding="utf-8")
     s = load_prices(p, rv_window=cfg["rv_window"])
     first_valid = days[cfg["rv_window"]]
     for vid in ("V0", "V5"):

@@ -44,7 +44,7 @@ def load_meta(path):
     meta = {"ticker": path.stem, "source": "user-supplied", "synthetic": False,
             "asset_type": "stock", "notes": ""}
     if side.exists():
-        meta.update(json.loads(side.read_text()))
+        meta.update(json.loads(side.read_text(encoding="utf-8")))
     return meta
 
 

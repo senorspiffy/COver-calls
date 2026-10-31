@@ -24,7 +24,7 @@ def business_days(start, end, holidays=None):
 @functools.cache
 def load_holidays():
     """config/holidays.json (NYSE full-day closures and early closes), read once."""
-    return json.loads(HOLIDAYS_PATH.read_text())
+    return json.loads(HOLIDAYS_PATH.read_text(encoding="utf-8"))
 
 
 def extend(dates, until):

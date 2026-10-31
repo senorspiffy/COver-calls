@@ -74,6 +74,8 @@ python -m pytest -q              # all tests run offline (sockets are blocked)
 
 Exit codes: 0 ok, 2 bad input, 3 refused (live trading or a non-sandbox Webull setting).
 
+**Two positions (item 024).** The scan holds up to `max_positions` (default 2) different underlyings that share one cash balance. Each day it manages open positions first, then opens new ones from the passing tickers in `universe` order. A single stock may use at most `max_single_name_frac` (50%) of capital, an ETF may use all the cash, and `cash_buffer` ($200) always stays back. Ledgers saved before item 024 load unchanged.
+
 The backtest runs six pre-registered variants (V0 baseline monthly, V1 50% buy-back, V2 weekly, V3 after an up day, V4 IV-percentile filter with θ chosen walk-forward, V5 wheel) across spread × k sweeps, then a walk-forward with the last two years held out, and a PBO overfitting check. Rows are always in registry order.
 
 ### Use your own data

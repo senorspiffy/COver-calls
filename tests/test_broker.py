@@ -89,7 +89,7 @@ def test_sim_limits_day_and_gtc(flat, cfg):
         filled += [e for e in b.advance(d.date()) if e.get("status") == "FILLED"]
         if filled:
             break
-    assert filled and b.get_positions().option is None and filled[0]["fill"] == target
+    assert filled and b.get_positions().get("X").option is None and filled[0]["fill"] == target
 
 
 def test_ledger_survives_restart(flat, cfg):

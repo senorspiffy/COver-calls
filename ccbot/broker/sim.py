@@ -10,7 +10,8 @@ from .. import expiries
 from ..backtest import build_days
 from ..data import DataError
 from ..pricing import grid_range
-from ..rules import Day, Quote, State, apply_fill, model_quote, settle_day
+from ..portfolio import Portfolio
+from ..rules import Day, Quote, apply_fill, model_quote, settle_day
 from .base import Broker, NoQuote, OptionOrder, OrderRejected, OrderResult, occ_symbol, parse_occ, validate
 
 
@@ -25,11 +26,11 @@ class SimBroker(Broker):
         self.quotes_have_oi = series is None   # BS model quotes carry no OI
         if series is not None:
             self._days = {d.date: d for d in build_days(series)}
-        self.date, self.state, self.orders, self.n_orders = None, State(cash=cfg["cash"]), [], 0
+        self.date, self.state, self.orders, self.n_orders = None, Portfolio(cash=cfg["cash"]), [], 0
         if self.ledger_path.exists():
-            saved = json.loads(self.ledger_path.read_text())
+            saved = json.loads(self.ledger_path.read_text(encoding="utf-8"))
             self.date = saved["date"] and dt.date.fromisoformat(saved["date"])
-            self.state = State.from_dict(saved["state"])
+            self.state = Portfolio.from_dict(saved["state"])
             self.orders = [_order_from(o) for o in saved["orders"]]
 
     # ---- persistence ----
@@ -37,7 +38,7 @@ class SimBroker(Broker):
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.ledger_path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"date": self.date and self.date.isoformat(), "state": self.state.to_dict(),
-                                   "orders": [_order_to(o) for o in self.orders]}, indent=2))
+                                   "orders": [_order_to(o) for o in self.orders]}, indent=2), encoding="utf-8")
         os.replace(tmp, self.ledger_path)
 
     def calendar(self, asof):
@@ -97,7 +98,7 @@ class SimBroker(Broker):
 
     # ---- account ----
     def get_positions(self):
-        return State.from_dict(self.state.to_dict())
+        return Portfolio.from_dict(self.state.to_dict())
 
     def get_cash(self):
         return self.state.cash
@@ -118,8 +119,9 @@ class SimBroker(Broker):
         sell = order.side == "SELL_TO_OPEN"
         if (sell and order.limit <= q.bid + 1e-9) or (not sell and order.limit >= q.ask - 1e-9):
             action = "BUY_TO_CLOSE" if not sell else ("SELL_CALL" if order.kind == "C" else "SELL_PUT")
-            fee = apply_fill(self.state, action, order.limit, order.qty, self.date, self.cfg,
-                             order.kind, order.strike, order.expiry)
+            with self.state.lend(order.underlying, self.state.cash) as sleeve:
+                fee = apply_fill(sleeve, action, order.limit, order.qty, self.date, self.cfg,
+                                 order.kind, order.strike, order.expiry)
             return OrderResult("FILLED", order.limit, fee["total"])
         return None
 
@@ -141,8 +143,10 @@ class SimBroker(Broker):
         price = self.get_underlying_quote(ticker).close
         if limit < price or self.state.cash < price * qty:
             return OrderResult("REJECTED", detail="limit below close or insufficient cash")
-        apply_fill(self.state, "BUY_SHARES", price, qty, self.date, self.cfg)
-        self.state.ticker = ticker
+        if ticker not in self.state.positions and len(self.state.held()) >= self.cfg["max_positions"]:
+            return OrderResult("REJECTED", detail="max_positions reached")
+        with self.state.lend(ticker, self.state.cash) as sleeve:
+            apply_fill(sleeve, "BUY_SHARES", price, qty, self.date, self.cfg)
         self._save()
         return OrderResult("FILLED", price)
 
@@ -157,18 +161,21 @@ class SimBroker(Broker):
         for order, placed in list(self.orders):
             if order.tif == "DAY" and placed < date:
                 self.orders.remove((order, placed))
-                events.append({"action": "CANCELLED", "contract": order.symbol, "status": "CANCELLED"})
-        if self.state.shares or self.state.option:
+                events.append({"action": "CANCELLED", "contract": order.symbol, "status": "CANCELLED",
+                               "ticker": order.underlying})
+        for ticker in self.state.held():
             try:
-                day = self.get_underlying_quote(self.state.ticker)
+                day = self.get_underlying_quote(ticker)
             except NoQuote as exc:
                 raise DataError(f"cannot settle the paper ledger: {exc}") from exc
-            events += settle_day(self.state, day, self.cfg)
+            with self.state.lend(ticker, 0.0) as sleeve:
+                events += [{**e, "ticker": ticker} for e in settle_day(sleeve, day, self.cfg)]
         for order, placed in list(self.orders):
             result = self._try_fill(order)
             if result is not None:
                 self.orders.remove((order, placed))
                 events.append({"action": "BUY_TO_CLOSE", "contract": order.symbol, "status": "FILLED",
+                               "ticker": order.underlying,
                                "fill": result.fill, "fees": result.fees, "detail": "resting GTC filled"})
         self._save()
         return events

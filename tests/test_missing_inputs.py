@@ -33,13 +33,13 @@ def _backtest_md(tmp_path, path):
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         assert main(["backtest", "--data", str(path), "--quick", "--asof", "2026-10-30", "--out", str(tmp_path)]) == 0
-    return (tmp_path / f"backtest_{path.stem}_2026-10-30.md").read_text()
+    return (tmp_path / f"backtest_{path.stem}_2026-10-30.md").read_text(encoding="utf-8")
 
 
 def _scan(tmp_path, cfg, df, meta):
     broker = SimBroker(cfg, snapshots=df, meta=meta, ledger_path=tmp_path / "state" / "sim_ledger.json")
     scan = run_daily(DATE, broker, cfg, state_dir=tmp_path / "state", reports_dir=tmp_path / "reports")
-    return scan, (tmp_path / "reports" / f"daily_{DATE}.md").read_text()
+    return scan, (tmp_path / "reports" / f"daily_{DATE}.md").read_text(encoding="utf-8")
 
 
 def _no_option_sold(res):

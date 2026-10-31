@@ -28,7 +28,7 @@ def test_screen_on_sample(cfg):
 def test_shipped_config_has_a_passing_ticker():
     """001 guardrail: a universe rule must have at least one passing ticker on the sample."""
     shipped = load_config(REPO / "config" / "default.json")
-    assert shipped == load_config(None) and json.loads((REPO / "config" / "default.json").read_text()) == DEFAULTS
+    assert shipped == load_config(None) and json.loads((REPO / "config" / "default.json").read_text(encoding="utf-8")) == DEFAULTS
     df, _ = _snaps()
     assert feasible_universe(shipped, df, shipped["cash"], DATE)[0]
 
@@ -53,7 +53,7 @@ def _run(tmp_path, cfg, date=DATE, **kw):
 def test_universe_empty_blocks_orders(tmp_path):
     cfg = load_config(None, {"cash": 2000, "screen": {"max_spread": 0.01}})
     scan, broker = _run(tmp_path, cfg)
-    report = (tmp_path / "reports" / f"daily_{DATE}.md").read_text()
+    report = (tmp_path / "reports" / f"daily_{DATE}.md").read_text(encoding="utf-8")
     assert "UNIVERSE EMPTY: rule PRICE_CAP has no passing ticker" in report
     trades = pd.read_csv(tmp_path / "state" / "paper_trades.csv")
     assert list(trades["reason"]) == ["UNIVERSE_EMPTY"] and broker.n_orders == 0
@@ -126,7 +126,7 @@ def test_pass_history_counts_last_10(tmp_path, cfg):
     scans_dir.mkdir(parents=True)
     for i in range(10):     # 10 earlier logged scans in which nothing passed
         d = f"2026-10-{10 + i}"
-        (scans_dir / f"{d}.json").write_text(json.dumps({**real, "date": d, "passing": []}, default=str))
+        (scans_dir / f"{d}.json").write_text(json.dumps({**real, "date": d, "passing": []}, default=str), encoding="utf-8")
     scan, _ = _run(tmp_path, cfg)
     assert [d["action"] for d in scan["decisions"]] == ["BUY_SHARES", "SELL_CALL"]
     assert scan["pass_history"] == {"SYNTH_A": [1, 10], "SYNTH_B": [0, 10], "SYNTH_C": [0, 10]}

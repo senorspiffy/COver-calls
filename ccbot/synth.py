@@ -47,12 +47,12 @@ def make_series(seed, start, n_days, s0, drift, vols, p_switch, iv_mult, div, ea
 def _write_csv(path, rows):
     lines = ["date,close,iv,dividend,earnings"]
     lines += [f"{d.isoformat()},{c:.4f},{iv:.4f},{dv:.2f},{e}" for d, c, iv, dv, e in rows]
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_meta(path, ticker, asset_type, notes):
     meta = {"ticker": ticker, "source": SOURCE, "synthetic": True, "asset_type": asset_type, "notes": notes}
-    path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
+    path.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 # One scan date, one monthly expiry (49 DTE: the 30-45 window has no monthly on 2026-10-30).
@@ -91,7 +91,7 @@ def write_samples(out_dir):
     _write_csv(out / "SYNTH_B.csv", b)
     _write_meta(out / "SYNTH_B.meta.json", "SYNTH_B", "stock",
                 "GBM, 2-regime vol 35%/60%, earnings flag every 63 rows, no dividend")
-    (out / "SYNTH_SNAPSHOTS.csv").write_text("\n".join([",".join(SNAPSHOT_COLUMNS)] + snapshot_rows()) + "\n")
+    (out / "SYNTH_SNAPSHOTS.csv").write_text("\n".join([",".join(SNAPSHOT_COLUMNS)] + snapshot_rows()) + "\n", encoding="utf-8")
     _write_meta(out / "SYNTH_SNAPSHOTS.meta.json", "SYNTH_SNAPSHOTS", "etf",
                 "BS quotes +/- a fixed spread; SYNTH_A passes, SYNTH_B fails SPREAD, SYNTH_C fails PRICE_CAP")
     return sorted(p.name for p in out.iterdir())

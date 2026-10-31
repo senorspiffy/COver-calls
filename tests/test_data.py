@@ -23,14 +23,14 @@ GOOD = "date,close,iv,dividend,earnings\n2026-01-05,10,0.3,0,0\n2026-01-06,11,0.
 ])
 def test_bad_files_raise(tmp_path, body, match):
     p = tmp_path / "bad.csv"
-    p.write_text(body)
+    p.write_text(body, encoding="utf-8")
     with pytest.raises(DataError, match=match):
         load_prices(p)
 
 
 def test_realized_vol_of_constant_return_is_zero(tmp_path):
     p = tmp_path / "c.csv"
-    p.write_text("date,close\n" + "".join(f"2026-01-{d:02d},{10 * 1.01 ** d:.10f}\n" for d in range(1, 31)))
+    p.write_text("date,close\n" + "".join(f"2026-01-{d:02d},{10 * 1.01 ** d:.10f}\n" for d in range(1, 31)), encoding="utf-8")
     s = load_prices(p)
     assert s.vol.abs().max() < 1e-9
     rv = realized_vol(s.df["close"], 5)
@@ -49,7 +49,7 @@ def test_realized_vol_uses_only_past_closes(tmp_path, cfg):
 
     def load(cs):
         p = tmp_path / "noiv.csv"
-        p.write_text("date,close\n" + "".join(f"{d},{c:.6f}\n" for d, c in zip(dates, cs)))
+        p.write_text("date,close\n" + "".join(f"{d},{c:.6f}\n" for d, c in zip(dates, cs)), encoding="utf-8")
         return load_prices(p, k=1.2, rv_window=cfg["rv_window"]).vol.to_numpy()
 
     base = load(closes)
@@ -67,7 +67,7 @@ def test_realized_vol_uses_only_past_closes(tmp_path, cfg):
 def test_meta_flags(tmp_path, synth_a):
     assert synth_a.meta["synthetic"] is True and synth_a.meta["asset_type"] == "etf"
     p = tmp_path / "x.csv"
-    p.write_text(GOOD)
+    p.write_text(GOOD, encoding="utf-8")
     meta = load_prices(p).meta
     assert meta["synthetic"] is False and meta["asset_type"] == "stock" and meta["source"] == "user-supplied"
 
@@ -94,10 +94,10 @@ def test_synth_a_shape(synth_a):
 def test_absent_optional_columns_are_flagged(tmp_path):
     """005: an absent dividend/earnings column is NaN and named, never 0."""
     p = tmp_path / "x.csv"
-    p.write_text("date,close\n2026-01-05,10\n2026-01-06,11\n")
+    p.write_text("date,close\n2026-01-05,10\n2026-01-06,11\n", encoding="utf-8")
     s = load_prices(p)
     assert s.missing == ("dividend", "earnings")
     assert s.df["dividend"].isna().all() and s.df["earnings"].isna().all()
     good = tmp_path / "g.csv"
-    good.write_text(GOOD)
+    good.write_text(GOOD, encoding="utf-8")
     assert load_prices(good).missing == ()

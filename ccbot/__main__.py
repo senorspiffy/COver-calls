@@ -69,8 +69,8 @@ def cmd_backtest(a):
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     stem = out / f"backtest_{series.ticker}_{a.asof.isoformat()}"
-    stem.with_suffix(".md").write_text(md)
-    stem.with_suffix(".csv").write_text(csv)
+    stem.with_suffix(".md").write_text(md, encoding="utf-8")
+    stem.with_suffix(".csv").write_text(csv, encoding="utf-8")
     print(f"{len(grid)} configs in {time.time() - t0:.1f} s -> {stem}.md, {stem}.csv")
 
 

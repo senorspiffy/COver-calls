@@ -7,6 +7,7 @@ import pytest
 
 from ccbot.broker.base import LiveTradingDisabled, OptionOrder
 from ccbot.broker.webull_sandbox import SANDBOX_HOST, TokenBucket, WebullSandboxBroker, load_sdk, to_sdk_payload
+from ccbot.rules import State
 
 ENV = {"WEBULL_ENV": "sandbox", "WEBULL_APP_KEY": "k-test", "WEBULL_APP_SECRET": "s-test-value",
        "WEBULL_ACCOUNT_ID": "acct"}
@@ -126,11 +127,11 @@ def test_missing_keys_message_has_no_secret(tmp_path, cfg):
 def test_dry_run_never_places(tmp_path, cfg):
     sdk = FakeSDK()
     b = _broker(tmp_path, cfg, sdk=sdk)
-    b.ledger.state.shares = 100
+    b.ledger.state.positions["X"] = State(cash=0.0, ticker="X", shares=100)
     assert b.submit(_sell()).status == "DRY_RUN"
     assert sdk.calls["place_option"] == 0 and sdk.calls["preview_option"] == 0
     p = _broker(tmp_path, cfg, sdk=sdk, preview=True)
-    p.ledger.state.shares = 100
+    p.ledger.state.positions["X"] = State(cash=0.0, ticker="X", shares=100)
     assert p.submit(_sell()).status == "DRY_RUN"
     assert sdk.calls["place_option"] == 0 and sdk.calls["preview_option"] == 1
 
