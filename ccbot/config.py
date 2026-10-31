@@ -12,6 +12,7 @@ DEFAULTS = {
     "cash": 3000,
     "cash_buffer": 200,
     "max_single_name_frac": 0.5,
+    "max_positions": 2,
     "r": 0.04,
     "target_delta": 0.275,
     "band": [0.25, 0.30],
@@ -68,6 +69,8 @@ def validate(cfg):
         raise ConfigError("sweep spreads must be >= 0")
     if cfg["k"] <= 0 or any(k <= 0 for k in cfg["sweeps"]["k"]):
         raise ConfigError("k must be > 0")
+    if not isinstance(cfg["max_positions"], int) or cfg["max_positions"] < 1:
+        raise ConfigError("max_positions must be an integer >= 1")
     if cfg["cash"] <= 0:
         raise ConfigError("cash must be > 0")
     return cfg

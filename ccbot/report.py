@@ -140,35 +140,42 @@ def daily_report(scan):
     if scan["skipped"]:
         lines += ["Already scanned for this date and variant: no new decision was made.", ""]
     pos = scan["positions"]
-    o = pos["option"]
-    lines += ["## Positions",
-              f"- Ticker: {pos['ticker'] or 'none'}; shares {pos['shares']}; cost basis {_fmt(pos['basis'], 'usd')}; "
-              f"cash {_fmt(pos['cash'], 'usd')}; equity {_fmt(scan['equity'], 'usd')}",
-              f"- Open option: {o['kind']} {o['strike']} exp {o['expiry']} x{o['qty']} sold at {o['premium']}"
-              if o else "- Open option: none", "",
+    held = {t: p for t, p in pos["positions"].items() if p["shares"] or p["option"]}
+    lines += [f"## Positions (up to {scan['max_positions']} underlyings)",
+              f"- Cash {_fmt(pos['cash'], 'usd')}; equity {_fmt(scan['equity'], 'usd')}"]
+    for t, p in held.items():
+        o = p["option"]
+        lines.append(f"- {t}: shares {p['shares']}; cost basis {_fmt(p['basis'], 'usd')}; open option: "
+                     + (f"{o['kind']} {o['strike']} exp {o['expiry']} x{o['qty']} sold at {o['premium']}" if o else "none"))
+    if not held:
+        lines.append("- No open positions")
+    lines += ["",
               "## Screen", f"- Passing: {', '.join(scan['passing']) or 'none'}",
               f"- Rejected: {', '.join(f'{t} ({r})' for t, r in scan['rejects'].items()) or 'none'}",
               *[f"- {t}: passed {n} of last {k} logged scans" + (f" (history short: {k} < 10)" if k < 10 else "")
                 for t, (n, k) in scan.get("pass_history", {}).items()], "",
               "## Today's decision",
-              table(["Action", "Reason", "Contract", "Limit", "TIF", "Delta", "in_band", "in_window", "Status", "Fill"],
-                    [[r["action"], r["reason"], r["contract"] or "-", r["limit"] if r["limit"] is not None else "-",
+              table(["Ticker", "Action", "Reason", "Contract", "Limit", "TIF", "Delta", "in_band", "in_window",
+                     "Status", "Fill"],
+                    [[r["ticker"] or "-", r["action"], r["reason"], r["contract"] or "-",
+                      r["limit"] if r["limit"] is not None else "-",
                       r["tif"] or "-", _fmt(r["delta"]), r["in_band"], r["in_window"], r["status"],
                       r["fill"] if r["fill"] is not None else "-"] for r in scan["decisions"]]),
               "", "## Context"]
-    ctx = scan["context"]
-    if ctx:
+    for ctx in scan["contexts"]:
         lines += [f"- Underlying {ctx['ticker']} at {_fmt(ctx['price'], 'usd')}",
-                  f"- Vol percentile (252 d): {_fmt(ctx['vol_pct']) if ctx['vol_pct'] is not None else 'n/a'}"
+                  f"  - Vol percentile (252 d): {_fmt(ctx['vol_pct']) if ctx['vol_pct'] is not None else 'n/a'}"
                   f"{'' if ctx['vol_pct'] is not None else ' (fewer than 252 days of history)'}",
-                  f"- Spread at the chosen strike: {_fmt(ctx['spread'], 'usd') if ctx['spread'] is not None else 'n/a'}",
-                  f"- Days to earnings: "
+                  f"  - Spread at the chosen strike: {_fmt(ctx['spread'], 'usd') if ctx['spread'] is not None else 'n/a'}",
+                  f"  - Days to earnings: "
                   f"{_days_to(_date(ctx['next_earnings']), asof) if ctx.get('earnings_known', True) else 'n/a (not supplied)'}; "
                   f"days to ex-dividend: {_days_to(_date(ctx['ex_div_date']), asof) if ctx['ex_div_date'] else 'n/a (not supplied)'}"]
-    else:
+    if not scan["contexts"]:
         lines.append("- No ticker to trade today.")
     lines += ["", "## Would each variant act today?",
-              table(["Variant", "Action", "Reason"], [[v, a, r] for v, (a, r) in scan["would_act"].items()]),
+              table(["Ticker", "Variant", "Action", "Reason"],
+                    [[t, v, a, r] for t, acts in scan["would_act"].items() for v, (a, r) in acts.items()])
+              if scan["would_act"] else "- No ticker to trade today.",
               "", f"Broker {scan['broker']}; dry-run: {scan['dry_run']}. No order reaches a live account; "
               "live trading is not built.", ""]
     return "\n".join(lines)
@@ -178,23 +185,44 @@ def _date(x):
     return dt.date.fromisoformat(x) if x else None
 
 
+def _contexts(scan):
+    """Per-ticker contexts; a scan written before item 024 has one `context` (or None)."""
+    if "contexts" in scan:
+        return scan["contexts"]
+    return [scan["context"]] if scan.get("context") else []
+
+
+def _bh_text(first, last, equity0, cfg):
+    """Buy-and-hold over the week for the tickers priced on both the first and last scan.
+    Shares are bought in order from the starting cash, with the same caps as the bot: an ETF
+    may use all the cash, a single stock at most max_single_name_frac x start, and cash_buffer
+    stays back. A pre-024 context has no asset_type; it held one position, so it gets all the cash."""
+    p1 = {c["ticker"]: c["price"] for c in _contexts(last) if c["price"]}
+    common = [c for c in _contexts(first) if c["price"] and c["ticker"] in p1]
+    if not common:
+        return "n/a (no common ticker priced on the first and last scan)"
+    cash, total, held = equity0, 0.0, []
+    for c in common:
+        t, p0 = c["ticker"], c["price"]
+        stock = c.get("asset_type") not in (None, "etf")
+        budget = min(cash, cfg["max_single_name_frac"] * equity0 + cfg["cash_buffer"]) if stock else cash
+        lots = int((budget - cfg["cash_buffer"]) // (p0 * 100))
+        if lots < 1:
+            continue
+        cash -= lots * 100 * p0
+        total += lots * 100 * (p1[t] - p0)
+        held.append(f"{lots * 100} sh {t}")
+    if not held:
+        return "n/a (100 shares cost more than cash − buffer)"
+    return _fmt(total, "usd") + f" ({'; '.join(held)}, {first['date']} to {last['date']}, dividends not included)"
+
+
 def weekly_report(date, trades, scans, cfg):
     """trades: DataFrame of state/paper_trades.csv; scans: list of scan dicts up to `date`."""
     first, last = scans[0], scans[-1]
-    p0 = first["context"]["price"] if first["context"] else None
-    p1 = last["context"]["price"] if last["context"] else None
     equity0 = cfg["cash"]
     paper = last["equity"] - equity0
-    if p0 and p1 and first["context"]["ticker"] == last["context"]["ticker"]:
-        lots = int((equity0 - cfg["cash_buffer"]) // (p0 * 100))
-        if lots < 1:
-            bh_text = "n/a (100 shares cost more than cash − buffer)"
-        else:
-            bh = lots * 100 * (p1 - p0)
-            bh_text = _fmt(bh, "usd") + f" ({lots * 100} sh {first['context']['ticker']}, {first['date']} to " \
-                                        f"{last['date']}, dividends not included)"
-    else:
-        bh_text = "n/a (no common ticker priced on the first and last scan)"
+    bh_text = _bh_text(first, last, equity0, cfg)
     fills = trades[trades["status"] == "FILLED"]
     opt = fills[fills["action"].isin(["SELL_CALL", "SELL_PUT", "BUY_TO_CLOSE"])]
     spread_paid = float(((opt["mid"] - opt["fill"]).abs() * 100 * opt["qty"]).sum()) if len(opt) else 0.0

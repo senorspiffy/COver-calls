@@ -50,7 +50,10 @@ class OrderResult:
 
 
 def validate(order, positions, cash):
-    """Raise OrderRejected(reason) unless the order is allowed. positions: rules.State."""
+    """Raise OrderRejected(reason) unless the order is allowed. positions: rules.State, or a
+    portfolio.Portfolio (then the sleeve for the order's underlying is checked)."""
+    if hasattr(positions, "positions"):
+        positions = positions.get(order.underlying)
     if order.order_type == "MARKET":
         raise OrderRejected("MARKET_NOT_ALLOWED")
     if order.order_type.startswith("TRAILING"):
