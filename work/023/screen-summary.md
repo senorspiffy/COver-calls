@@ -70,8 +70,8 @@ Screened 2026-10-31 (Saturday) for the 001 starter strategy. Research, not perso
 
 So this week **17 of 39** priced tickers (40 tried; SPLG's quote failed) fit the price limits, **8** were checked further, and **1 (Ford)** passes every test we could see.
 
-## A choice for you
-Ford ($1,233) and Vale ($1,200) together cost $2,433 and leave $567 in cash. Each is under the 50% single-stock cap, so owning both would spread your risk across two companies. The current rule says one position at $3,000, so this would be a rule change, and it's your call.
+## Your decision: two companies (2026-10-31)
+You chose to hold two companies. **Ford ($1,233) + Vale ($1,200) = $2,433**, leaving $567 in cash (the rule needs $200 or more). Each is under the 50% single-stock cap. Check both Dec 18 chains in Webull first (see the bottom line). If Vale's strike fails the liquidity check, American Airlines ($1,232) is the backup, and its chain needs the same check.
 
 ## Data limits
 - Prices and IV are Cboe's delayed quotes. Most are from Oct 29–30, but VALE (Oct 26), KWEB (Oct 26), BBD, SNAP, T, KEY, LUMN, WBD and several ETFs were older; dates are in `work/023/01-research.md`.
