@@ -12,7 +12,8 @@ MISSING_POLICY = {
     "snapshot.oi": ("block", "OI_UNKNOWN"),
     "snapshot.next_earnings": ("block", "EARNINGS_UNKNOWN"),  # stock only
     "snapshot.ex_div_date": ("n/a", "days to ex-dividend: n/a (not supplied)"),
-    "snapshot.iv": ("n/a", "equity n/a while an option is held (no vol to mark it); quotes keep their own delta"),
+    "snapshot.iv": ("fallback", "the held option is marked at its quoted mid (025); equity n/a only when "
+                                "there is no quote and no vol; quotes keep their own delta"),
     "bh_benchmark": ("n/a", "100 shares cost more than cash − buffer"),
     "broker.div_next": ("known_gap", "broker Day.div_next is 0.0, so the ex-dividend early-assignment "
                                      "check is off on the broker path; A1 to open an item"),

@@ -18,12 +18,16 @@ from .base import Broker, NoQuote, OptionOrder, OrderRejected, OrderResult, occ_
 class SimBroker(Broker):
     name = "sim"
 
-    def __init__(self, cfg, series=None, snapshots=None, meta=None, ledger_path="state/sim_ledger.json"):
-        self.cfg, self.series, self.snapshots = cfg, series, snapshots
+    def __init__(self, cfg, series=None, snapshots=None, meta=None, ledger_path="state/sim_ledger.json", quotes=None):
+        """quotes: another Broker whose market data this ledger fills against (webull-paper)."""
+        self.cfg, self.series, self.snapshots, self.quotes = cfg, series, snapshots, quotes
         self.ledger_path = Path(ledger_path)
         self.synthetic = bool((series.meta if series is not None else meta or {}).get("synthetic"))
         self.modelled = series is not None or self.synthetic
         self.quotes_have_oi = series is None   # BS model quotes carry no OI
+        if quotes is not None:
+            self.synthetic = self.modelled = False
+            self.quotes_have_oi = quotes.quotes_have_oi
         if series is not None:
             self._days = {d.date: d for d in build_days(series)}
         self.date, self.state, self.orders, self.n_orders = None, Portfolio(cash=cfg["cash"]), [], 0
@@ -54,6 +58,8 @@ class SimBroker(Broker):
         return df if ticker is None else df[df["underlying"] == ticker]
 
     def get_underlying_quote(self, ticker):
+        if self.quotes is not None:
+            return self.quotes.get_underlying_quote(ticker)
         if self.series is not None:
             if ticker != self.series.ticker or self.date not in self._days:
                 raise NoQuote(f"no quote for {ticker} on {self.date}")
@@ -72,6 +78,8 @@ class SimBroker(Broker):
                    earnings_known=first["asset_type"] == "etf" or next_earnings is not None)
 
     def list_option_contracts(self, underlying, exp_from, exp_to, strike_lo, strike_hi):
+        if self.quotes is not None:
+            return self.quotes.list_option_contracts(underlying, exp_from, exp_to, strike_lo, strike_hi)
         if self.series is not None:
             self.get_underlying_quote(underlying)
             exps = [e for e in expiries.fridays(self.calendar(self.date)) if exp_from <= e <= exp_to]
@@ -83,6 +91,8 @@ class SimBroker(Broker):
         return list(rows["symbol"].dropna())
 
     def get_option_snapshots(self, symbols):
+        if self.quotes is not None:
+            return self.quotes.get_option_snapshots(symbols)
         out = []
         if self.series is not None:
             for s in symbols:

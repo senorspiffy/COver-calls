@@ -10,8 +10,8 @@ from . import expiries
 from .broker.base import NoQuote, OptionOrder, chunk
 from .data import SNAPSHOT_COLUMNS
 from .report import daily_report, weekly_report
-from .portfolio import entry_budget, portfolio_equity
-from .rules import Market, State, apply_fill, decide_entry, decide_exit
+from .portfolio import entry_budget
+from .rules import CONTRACT, Market, State, apply_fill, decide_entry, decide_exit, option_mark
 from .screen import feasible_universe, pass_history, universe_banner
 from .variants import BY_ID, REGISTRY
 
@@ -96,6 +96,7 @@ def _context(ticker, day, spread):
     return {"ticker": ticker, "price": day.close, "vol_pct": _nan_to_none(day.vol_pct), "spread": spread,
             "next_earnings": day.next_earnings and day.next_earnings.isoformat(),
             "earnings_known": day.asset_type == "etf" or day.earnings_known,
+            "earnings_estimated": day.earnings_estimated,
             "ex_div_date": day.ex_div_date and day.ex_div_date.isoformat(), "asset_type": day.asset_type}
 
 
@@ -135,6 +136,24 @@ def _manage(ticker, broker, v, variant, cfg, date, day, market, allowed, capital
     return spread, opened
 
 
+def _capital(portfolio, days, markets, cfg):
+    """Cash + shares at the close − each open short option at its quoted mid when the broker
+    has a quote for it, else at BS mid on the day's vol (NaN if neither exists: never 0)."""
+    total = portfolio.cash
+    for t in portfolio.held():
+        s, day = portfolio.positions[t], days[t]
+        total += s.shares * day.close
+        o = s.option
+        if o is None:
+            continue
+        q = next((q for q in markets[t].chain(day, o.expiry, o.kind) if abs(q.strike - o.strike) < 1e-9), None)
+        if q is not None and q.ask > 0:
+            total -= q.mid * CONTRACT * o.qty
+        else:
+            total -= option_mark(s, day, cfg)
+    return total
+
+
 def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", reports_dir="reports"):
     state_dir, reports_dir = Path(state_dir), Path(reports_dir)
     trades_path = state_dir / "paper_trades.csv"
@@ -171,7 +190,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
         if t not in days:
             days[t] = broker.get_underlying_quote(t)  # NoQuote: no silent skip
             markets[t] = BrokerMarket(broker, t, date, log)
-    capital = portfolio_equity(start, days, cfg)
+    capital = _capital(start, days, markets, cfg)
     snaps = pd.DataFrame(log, columns=SNAPSHOT_COLUMNS)
     passing, rejects = feasible_universe(cfg, snaps, capital, date, calendar, broker.quotes_have_oi)
     banner = universe_banner(passing, rejects)
@@ -199,7 +218,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
              for t in tried}
     _append_csv(trades_path, rows, TRADE_COLUMNS)
     _append_csv(state_dir / "paper_snapshots.csv", log, SNAPSHOT_COLUMNS)
-    final_eq = portfolio_equity(state, days, cfg)
+    final_eq = _capital(state, days, markets, cfg)
     prior = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((state_dir / "scans").glob("*.json")) if p.stem < date.isoformat()]
     history = {t: list(pass_history(prior + [{"passing": passing}], t)) for t in cfg["universe"]}
     scan = {"date": date.isoformat(), "variant": variant, "broker": broker.name, "skipped": False,

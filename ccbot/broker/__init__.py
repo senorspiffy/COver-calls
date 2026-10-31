@@ -5,7 +5,7 @@ def make_broker(name, cfg, **kw):
     if name == "sim":
         from .sim import SimBroker
         return SimBroker(cfg, **kw)
-    if name == "webull-sandbox":
+    if name in ("webull-sandbox", "webull-paper"):
         from .webull_sandbox import WebullSandboxBroker
-        return WebullSandboxBroker(cfg, **kw)
-    raise ValueError(f"unknown broker '{name}' (use 'sim' or 'webull-sandbox')")
+        return WebullSandboxBroker(cfg, paper=name == "webull-paper", **kw)
+    raise ValueError(f"unknown broker '{name}' (use 'sim', 'webull-sandbox' or 'webull-paper')")
