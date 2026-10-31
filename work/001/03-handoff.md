@@ -143,7 +143,7 @@ $3,000 account. A broad ETF "XYZ" at $27.00, monthly options, next earnings n/a.
 - At $5,600: two such positions → ≈ $93.80/month, same 1.74%, but a 20% drop in one ETF costs ≈ 9% of the account instead of 18%.
 
 ## Self-check
-Every numeric threshold in the implementation map re-derived from its own check, and every worked example run against its rule's trigger (added by work items 002 and 003).
+Every numeric threshold in the implementation map re-derived from its own check, and every worked example run against its rule's trigger (added by work items 017 and 018).
 
 | Rule | Check formula | Arithmetic | Result |
 |---|---|---|---|
