@@ -222,7 +222,7 @@ def write_reports(scan, state_dir, reports_dir, cfg, weekly=False):
     reports_dir.mkdir(parents=True, exist_ok=True)
     date = dt.date.fromisoformat(scan["date"])
     paths = [reports_dir / f"daily_{scan['date']}.md"]
-    paths[0].write_text(daily_report(scan))
+    paths[0].write_text(daily_report(scan), encoding="utf-8")
     if weekly or date.weekday() == 4:
         scans = [json.loads(p.read_text()) for p in sorted((Path(state_dir) / "scans").glob("*.json"))
                  if p.stem <= scan["date"]]

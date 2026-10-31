@@ -19,5 +19,5 @@ def write_path(path, closes, start=dt.date(2026, 10, 19), iv=0.25, dividends=Non
     lines = ["date,close,iv,dividend,earnings"]
     for d, c in zip(bdays(start, len(closes)), closes):
         lines.append(f"{d},{c},{iv},{dividends.get(d, 0)},{earnings.get(d, 0)}")
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return load_prices(path)

@@ -49,7 +49,7 @@ def test_two_stocks_opened_within_caps(tmp_path):
     for t in pf.held():   # each single stock <= 50% of starting capital
         assert pf.positions[t].shares * pf.positions[t].basis <= 0.5 * cfg["cash"]
     assert pf.cash >= cfg["cash_buffer"]
-    report = (tmp_path / "reports" / f"daily_{DATE}.md").read_text()
+    report = (tmp_path / "reports" / f"daily_{DATE}.md").read_text(encoding="utf-8")
     assert "## Positions (up to 2 underlyings)" in report and "- SYNTH_D: shares 100" in report
 
 

@@ -44,11 +44,11 @@ def test_short_csv_reports_pbo_na_without_warnings(tmp_path, recwarn):
             rows.append(f"{d},{24 + 0.3 * (-1) ** len(rows):.2f}")
         d += dt.timedelta(days=1)
     p = tmp_path / "SHORT.csv"
-    p.write_text("date,close\n" + "\n".join(rows) + "\n")
+    p.write_text("date,close\n" + "\n".join(rows) + "\n", encoding="utf-8")
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         assert main(["backtest", "--data", str(p), "--quick", "--asof", "2026-10-30", "--out", str(tmp_path)]) == 0
-    md = (tmp_path / "backtest_SHORT_2026-10-30.md").read_text()
+    md = (tmp_path / "backtest_SHORT_2026-10-30.md").read_text(encoding="utf-8")
     pbo = next(line for line in md.splitlines() if line.startswith("- PBO"))
     assert "n/a (needs >= 8 non-held-out months" in pbo and "0.000" not in pbo
     assert "not selected (no train years)" in md

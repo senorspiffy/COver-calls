@@ -46,13 +46,13 @@ def main(item):
 
     research = base / "01-research.md"
     if research.exists():
-        print(f"sources count (unique URLs in 01-research.md): {len(unique_urls(research.read_text()))}")
+        print(f"sources count (unique URLs in 01-research.md): {len(unique_urls(research.read_text(encoding="utf-8")))}")
 
     handoff = base / "03-handoff.md"
     if not handoff.exists():
         print(f"no {handoff}; nothing else to check")
         return 0
-    text = handoff.read_text()
+    text = handoff.read_text(encoding="utf-8")
 
     block = section(text, "Fact check")
     if block is None:

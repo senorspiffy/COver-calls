@@ -28,7 +28,7 @@ class SimBroker(Broker):
             self._days = {d.date: d for d in build_days(series)}
         self.date, self.state, self.orders, self.n_orders = None, Portfolio(cash=cfg["cash"]), [], 0
         if self.ledger_path.exists():
-            saved = json.loads(self.ledger_path.read_text())
+            saved = json.loads(self.ledger_path.read_text(encoding="utf-8"))
             self.date = saved["date"] and dt.date.fromisoformat(saved["date"])
             self.state = Portfolio.from_dict(saved["state"])
             self.orders = [_order_from(o) for o in saved["orders"]]
@@ -38,7 +38,7 @@ class SimBroker(Broker):
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.ledger_path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"date": self.date and self.date.isoformat(), "state": self.state.to_dict(),
-                                   "orders": [_order_to(o) for o in self.orders]}, indent=2))
+                                   "orders": [_order_to(o) for o in self.orders]}, indent=2), encoding="utf-8")
         os.replace(tmp, self.ledger_path)
 
     def calendar(self, asof):

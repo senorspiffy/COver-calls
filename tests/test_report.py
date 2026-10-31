@@ -61,10 +61,10 @@ def _scan(tmp_path, cfg, date, n_prior=0, ts=None):
                              meta=meta, ledger_path=tmp_path / "seed.json"), cfg,
                              state_dir=tmp_path / "seed", reports_dir=tmp_path / "seed_r")
         d = f"2026-09-{10 + i}"
-        (scans / f"{d}.json").write_text(json.dumps({**seed, "date": d}, default=str))
+        (scans / f"{d}.json").write_text(json.dumps({**seed, "date": d}, default=str), encoding="utf-8")
     broker = SimBroker(cfg, snapshots=df, meta=meta, ledger_path=tmp_path / "state" / "sim_ledger.json")
     run_daily(date, broker, cfg, state_dir=tmp_path / "state", reports_dir=tmp_path / "reports")
-    return (tmp_path / "reports" / f"daily_{date}.md").read_text()
+    return (tmp_path / "reports" / f"daily_{date}.md").read_text(encoding="utf-8")
 
 
 def test_daily_report_shows_pass_history(tmp_path, cfg):
@@ -100,7 +100,7 @@ def test_bh_na_line_backtest(tmp_path, infeasible_csv):
         warnings.simplefilter("error", RuntimeWarning)
         assert main(["backtest", "--data", str(infeasible_csv), "--quick", "--asof", "2026-10-30",
                      "--out", str(tmp_path)]) == 0
-    md = (tmp_path / "backtest_SYNTH_A_X15_2026-10-30.md").read_text()
+    md = (tmp_path / "backtest_SYNTH_A_X15_2026-10-30.md").read_text(encoding="utf-8")
     bh = md.split("## Buy and hold")[1].split("##")[0]
     assert "n/a (100 shares cost more than cash − buffer)" in bh and "%" not in bh
     grid = pd.read_csv(tmp_path / "backtest_SYNTH_A_X15_2026-10-30.csv")

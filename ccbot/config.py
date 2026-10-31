@@ -81,7 +81,7 @@ def load_config(path=None, overrides=None):
     cfg = copy.deepcopy(DEFAULTS)
     if path is not None:
         try:
-            cfg = _merge(cfg, json.loads(Path(path).read_text()))
+            cfg = _merge(cfg, json.loads(Path(path).read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError) as exc:
             raise ConfigError(f"cannot read config {path}: {exc}") from exc
     if overrides:
