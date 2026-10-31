@@ -142,7 +142,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
     if trades_path.exists():
         done = pd.read_csv(trades_path, usecols=["date", "variant"])
         if ((done["date"] == date.isoformat()) & (done["variant"] == variant)).any() and scan_path.exists():
-            scan = json.loads(scan_path.read_text())
+            scan = json.loads(scan_path.read_text(encoding="utf-8"))
             scan["skipped"] = True
             write_reports(scan, state_dir, reports_dir, cfg, weekly)
             return scan
@@ -200,7 +200,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
     _append_csv(trades_path, rows, TRADE_COLUMNS)
     _append_csv(state_dir / "paper_snapshots.csv", log, SNAPSHOT_COLUMNS)
     final_eq = portfolio_equity(state, days, cfg)
-    prior = [json.loads(p.read_text()) for p in sorted((state_dir / "scans").glob("*.json")) if p.stem < date.isoformat()]
+    prior = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((state_dir / "scans").glob("*.json")) if p.stem < date.isoformat()]
     history = {t: list(pass_history(prior + [{"passing": passing}], t)) for t in cfg["universe"]}
     scan = {"date": date.isoformat(), "variant": variant, "broker": broker.name, "skipped": False,
             "synthetic": broker.synthetic, "modelled": broker.modelled, "dry_run": dry, "banner": banner,
@@ -211,7 +211,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
                                                            "delta", "in_band", "in_window", "status", "fill")}
                           for r in rows], "contexts": contexts, "would_act": would}
     scan_path.parent.mkdir(parents=True, exist_ok=True)
-    scan_path.write_text(json.dumps(scan, indent=2, default=str))
+    scan_path.write_text(json.dumps(scan, indent=2, default=str), encoding="utf-8")
     write_reports(scan, state_dir, reports_dir, cfg, weekly)
     return scan
 
@@ -224,13 +224,13 @@ def write_reports(scan, state_dir, reports_dir, cfg, weekly=False):
     paths = [reports_dir / f"daily_{scan['date']}.md"]
     paths[0].write_text(daily_report(scan), encoding="utf-8")
     if weekly or date.weekday() == 4:
-        scans = [json.loads(p.read_text()) for p in sorted((Path(state_dir) / "scans").glob("*.json"))
+        scans = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((Path(state_dir) / "scans").glob("*.json"))
                  if p.stem <= scan["date"]]
         trades = pd.read_csv(Path(state_dir) / "paper_trades.csv")
         start = (date - dt.timedelta(days=6)).isoformat()
         week = trades[(trades["date"] >= start) & (trades["date"] <= scan["date"])]
         paths.append(reports_dir / f"weekly_{scan['date']}.md")
-        paths[1].write_text(weekly_report(scan["date"], week, scans, cfg))
+        paths[1].write_text(weekly_report(scan["date"], week, scans, cfg), encoding="utf-8")
     return paths
 
 
@@ -239,4 +239,4 @@ def regenerate(date, state_dir, reports_dir, cfg, weekly=False):
     path = Path(state_dir) / "scans" / f"{date.isoformat()}.json"
     if not path.exists():
         raise FileNotFoundError(f"no scan recorded for {date} in {path.parent}")
-    return write_reports(json.loads(path.read_text()), state_dir, reports_dir, cfg, weekly)
+    return write_reports(json.loads(path.read_text(encoding="utf-8")), state_dir, reports_dir, cfg, weekly)
