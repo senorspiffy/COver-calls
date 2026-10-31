@@ -57,3 +57,15 @@ def test_pick_strike_none_when_band_has_no_strike():
     chain = _chain(30, 0.15, 7)
     assert not any(0.25 <= d <= 0.30 for _, d in chain)
     assert pick_strike(chain, 0.275, (0.25, 0.30)) is None
+
+
+def test_tolerance_finds_strike_on_bs_grid():
+    """RI-001 guardrail (004): on a $0.50 grid at 35 DTE the 0.25-0.30 band is empty in 3 of
+    these 4 cases, but nearest-0.275 within [0.20, 0.35] finds a strike in all 4 (001 step 5).
+    The grid is built here: strike_grid switches to $1 steps at $25."""
+    T, empty = 35 / 365, 0
+    for S, sigma in ((24, 0.25), (17, 0.35), (12, 0.25), (24, 0.50)):
+        chain = [(k, bs_delta(S, k, T, 0.04, 0, sigma, "C")) for k in (round(0.7 * S) + 0.5 * i for i in range(40))]
+        assert pick_strike(chain, 0.275, (0.20, 0.35)) is not None, (S, sigma)
+        empty += not any(0.25 <= d <= 0.30 for _, d in chain)
+    assert empty == 3

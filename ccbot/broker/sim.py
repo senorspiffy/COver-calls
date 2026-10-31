@@ -22,6 +22,7 @@ class SimBroker(Broker):
         self.ledger_path = Path(ledger_path)
         self.synthetic = bool((series.meta if series is not None else meta or {}).get("synthetic"))
         self.modelled = series is not None or self.synthetic
+        self.quotes_have_oi = series is None   # BS model quotes carry no OI
         if series is not None:
             self._days = {d.date: d for d in build_days(series)}
         self.date, self.state, self.orders, self.n_orders = None, State(cash=cfg["cash"]), [], 0
@@ -39,6 +40,13 @@ class SimBroker(Broker):
                                    "orders": [_order_to(o) for o in self.orders]}, indent=2))
         os.replace(tmp, self.ledger_path)
 
+    def calendar(self, asof):
+        """Series replay: the backtest's own calendar (ModelMarket), so bot and backtest agree."""
+        if self.series is not None:
+            dates = [d.date() for d in self.series.df.index]
+            return expiries.extend(dates, dates[-1] + dt.timedelta(days=70))
+        return super().calendar(asof)
+
     # ---- quotes ----
     def _snap_rows(self, ticker=None):
         df = self.snapshots[self.snapshots["ts"] == self.date]
@@ -55,15 +63,17 @@ class SimBroker(Broker):
         older = self.snapshots[(self.snapshots["underlying"] == ticker) & (self.snapshots["ts"] < self.date)]
         first = rows.iloc[0]
         opt = lambda x: x if pd.notna(x) else None  # noqa: E731
+        next_earnings = opt(first["next_earnings"])
         return Day(self.date, float(first["underlying_price"]),
                    float(older.iloc[-1]["underlying_price"]) if len(older) else None,
-                   float(rows["iv"].median()), next_earnings=opt(first["next_earnings"]),
-                   ex_div_date=opt(first["ex_div_date"]), asset_type=first["asset_type"])
+                   float(rows["iv"].median()), next_earnings=next_earnings,
+                   ex_div_date=opt(first["ex_div_date"]), asset_type=first["asset_type"],
+                   earnings_known=first["asset_type"] == "etf" or next_earnings is not None)
 
     def list_option_contracts(self, underlying, exp_from, exp_to, strike_lo, strike_hi):
         if self.series is not None:
             self.get_underlying_quote(underlying)
-            exps = expiries.fridays(expiries.business_days(exp_from, exp_to))
+            exps = [e for e in expiries.fridays(self.calendar(self.date)) if exp_from <= e <= exp_to]
             return [occ_symbol(underlying, e, kind, k) for e in exps for kind in ("C", "P")
                     for k in grid_range(strike_lo, strike_hi)]
         rows = self._snap_rows(underlying)

@@ -52,7 +52,7 @@ def cmd_make_sample(a):
 
 
 def cmd_backtest(a):
-    from .backtest import metrics
+    from .backtest import bh_na_reason, metrics
     from .data import load_prices
     from .report import backtest_report
     from .variants import run_grid
@@ -63,7 +63,9 @@ def cmd_backtest(a):
     t0 = time.time()
     grid, results, bh = run_grid(series, cfg, quick=a.quick)
     wf = walk_forward(results, bh, cfg, cfg["spread"]["value"], cfg["k"])
-    md, csv = backtest_report(grid, results, wf, metrics(bh, None, cfg), cfg, series.meta, a.asof)
+    bh_m = metrics(bh, None, cfg)
+    bh_m["na_reason"] = bh_na_reason(series, cfg)
+    md, csv = backtest_report(grid, results, wf, bh_m, cfg, series.meta, a.asof, series.missing)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     stem = out / f"backtest_{series.ticker}_{a.asof.isoformat()}"

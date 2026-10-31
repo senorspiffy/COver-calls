@@ -167,3 +167,27 @@ def test_contract_list_fallback(tmp_path, cfg):
     assert ok == ["X261218C00026000"]
     fb = _broker(tmp_path, cfg, sdk=FakeSDK(contracts_error=True)).list_option_contracts("X", exp, exp, 25, 27)
     assert "X261218C00026000" in fb and "X261218P00025000" in fb
+
+
+def test_sandbox_day_is_not_earnings_known(tmp_path, cfg):
+    """005: the sandbox gives no earnings date, so a stock entry blocks (never 'no earnings')."""
+    from ccbot.rules import Market, State, decide_entry
+    from ccbot.variants import BY_ID
+    b = _broker(tmp_path, cfg)
+    b.advance(dt.date(2026, 10, 30))
+    day = b.get_underlying_quote("X")
+    assert day.asset_type == "stock" and day.next_earnings is None and day.earnings_known is False
+    assert b.quotes_have_oi is True    # blank OI from the sandbox is OI_UNKNOWN in the screen
+
+    class Stub(Market):
+        def chain(self, day, expiry, kind):
+            raise AssertionError("the chain must not be read when earnings are unknown")
+    st = State(cash=600.0, ticker="X", shares=100, basis=24.0)
+    assert decide_entry(st, day, BY_ID["V0"], cfg, Stub([dt.date(2026, 12, 4)], [])).reason == "EARNINGS_UNKNOWN"
+
+
+def test_occ_fallback_builds_thursday_symbols(tmp_path, cfg):
+    """RI-003 guardrail (007): 2026-06-19 is a holiday, so the June monthly is Thu 06-18."""
+    exp = dt.date(2026, 6, 18)
+    fb = _broker(tmp_path, cfg, sdk=FakeSDK(contracts_error=True)).list_option_contracts("X", exp, exp, 25, 27)
+    assert fb and all("260618" in s for s in fb)

@@ -48,7 +48,21 @@ METRIC_COLS = [("cagr", "CAGR", "pct"), ("vol", "Vol", "pct"), ("max_dd", "Max D
                ("excess_vs_bh", "Excess vs B&H (CAGR)", "pct")]
 
 
-def backtest_report(grid, results, wf, bh_metrics, cfg, meta, asof):
+def missing_lines(missing, results, cfg, asset_type):
+    """One line per absent optional CSV column (005), counted on V0 at the base setting."""
+    reasons = results[("V0", cfg["spread"]["value"], cfg["k"])].reasons
+    out = []
+    for col in missing:
+        if col == "earnings" and asset_type == "etf":
+            out.append("- earnings: not supplied (ETF: no earnings, nothing blocked)")
+        else:
+            code = {"earnings": "EARNINGS_UNKNOWN", "dividend": "DIVIDEND_UNKNOWN"}[col]
+            out.append(f"- {col}: not supplied ({reasons.get(code, 0)} days blocked, {code})"
+                       + ("; buy and hold n/a" if col == "dividend" else ""))
+    return out or ["- none"]
+
+
+def backtest_report(grid, results, wf, bh_metrics, cfg, meta, asof, missing=()):
     """grid: DataFrame from variants.run_grid. Returns (markdown, csv)."""
     from .variants import REGISTRY, expand
 
@@ -64,9 +78,11 @@ def backtest_report(grid, results, wf, bh_metrics, cfg, meta, asof):
              f"{cfg['tolerance']}; in_band = {cfg['band']}. Calls never below cost basis.",
              f"- Monthly expiry: {cfg['monthly_dte']} DTE, else the nearest monthly within "
              f"{cfg['monthly_slack_days']} days of that window (in_window=False).",
+             "", "## Missing inputs", *missing_lines(missing, results, cfg, meta.get("asset_type")),
              "", "## Variants (pre-registered)",
              table(["ID", "Rule"], [[v.id, v.name] for v in REGISTRY]), "",
              "## Buy and hold (same start, cash, dividends)",
+             f"n/a ({bh_metrics['na_reason']})" if bh_metrics.get("na_reason") else
              table(["CAGR", "Vol", "Max DD", "Sharpe"],
                    [[_fmt(bh_metrics[c], k) for c, k in (("cagr", "pct"), ("vol", "pct"),
                                                            ("max_dd", "pct"), ("sharpe", "num"))]]), ""]
@@ -119,6 +135,8 @@ def daily_report(scan):
              banners(scan["synthetic"], scan["modelled"]), ""]
     if scan["banner"]:
         lines += [f"> **{scan['banner']}**", ""]
+    if scan.get("early_close"):
+        lines += ["> Early close today: 1:00 p.m. ET (1:15 p.m. for eligible options); run the scan before then.", ""]
     if scan["skipped"]:
         lines += ["Already scanned for this date and variant: no new decision was made.", ""]
     pos = scan["positions"]
@@ -129,7 +147,9 @@ def daily_report(scan):
               f"- Open option: {o['kind']} {o['strike']} exp {o['expiry']} x{o['qty']} sold at {o['premium']}"
               if o else "- Open option: none", "",
               "## Screen", f"- Passing: {', '.join(scan['passing']) or 'none'}",
-              f"- Rejected: {', '.join(f'{t} ({r})' for t, r in scan['rejects'].items()) or 'none'}", "",
+              f"- Rejected: {', '.join(f'{t} ({r})' for t, r in scan['rejects'].items()) or 'none'}",
+              *[f"- {t}: passed {n} of last {k} logged scans" + (f" (history short: {k} < 10)" if k < 10 else "")
+                for t, (n, k) in scan.get("pass_history", {}).items()], "",
               "## Today's decision",
               table(["Action", "Reason", "Contract", "Limit", "TIF", "Delta", "in_band", "in_window", "Status", "Fill"],
                     [[r["action"], r["reason"], r["contract"] or "-", r["limit"] if r["limit"] is not None else "-",
@@ -142,8 +162,9 @@ def daily_report(scan):
                   f"- Vol percentile (252 d): {_fmt(ctx['vol_pct']) if ctx['vol_pct'] is not None else 'n/a'}"
                   f"{'' if ctx['vol_pct'] is not None else ' (fewer than 252 days of history)'}",
                   f"- Spread at the chosen strike: {_fmt(ctx['spread'], 'usd') if ctx['spread'] is not None else 'n/a'}",
-                  f"- Days to earnings: {_days_to(_date(ctx['next_earnings']), asof)}; "
-                  f"days to ex-dividend: {_days_to(_date(ctx['ex_div_date']), asof)}"]
+                  f"- Days to earnings: "
+                  f"{_days_to(_date(ctx['next_earnings']), asof) if ctx.get('earnings_known', True) else 'n/a (not supplied)'}; "
+                  f"days to ex-dividend: {_days_to(_date(ctx['ex_div_date']), asof) if ctx['ex_div_date'] else 'n/a (not supplied)'}"]
     else:
         lines.append("- No ticker to trade today.")
     lines += ["", "## Would each variant act today?",
@@ -165,10 +186,13 @@ def weekly_report(date, trades, scans, cfg):
     equity0 = cfg["cash"]
     paper = last["equity"] - equity0
     if p0 and p1 and first["context"]["ticker"] == last["context"]["ticker"]:
-        lots = max(1, int((equity0 - cfg["cash_buffer"]) // (p0 * 100)))
-        bh = lots * 100 * (p1 - p0)
-        bh_text = _fmt(bh, "usd") + f" ({lots * 100} sh {first['context']['ticker']}, {first['date']} to " \
-                                    f"{last['date']}, dividends not included)"
+        lots = int((equity0 - cfg["cash_buffer"]) // (p0 * 100))
+        if lots < 1:
+            bh_text = "n/a (100 shares cost more than cash − buffer)"
+        else:
+            bh = lots * 100 * (p1 - p0)
+            bh_text = _fmt(bh, "usd") + f" ({lots * 100} sh {first['context']['ticker']}, {first['date']} to " \
+                                        f"{last['date']}, dividends not included)"
     else:
         bh_text = "n/a (no common ticker priced on the first and last scan)"
     fills = trades[trades["status"] == "FILLED"]

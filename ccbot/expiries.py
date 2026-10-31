@@ -1,16 +1,30 @@
 """Expiry calendar built from trading dates (business days beyond the data)."""
 import bisect
 import datetime as dt
+import functools
+import json
+from pathlib import Path
 
 import pandas as pd
+
+HOLIDAYS_PATH = Path(__file__).resolve().parents[1] / "config" / "holidays.json"
 
 
 def _as_dates(dates):
     return [d.date() if hasattr(d, "date") and callable(d.date) else d for d in dates]
 
 
-def business_days(start, end):
-    return [d.date() for d in pd.bdate_range(start, end)]
+def business_days(start, end, holidays=None):
+    """Mon-Fri dates; with `holidays` (iterable of dates), exchange holidays removed."""
+    if holidays is None:
+        return [d.date() for d in pd.bdate_range(start, end)]
+    return [d.date() for d in pd.bdate_range(start, end, freq="C", holidays=list(holidays))]
+
+
+@functools.cache
+def load_holidays():
+    """config/holidays.json (NYSE full-day closures and early closes), read once."""
+    return json.loads(HOLIDAYS_PATH.read_text())
 
 
 def extend(dates, until):
@@ -20,7 +34,8 @@ def extend(dates, until):
 
 
 def _move_back(target, dates, known):
-    """`target` if it trades, else the prior trading day (same week)."""
+    """`target` if it trades, else the prior trading day (same week). Looks back at most
+    4 days, which covers one holiday (e.g. Good Friday -> Thursday)."""
     if target in known:
         return target
     prior = [d for d in dates if target - dt.timedelta(days=4) <= d < target]
@@ -74,5 +89,12 @@ def pick_expiry(today, expiries, dte_range, slack=0):
 
 
 def scan_calendar(today, days=120):
-    """Calendar for a live/paper scan: business days around `today`."""
-    return business_days(today - dt.timedelta(days=35), today + dt.timedelta(days=days))
+    """Calendar for a live/paper scan: NYSE trading days around `today`. Raises
+    ValueError outside the holiday table; it never falls back to Mon-Fri."""
+    table = load_holidays()
+    lo, hi = (dt.date.fromisoformat(d) for d in table["covers"])
+    start, end = today - dt.timedelta(days=35), today + dt.timedelta(days=days)
+    if start < lo or end > hi:
+        raise ValueError(f"holiday table covers {lo}..{hi}; add NYSE dates for {start.year if start < lo else end.year} "
+                         f"to {HOLIDAYS_PATH.name} (source {table['source']})")
+    return business_days(start, end, table["holidays"])

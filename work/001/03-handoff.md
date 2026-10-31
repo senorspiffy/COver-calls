@@ -116,6 +116,8 @@ Math: half-spread × 100 shares × fills; e.g. $0.05/2 × 100 × 104 = $260; $26
 ## Implementation map (starter strategy — rules the person follows)
 Rules marked **[house rule]** are judgment calls, not sourced facts. Everything else cites the fact check above.
 
+> **Corrected 2026-10-30** (items 003, 004, 008): steps 1, 3, 4, 5, 6, 8, 9(a), 11, Alternative 1 and the worked example's 50% line are superseded by § Correction 2026-10-30 below.
+
 | Step | Change (rule) | Inputs | Outputs | How we check it |
 |---|---|---|---|---|
 | 1 | **Account size.** $3,000 is enough to *start* with **one** position, but only on a diversified, liquid ETF priced ≤ $28 (keeps ≥ $200 cash for the 100 shares + buffer). Prefer **$5,000–6,000** before using single stocks: by the check in the last column, $5,000 allows two positions ≤ $24 or one ≤ $48; $5,600 allows two ≤ $27 or one ≤ $54; two positions ≤ $28 need **$5,800** (N1 + $200 buffer). Income % is about the same either way; the gain is diversification. [house rule on ETF-only at $3k; N1, R2 AGAINST2] | Cash balance, share price | Number of positions allowed: max price = (cash − $200) / (100 × positions) | Before each buy: (price × 100 × positions) ≤ cash − $200. |
@@ -142,8 +144,20 @@ $3,000 account. A broad ETF "XYZ" at $27.00, monthly options, next earnings n/a.
 - 50% exception: GTC limit = 50% × $0.47 = $0.235 → rounded down to **$0.23**. On day 9 the call is $0.21 bid / $0.23 ask; the GTC fills at $0.23 (48.9% of $0.47) → profit (0.47 − 0.23) × 100 − $0.20 = **$23.80**; sell next month's call the same day.
 - At $5,600: two such positions → ≈ $93.80/month, same 1.74%, but a 20% drop in one ETF costs ≈ 9% of the account instead of 18%.
 
+## Correction 2026-10-30 (items 003, 004, 008)
+Found by A1/R3 on 2026-10-30. The rows above are kept as written; where they differ, this section wins.
+- **Step 1 (003).** At $3,000, trade **one** underlying that passes today's step-3 screen at the step-5 strike of the step-4 expiry and fits both caps: 100 sh ≤ cash − $200 (≤ $28/share) and, for a single stock, ≤ 50% of capital (≤ $15/share). Prefer a diversified ETF if one passes. **Feasibility, 2026-10-30:** 0 tickers confirmed on monthly quotes; no diversified ETF ≤ $28 passes (002/03 L114); F ($11.94, 39.8% of capital) passes only on an 11-06 weekly quote (003/03). Unproven until the paper bot logs monthly scans. If none passes: no trade that day (**UNIVERSE EMPTY**); options are (a) a CSP within the caps on a passing ticker, (b) add funds (two names from about $5.3k), (c) a covered-call ETF. The daily report shows how many of the last 10 logged scans each ticker passed (information, not a gate). [house rule] Check: `screen.feasible_universe` each scan; tests `test_universe_empty_blocks_orders`, `test_shipped_config_has_a_passing_ticker` (SYNTH data only), `test_pass_history_counts_last_10`.
+- **Step 3 (005).** If OI or the next earnings date is unknown, the test fails (`OI_UNKNOWN`, `EARNINGS_UNKNOWN`); an ETF has no earnings.
+- **Step 4 (004).** Monthly expiry with **30–45 DTE**; if none, the monthly nearest that window within 7 days of its edges (**23–52 DTE**, ties → later), logged `in_window = False`; if none, no trade that day (`NO_EXPIRY`), retry next scan. Feasibility (2016–2025, Mon–Fri, repo `pick_expiry`): 30–45 alone 55.2% of days; with slack 95.2%; at most 3 business days in a row without one. Example: 2026-10-30 → 2026-12-18, 49 DTE. No 0DTE; weekly rule unchanged. Check: DTE 23–52 and `in_window` logged; tests `test_monthly_coverage_2016_2025`, `test_live_scan_rule_2026_10_30`.
+- **Step 5 (004).** Sell the listed call with delta **nearest 0.275**, only if in **[0.20, 0.35]**, else no trade (`NO_STRIKE_IN_TOLERANCE`). Strike ≥ cost basis: if the nearest is below basis, take the lowest strike ≥ basis if its delta ≥ 0.20, else no trade (`BASIS_ABOVE_BAND`). Why: at 35 DTE on a $0.50 grid adjacent strikes are 0.07–0.16Δ apart, so 0.25–0.30 was empty in 3 of 4 cases; it is logged as `in_band`. Limit at the mid as before. Check: delta in [0.20, 0.35], `in_band`, strike ≥ basis, fill vs mid; test `test_tolerance_finds_strike_on_bs_grid`.
+- **Step 6 (008).** "first third of its life" means days held × 3 ≤ days of life (e.g. day ≤ **11** of 35, as the bot checks). The GTC buy-to-close limit is 50% of the sale price rounded **down** to the tick.
+- **Step 8, Alternative 1 (004).** "30–45 DTE, ~0.25–0.30 delta" → the step-4 expiry and step-5 strike rule (put delta nearest −0.275, |Δ| in [0.20, 0.35]).
+- **Step 9(a) (003).** Max 50% of capital in one single stock (≤ $15/share at $3k; `max_single_name_frac: 0.5`), not "only at ≥ $5.6k".
+- **Step 11 (004).** Replace "another reason for 30–45 DTE" with: on about 25% of days (2016–2025) the step-4 rule picks 23–30 DTE, and those calls are not QCCs.
+- **Worked example, 50% line (008).** Penny class ($0.01 tick below $3, Cboe C2023122104): 50% of $0.47 = $0.235, so the GTC limit is **$0.23** (48.9%). Day 9 quote $0.21 / $0.23 → fills at $0.23; profit (0.47 − 0.23) × 100 − $0.20 = **$23.80**; sell next month's call the same day. On $0.22 / $0.24 it would **not** fill (a buy limit executes only at the limit or lower, SEC Investor.gov), and the bot would not exit either. Non-penny ($0.05 tick): the sale would be $0.45 or $0.50 and the limit $0.20 or $0.25. Test `test_worked_example_50pct_exit`.
+
 ## Self-check
-Every numeric threshold in the implementation map re-derived from its own check, and every worked example run against its rule's trigger (added by work items 017 and 018).
+Every numeric threshold in the implementation map re-derived from its own check, and every worked example run against its rule's trigger (added by work items 017 and 018). Written against the original rows; where § Correction 2026-10-30 above changes a rule (e.g. step 4's DTE window is now 23–52), the Correction wins.
 
 | Rule | Check formula | Arithmetic | Result |
 |---|---|---|---|
