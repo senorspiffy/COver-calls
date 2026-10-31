@@ -12,7 +12,7 @@ A) Per item - when `work/<ID>/07-audit-task.md` exists:
 
 B) Daily review - run once a day over `logs/` (all teams, since the last daily review) and every item touched that day:
    - Is every log line backed by a file in `work/`? Any step skipped? Any item stuck?
-   - Do the strategy numbers still add up (premium, yield, breakeven, assignment scenarios)?
+   - Do the strategy numbers still add up (premium, yield, breakeven, assignment scenarios)? Run `python3 scripts/check_handoff.py <ID>` on every item with a hand-off, and spot-check its Self-check table.
    - Any errors, failed tests, or contradictions between teams?
 
 Every error you find MUST be sent back. For each one:

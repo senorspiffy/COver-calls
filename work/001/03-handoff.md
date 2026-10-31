@@ -86,9 +86,10 @@ R1 = 01-research.md, R2 = 02-improvements.md. "V" = VERIFIED (source opened toda
 | NEW: Webull GTC options orders expire after 60 calendar days; auto-cancel at contract expiry; no fills outside regular hours | webullapp.com courseware "GTC for Options Trading" | VERIFIED (Webull learning page; confirm in the US app) | – |
 | NEW: Webull option order types: Market, Limit, Stop Limit, Take-Profit/Stop-Loss, Trailing Stop | webull.com/help/faq/298 | VERIFIED | – |
 
-**Totals:** 76 rows checked → **60 VERIFIED as-is**, **12 fixed** (corrected or newly sourced: A7, B11, C6, G4, J1, K5, N2, N3, N4, R2 AGAINST3 fee point, R2 Portuguese URL, R2 variation J), **4 removed** (C7 21-DTE data, H3 as a sourced rule, I5 dividend claim, J2 exact fee amounts).
+**Totals:** 77 rows checked → **61 VERIFIED as-is**, **12 fixed** (corrected or newly sourced: A7, B11, C6, G4, J1, K5, N2, N3, N4, R2 AGAINST3 fee point, R2 Portuguese URL, R2 variation J), **4 removed** (C7 21-DTE data, H3 as a sourced rule, I5 dividend claim, J2 exact fee amounts).
 
 ## Removed claims
+Definitions: *fixed* = claim kept with a correction or a new source; *removed* = claim dropped with nothing in its place. Entries 3, 4, 5 and 7 below are the 4 removed rows; entries 1, 2 and 6 were replaced by a corrected fact and are counted under *fixed*.
 1. **R1 B11 / R2 row F** as evidence that weekly writing lags — BXMW is laddered *monthly* options, not weekly.
 2. **R1 C6** "most sub-$30 stocks lack daily expiries" — replaced by the actual Jan-2026 eligibility rule (> $700B market cap).
 3. **R1 C7** any numbers for tastytrade 45/21-DTE — still unfetchable.
@@ -117,15 +118,15 @@ Rules marked **[house rule]** are judgment calls, not sourced facts. Everything 
 
 | Step | Change (rule) | Inputs | Outputs | How we check it |
 |---|---|---|---|---|
-| 1 | **Account size.** $3,000 is enough to *start* with **one** position, but only on a diversified, liquid ETF priced ≤ $28 (keeps ≥ $200 cash for the 100 shares + buffer). Prefer **$5,000–6,000** before using single stocks: it allows two positions ≤ $28 or one ≤ $55 (N1). Income % is about the same either way; the gain is diversification. [house rule on ETF-only at $3k; N1, R2 AGAINST2] | Cash balance, share price | Number of positions allowed (1 at $3k, 2 at ≥ $5.6k) | Before each buy: (price × 100 × positions) ≤ cash − $200. |
+| 1 | **Account size.** $3,000 is enough to *start* with **one** position, but only on a diversified, liquid ETF priced ≤ $28 (keeps ≥ $200 cash for the 100 shares + buffer). Prefer **$5,000–6,000** before using single stocks: by the check in the last column, $5,000 allows two positions ≤ $24 or one ≤ $48; $5,600 allows two ≤ $27 or one ≤ $54; two positions ≤ $28 need **$5,800** (N1 + $200 buffer). Income % is about the same either way; the gain is diversification. [house rule on ETF-only at $3k; N1, R2 AGAINST2] | Cash balance, share price | Number of positions allowed: max price = (cash − $200) / (100 × positions) | Before each buy: (price × 100 × positions) ≤ cash − $200. |
 | 2 | **Broker setup (Webull).** Apply for options **Level 1** (covered calls, buy-writes, CSPs). Cash account is fine; no margin needed. Do not apply for Level 3 unless doing PMCC (needs margin + $2,000 margin equity). | Webull account | Level 1 approval | Approval shown in app. After first trade, read the confirmation and record the real per-contract regulatory/clearing fees; replace the $0.10 placeholder. Also confirm whether Webull charges anything on assignment (not stated on its pages). |
 | 3 | **Underlying selection.** Must meet all: (a) you'd hold it for a year anyway (F4); (b) monthly options listed; (c) option bid-ask ≤ $0.05 at the chosen strike and OI ≥ 500 [house rule; F1/F5]; (d) no earnings date before the call's expiry (ORATS; F2); (e) prefer lower volatility / broad ETF over one company (moomoo; R2 AGAINST2). | Option chain in Webull | Approved ticker | Screenshot/log of spread, OI and next earnings date at each entry. Reject if any test fails. |
 | 4 | **Cadence & expiry.** Sell the **monthly expiry 30–45 DTE** (ORATS best 30 DTE; BXM/BXMD monthly). No 0DTE (not offered on this universe, C6). No weekly until 3 months of logs show spreads ≤ $0.02. | Calendar | One open call per 100 shares | Log DTE at entry: must be 30–45. |
 | 5 | **Strike/delta.** Sell the strike nearest **0.25–0.30 delta**, and at or above your cost basis. (BXMD 30Δ beat ATM BXM, B9/B10; ORATS' 0.10Δ is too little premium on a sub-$30 stock.) Sell with a **limit at the mid**, step down $0.01 at a time; never a market order. | Delta from chain, cost basis | Short call | Log delta (0.25–0.30), strike ≥ basis, fill vs mid (target ≤ $0.01 below mid). |
-| 6 | **Exit rule — default HOLD TO EXPIRY.** Let it expire or be assigned (ORATS; FlashAlpha and BXM method hold to expiry). **Exception:** if the call is worth ≤ 50% of what you sold it for *within the first third of its life* (e.g. day ≤ 12 of 35), buy it back and **sell the next month's call the same day** (R2 hybrid; untested — reasoning only). Put this on as a **GTC limit buy-to-close at 50%** right after the sale (Webull supports GTC limit for options; 60-day GTC life; cancels at expiry). Cancel the GTC once the first third is over. **21-DTE close: not used** (data unverified, C7). | Sale price, date | Closed or expired call | Log: was the 50% exit taken; days held; next call sold same day (Y/N). After 12 cycles compare the P/L of exits taken vs hold. |
+| 6 | **Exit rule — default HOLD TO EXPIRY.** Let it expire or be assigned (ORATS; FlashAlpha and BXM method hold to expiry). **Exception:** if the call is worth ≤ 50% of what you sold it for *within the first third of its life* (e.g. day ≤ 11 of 35, since 35 / 3 = 11.7), buy it back and **sell the next month's call the same day** (R2 hybrid; untested — reasoning only). Put this on as a **GTC limit buy-to-close at 50% of the sale price, rounded down to the nearest price the order ticket accepts (the option's minimum tick)**, so a fill is always ≤ 50%, right after the sale (Webull supports GTC limit for options; 60-day GTC life; cancels at expiry). Cancel the GTC once the first third is over. **21-DTE close: not used** (data unverified, C7). | Sale price, date | Closed or expired call | Log: was the 50% exit taken; days held; next call sold same day (Y/N). After 12 cycles compare the P/L of exits taken vs hold. |
 | 7 | **Rolling.** Roll only if the stock is above the strike with ≤ 7 DTE **and** you'd rather keep the shares: buy back, sell the next monthly at a higher strike (up-and-out). Only for a net credit or a debit ≤ 10% of the original premium [house rule; H1/H2 show debits happen]. Otherwise let the shares be called away — that's a max-profit outcome. Never roll down below cost basis. | Price, strike, chain | Rolled or assigned | Log net credit/debit of each roll; any roll breaking the rule is flagged. |
 | 8 | **Assignment → the wheel.** When called away, sell a **cash-secured put** on the same ticker, 30–45 DTE, ~0.25–0.30 delta, strike ≤ the price you'd happily pay (G1–G3; Webull Level 1). If put assigned → back to step 5. Before ex-dividend, check if an ITM call's time value < dividend; if so expect early assignment (F3). | Cash = strike × 100 | CSP or new covered call | Cash ≥ strike × 100 before selling a put; log ex-div dates. |
-| 9 | **Risk limits** [house rules]. (a) Max 100% of capital in one ETF, max 50% in one single stock (so single stocks only at ≥ $5.6k). (b) If the underlying closes ≥ 20% below cost basis, stop selling new calls below basis; reassess whether you'd still buy it today; if not, sell the shares (a 20% drop ≈ 11 months of premium, see example). (c) No margin, no naked options, no 0DTE. (d) Don't treat premium as spendable income until the call is closed. | Price, basis | Hold/exit decision | Monthly review log; any limit breach flagged. |
+| 9 | **Risk limits** [house rules]. (a) Max 100% of capital in one ETF, max 50% in one single stock (so single stocks only once two positions fit under step 1, e.g. two ≤ $27 at $5,600). (b) If the underlying closes ≥ 20% below cost basis, stop selling new calls below basis; reassess whether you'd still buy it today; if not, sell the shares (a 20% drop ≈ 11 months of premium, see example). (c) No margin, no naked options, no 0DTE. (d) Don't treat premium as spendable income until the call is closed. | Price, basis | Hold/exit decision | Monthly review log; any limit breach flagged. |
 | 10 | **Expected returns — set the bar honestly.** Premium "income" ≠ return (N7). Index history: BXM ≈ 6.1%/yr vs S&P ≈ 11.0%/yr (2006–2025, gross); BXMD 9.59%/yr (1990–2018, gross); BXM −29% in 2008. Covered calls lagged buy-and-hold in all 48 FlashAlpha setups (2022–2026). Planning range for a typical year: **roughly 0–10% total return**, with a bad year of **−20% to −30%** possible, and **lagging the underlying in strong up years**. Gross premium at 30Δ will be below BXM's 1.7%/month ATM average (Cboe: BXMD collects less). Single ETF/stock results vary more (B12). | Index data above | Benchmark for review | Each quarter, compare account total return vs simply holding the same shares (log both). |
 | 11 | **Taxes.** All closed/expired call premium is short-term = ordinary income rates (K1, K5). Use an IRA if available. Calls ≤ 30 DTE are never QCCs (K2) — another reason for 30–45 DTE. | Account type | Tax note | Year-end: realized short-term gains report from Webull. |
 | 12 | **Journal.** One row per trade: date, ticker, price, strike, delta, DTE, bid/ask/fill, fees, exit type, result, account value vs buy-and-hold. | Each trade | Spreadsheet | 12 monthly rows before changing any rule. |
@@ -138,8 +139,33 @@ $3,000 account. A broad ETF "XYZ" at $27.00, monthly options, next earnings n/a.
 - Called away at $28: ($28 − $27) × 100 + $47 − $0.10 = **$146.90 = 5.44%**.
 - Breakeven: $27.00 − $0.47 = **$26.53**.
 - XYZ falls 20% to $21.60: (21.60 − 27.00) × 100 + $46.90 = **−$493.10 = −18.3%**. The −$540 stock loss equals ≈ 11.5 months of this premium (540 / 46.9).
-- 50% exception: on day 9 the call is $0.22 bid / $0.24 ask; GTC fills at $0.24 → profit (0.47 − 0.24) × 100 − $0.20 = **$22.80**; sell next month's call the same day.
+- 50% exception: GTC limit = 50% × $0.47 = $0.235 → rounded down to **$0.23**. On day 9 the call is $0.21 bid / $0.23 ask; the GTC fills at $0.23 (48.9% of $0.47) → profit (0.47 − 0.23) × 100 − $0.20 = **$23.80**; sell next month's call the same day.
 - At $5,600: two such positions → ≈ $93.80/month, same 1.74%, but a 20% drop in one ETF costs ≈ 9% of the account instead of 18%.
+
+## Self-check
+Every numeric threshold in the implementation map re-derived from its own check, and every worked example run against its rule's trigger (added by work items 017 and 018).
+
+| Rule | Check formula | Arithmetic | Result |
+|---|---|---|---|
+| Step 1, $3,000, one position | (cash − 200) / 100 | (3,000 − 200) / 100 = $28.00 | ≤ $28 ✓ |
+| Step 1, $5,000 | (cash − 200) / (100 × n) | 4,800 / 200 = $24.00; 4,800 / 100 = $48.00 | two ≤ $24 or one ≤ $48 ✓ |
+| Step 1, $5,600 | same | 5,400 / 200 = $27.00; 5,400 / 100 = $54.00 | two ≤ $27 or one ≤ $54 ✓ |
+| Step 1, two at $28 | 2 × 28 × 100 + 200 | 5,600 + 200 = $5,800 | needs $5,800 ✓ |
+| Step 9(a), single stock ≤ 50% | 100 × price ≤ 50% of cash | at $5,600: $27 × 100 = $2,700 = 48% | ✓ |
+| Example, $3,000 at $27 | 2,700 ≤ 3,000 − 200 | 2,700 ≤ 2,800 | ✓ |
+| Example, $5,600, two at $27 | 5,400 ≤ 5,600 − 200 | 5,400 ≤ 5,400 | ✓ |
+| Example, 30–45 DTE | 35 DTE | 30 ≤ 35 ≤ 45 | ✓ |
+| Example, strike ≥ basis | $28 ≥ $27 | | ✓ |
+| Example, 50% exit trigger | fill ≤ 0.50 × sale | 0.23 ≤ 0.235 (48.9%) | ✓ |
+| Example, 50% exit timing | day ≤ ⅓ of life | day 9 ≤ 35 / 3 = 11.7 | ✓ |
+
+`python3 scripts/check_handoff.py 001` output (pasted):
+```
+sources count (unique URLs in 01-research.md): 29
+fact-check rows: 77
+totals line: 77 rows -> 61 as-is, 12 fixed, 4 removed
+PASS
+```
 
 ## Alternative strategy ideas
 1. **Wheel-first (CSP entry).** Start by selling a 30–45 DTE, 0.25–0.30Δ cash-secured put instead of buying shares; covered calls only after assignment. Same downside, gets paid while waiting to buy (G1–G3). Webull Level 1.

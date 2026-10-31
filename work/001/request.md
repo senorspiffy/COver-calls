@@ -2,7 +2,7 @@
 Type: IDEA
 Opened by: person
 Date: 2026-10-30
-Scope: RESEARCH TEAM ONLY (R1 -> R2 -> R3). Do not hand off to Implementation.
+Scope: RESEARCH ONLY (R1 -> R2 -> R3). Do not hand off to Implementation.
 
 ## What we want
 A good starting basis/strategy for selling covered calls.
