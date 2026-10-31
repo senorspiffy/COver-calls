@@ -168,7 +168,8 @@ def daily_report(scan):
                   f"{'' if ctx['vol_pct'] is not None else ' (fewer than 252 days of history)'}",
                   f"  - Spread at the chosen strike: {_fmt(ctx['spread'], 'usd') if ctx['spread'] is not None else 'n/a'}",
                   f"  - Days to earnings: "
-                  f"{_days_to(_date(ctx['next_earnings']), asof) if ctx.get('earnings_known', True) else 'n/a (not supplied)'}; "
+                  f"{_days_to(_date(ctx['next_earnings']), asof) if ctx.get('earnings_known', True) else 'n/a (not supplied)'}"
+                  f"{' (estimated: last report + earnings_gap_days)' if ctx.get('earnings_estimated') else ''}; "
                   f"days to ex-dividend: {_days_to(_date(ctx['ex_div_date']), asof) if ctx['ex_div_date'] else 'n/a (not supplied)'}"]
     if not scan["contexts"]:
         lines.append("- No ticker to trade today.")

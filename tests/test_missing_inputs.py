@@ -105,7 +105,8 @@ def drop_snapshot_iv(tmp_path, cfg):
     df["iv"] = float("nan")
     scan, md = _scan(tmp_path, cfg, df, meta)
     assert "SELL_CALL" in [d["action"] for d in scan["decisions"]]   # quotes carry their own delta
-    assert scan["equity"] != scan["equity"] and "equity n/a" in md     # NaN, shown as n/a
+    # 025: the open call is marked at its quoted mid, so equity no longer needs the iv input
+    assert scan["equity"] == scan["equity"] and "equity n/a" not in md
 
 
 def drop_bh_benchmark(tmp_path, cfg):

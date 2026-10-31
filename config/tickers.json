@@ -1,0 +1,30 @@
+{
+  "_about": "Per-ticker facts the broker feed does not carry. Fill only from a source; leave null when unknown (null earnings blocks a stock). Checked 2026-10-31, work/023.",
+  "F": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-28",
+    "ex_div_date": "2026-11-10",
+    "dividend": 0.15,
+    "sources": [
+      "https://www.businesswire.com/news/home/20261028111591/en/Ford-Reports-Third-Quarter-2026-Financial-Results/",
+      "ex_div_date = record date Nov 10 (T+1 settlement; release gives no ex-date)"
+    ]
+  },
+  "VALE": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-29",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": ["https://stockanalysis.com/stocks/vale/"]
+  },
+  "AAL": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-22",
+    "ex_div_date": null,
+    "dividend": 0.0,
+    "sources": ["https://stockanalysis.com/stocks/aal/", "https://stockanalysis.com/stocks/aal/dividend/ (no dividend since 2020)"]
+  }
+}

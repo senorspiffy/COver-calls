@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from .. import expiries
 from ..pricing import grid_range
 from ..rules import Day, Quote
+from ..tickers import enrich, load_facts
 from .base import Broker, LiveTradingDisabled, NoQuote, OrderRejected, OrderResult, chunk, occ_symbol, parse_occ, validate
 from .sim import SimBroker
 
@@ -86,10 +87,13 @@ def _num(item, *keys):
 
 
 class WebullSandboxBroker(Broker):
+    """paper=True (`--broker webull-paper`): Webull sandbox market data, fills simulated in the
+    local paper ledger at those quotes (sell at limit <= bid, buy at limit >= ask). Nothing is
+    sent to Webull's order endpoints in that mode."""
     name = "webull-sandbox"
 
     def __init__(self, cfg, dry_run=True, preview=False, live=False, env=None, sdk=None,
-                 ledger_path="state/sim_ledger.json", token_dir="state/webull_token", limiter=None):
+                 ledger_path="state/sim_ledger.json", token_dir="state/webull_token", limiter=None, paper=False):
         env = os.environ if env is None else env
         if live:
             raise LiveTradingDisabled("Live trading is not built.")
@@ -98,7 +102,10 @@ class WebullSandboxBroker(Broker):
         missing = [n for n in ("WEBULL_APP_KEY", "WEBULL_APP_SECRET") if not env.get(n)]
         if missing:
             raise ValueError(f"missing environment variables: {', '.join(missing)}")
-        self.cfg, self.dry_run, self.do_preview = cfg, dry_run, preview
+        self.cfg, self.dry_run, self.do_preview, self.paper = cfg, dry_run and not paper, preview, paper
+        self.facts = load_facts(cfg)
+        if paper:
+            self.name = "webull-paper"
         self.account_id = env.get("WEBULL_ACCOUNT_ID", "")
         self.sdk = sdk if sdk is not None else load_sdk()
         self.limiter = limiter or TokenBucket(1.0)
@@ -114,7 +121,7 @@ class WebullSandboxBroker(Broker):
         self._assert_sandbox()  # before any client is built: building one makes a network call
         self.trade = self.sdk.TradeClient(api)
         self.data = self.sdk.DataClient(api)
-        self.ledger = SimBroker(cfg, ledger_path=ledger_path)
+        self.ledger = SimBroker(cfg, ledger_path=ledger_path, quotes=self if paper else None)
         self.date = dt.date.today()
 
     def _assert_sandbox(self):
@@ -126,6 +133,8 @@ class WebullSandboxBroker(Broker):
     def advance(self, date):
         self._assert_sandbox()
         self.date = date
+        if self.paper:
+            return self.ledger.advance(date)
         return []   # dry-run: nothing fills, so the paper ledger has nothing to settle
 
     def _call(self, fn, *args, **kw):
@@ -141,7 +150,8 @@ class WebullSandboxBroker(Broker):
         price = _num(items[0], "price", "close", "last_price") if items else None
         if price is None:
             raise NoQuote(f"no sandbox quote for {ticker}")
-        return Day(self.date, price)  # earnings unknown → blocked (ccbot/missing.py)
+        # earnings unknown -> blocked (ccbot/missing.py) unless config/tickers.json supplies them
+        return enrich(Day(self.date, price), ticker, self.facts, self.cfg)
 
     def list_option_contracts(self, underlying, exp_from, exp_to, strike_lo, strike_hi):
         # SDK docs: start_date = exact expiration date, end_date = expiration lower bound.
@@ -198,6 +208,8 @@ class WebullSandboxBroker(Broker):
             validate(order, self.get_positions(), self.get_cash())
         except OrderRejected as exc:
             return OrderResult("REJECTED", detail=exc.reason)
+        if self.paper:
+            return self.ledger.submit(order)
         payload = to_sdk_payload(order)
         if self.dry_run:
             detail = "validated only"
@@ -223,4 +235,6 @@ class WebullSandboxBroker(Broker):
         return OrderResult("SUBMITTED", detail="sandbox order placed; paper ledger stays in SimBroker")
 
     def buy_shares(self, ticker, qty, limit):
+        if self.paper:
+            return self.ledger.buy_shares(ticker, qty, limit)
         return OrderResult("DRY_RUN", detail="stock orders are not sent by this adapter")
