@@ -2,8 +2,10 @@
 
 Screened 2026-10-31 (Saturday) for the 001 starter strategy. Research, not personal financial advice. No trades placed.
 
-## Bottom line
-- **Ford (F) is the clearest fit today.** It passes every test we could check: price, liquid options, earnings already out of the way, and a calm-ish volatility for a single stock.
+## Correction 2026-10-31 (item 025)
+Found by A1. Under 001 step 3 (Correction, item 005), a stock whose next earnings date is not published **fails** the earnings test (`EARNINGS_UNKNOWN`). Ford, Vale and American Airlines have not published theirs, so **none of them passes today under your own rule**. The paper bot would reject all three for that reason. The quarterly-cadence reasoning below (each just reported in late October, so the next report is probably late January) is a guess, not a published date. What changes it: the company announces its next date and it is after Dec 18, 2026, or you change the rule to accept an estimated date. Where the text below says "fits" or "passes", read "passes every other test we could check".
+
+- **Ford (F) is the clearest fit on every test except earnings**: price, liquid options and calm-ish volatility for a single stock. Its next earnings date isn't published, so it is `EARNINGS_UNKNOWN` today (see Correction).
 - **Vale (VALE) is a close second**, with one caveat: its quote is from Oct 26 and the strike next to the one you'd sell had very low open interest.
 - **American Airlines (AAL) is a maybe**: it fits on price and dates, but I couldn't see its option quotes near the strike you'd sell.
 - Everything else either has earnings before the December expiry (Nu, Itaú), options that are too thin (JETS, Itaú), or quotes too stale or broken to judge (KWEB, Nokia).
@@ -68,10 +70,10 @@ Screened 2026-10-31 (Saturday) for the 001 starter strategy. Research, not perso
 | T, PBR, KGC, KEY, PFE, KMI, WBD, AMCR | $20–47 | Over $15 (single stock). |
 | FXI, EWZ, SCHB, SCHD, XLF, SLV, ASHR, MCHI, EEM, VEA, IEFA, SPYM | $29–96 | Over $28 (ETF). |
 
-So this week **17 of 39** priced tickers (40 tried; SPLG's quote failed) fit the price limits, **8** were checked further, and **1 (Ford)** passes every test we could see.
+So this week **17 of 39** priced tickers (40 tried; SPLG's quote failed) fit the price limits, **8** were checked further, and **0** pass every test today: Ford passes all the others but is `EARNINGS_UNKNOWN` (see Correction).
 
 ## Your decision: two companies (2026-10-31)
-You chose to hold two companies. **Ford ($1,233) + Vale ($1,200) = $2,433**, leaving $567 in cash (the rule needs $200 or more). Each is under the 50% single-stock cap. Check both Dec 18 chains in Webull first (see the bottom line). If Vale's strike fails the liquidity check, American Airlines ($1,232) is the backup, and its chain needs the same check.
+You chose to hold two companies. **Ford ($1,233) + Vale ($1,200) = $2,433**, leaving $567 in cash (the rule needs $200 or more). This pair fits the price caps, but neither passes the earnings test until its next date is published (see Correction). Each is under the 50% single-stock cap. Check both Dec 18 chains in Webull first (see the bottom line). If Vale's strike fails the liquidity check, American Airlines ($1,232) is the backup, and its chain needs the same check.
 
 ## Data limits
 - Prices and IV are Cboe's delayed quotes. Most are from Oct 29–30, but VALE (Oct 26), KWEB (Oct 26), BBD, SNAP, T, KEY, LUMN, WBD and several ETFs were older; dates are in `work/023/01-research.md`.
