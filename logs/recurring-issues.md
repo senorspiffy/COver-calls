@@ -22,7 +22,7 @@ Occurrences: 4
 - 2026-10-30 | 002 (fixed by I2, 05 deviation 3) | 002/04 test_calendar | "Weekly picks 5–9 DTE on every Monday" – 0 of 522 Mondays
 
 ## RI-002: Missing or uncomputable data silently turned into a value
-Status: ESCALATED (7 occurrences). The guardrail added in 005/006 works for loader inputs. Two occurrences on the broker path got past it (014, still not started on 2026-10-31), and one in research text (025, 2026-10-31).
+Status: ESCALATED (7 occurrences). The guardrail added in 005/006 works for loader inputs. Two occurrences on the broker path got past it (014, still not started on 2026-11-01), and one in research text (025, fixed and merged in PR #6, 2026-10-31). 2026-11-01: no new occurrence.
 Root cause: when a value cannot be computed from the data available, the code fills, defaults, or tie-breaks it into a number (or into "OK") instead of keeping it NaN/n/a/unknown and saying why.
 Guardrail(s) added:
 - Standing rule (002/04 Revision 2). Tests (002): `test_realized_vol_uses_only_past_closes`, `test_no_option_sold_during_vol_warmup`, `test_pbo_undefined_on_too_few_months[0,1,7]`, `test_short_csv_reports_pbo_na_without_warnings`. They still pass.
@@ -30,8 +30,8 @@ Guardrail(s) added:
 - Fix 006: `bh_lots` (no `max(1,`), `bh_na_reason`, B&H n/a with reason, weekly report n/a.
 - Guardrail (005/006): `ccbot/missing.py::MISSING_POLICY` (9 rows); `tests/test_missing_inputs.py::test_drop_each_input[9]` + `test_policy_lists_every_optional_input`; `test_benchmark_cash_never_negative`; the widened grep in i2; the r3 step 3a and i1 step 1a policy lines; the i3 mutation step. A1 re-ran the mutations in scratch: `max(1,` in `bh_lots` → 3 failed; `else 0` in data.py → 2 failed; removing the screen's `EARNINGS_UNKNOWN` → 2 failed.
 - Proposed (014): `Day.q/dividend/div_next` default to NaN; extend the enumeration test to every `Day` default and broker capability flag; make the cap tests fail closed (`not (… <= …)`).
-- Proposed (025): r1/r3 report each screened ticker's bot reject code; an unpublished value stays UNKNOWN; test for blank `next_earnings` → `EARNINGS_UNKNOWN`.
-Why still ESCALATED: `test_policy_lists_every_optional_input` enumerates only `OPTIONAL_CSV_COLUMNS` and `OPTIONAL_SNAPSHOT_FIELDS`. Values that enter as dataclass defaults (`Day.q/dividend/div_next = 0.0`) or derived values (`capital`) are outside it, and the review grep cannot see them. I2 and I3 each flagged one (05 "Finding", 07 §1). A1 reproduced both. **Move to GUARDED when** 014's extended enumeration test is in and fails on the 0.0 defaults. 2026-10-31: the policy is enforced only in code. Research (023) filled an unknown earnings date with reasoning and told the person F and VALE pass. Also needs 025's research rule in r1/r3.
+- Fix 025 (merged PR #6): r1/r3 step 3a report each screened ticker's bot reject code; an unpublished value stays UNKNOWN (`MISSING_POLICY`); `test_drop_each_input[snapshot.next_earnings]` pins blank earnings → `EARNINGS_UNKNOWN`. A1 checked both agent files 2026-11-01.
+Why still ESCALATED: `test_policy_lists_every_optional_input` enumerates only `OPTIONAL_CSV_COLUMNS` and `OPTIONAL_SNAPSHOT_FIELDS`. Values that enter as dataclass defaults (`Day.q/dividend/div_next = 0.0`) or derived values (`capital`) are outside it, and the review grep cannot see them. I2 and I3 each flagged one (05 "Finding", 07 §1). A1 reproduced both. **Move to GUARDED when** 014's extended enumeration test is in and fails on the 0.0 defaults. 2026-10-31: the policy is enforced only in code. Research (023) filled an unknown earnings date with reasoning and told the person F and VALE pass. 025's research rule is now in r1/r3 (2026-10-31); still needs 014.
 Occurrences: 7
 - 2026-10-30 | 002 (fixed) | ccbot/data.py::realized_vol | warm-up vol back-filled from later closes (look-ahead); I3 06 first pass
 - 2026-10-30 | 002 (fixed) | ccbot/walkforward.py::pbo_cscv | empty CSCV blocks → NaN → PBO 0.000; held-out config tie-broken on 0 train years; I3 06 Re-verification
@@ -42,7 +42,7 @@ Occurrences: 7
 - 2026-10-31 | 025 | work/023/01-research.md L70/L79, screen-summary.md, work/001/03-handoff.md Correction "Step 1 and 9(a)" | F and VALE reported as passing; next earnings dates unpublished → `EARNINGS_UNKNOWN` by 001 step 3 and `screen._reject`
 
 ## RI-003: Scan calendar ignores exchange holidays
-Status: GUARDED (since 2026-10-30, 007; uncommitted)
+Status: GUARDED (since 2026-10-30, 007; merged in PR #2, 2026-10-31)
 Root cause: `expiries.business_days` is Mon–Fri with no holiday list, so holiday-moved expiries get the wrong date or symbol.
 Guardrail(s) added (007):
 - Fix: `config/holidays.json` (NYSE 2026–2028: 29 holidays, 5 early closes; A1 checked each date against the NYSE rules). `scan_calendar` raises outside `covers` and never falls back to Mon–Fri. `Broker.calendar`. The Thursday OCC fallback in webull_sandbox and sim. Early-close banner.
@@ -52,7 +52,7 @@ Occurrences: 1
 - 2026-10-30 | 007 (fixed) | ccbot/expiries.py, webull_sandbox.py L165 | June 2026 monthly computed as 06-19 (holiday); Thursday OCC fallback → []
 
 ## RI-004: Worked example not checked against the rule it shows
-Status: GUARDED (since 2026-10-30, 008; uncommitted)
+Status: GUARDED (since 2026-10-30, 008; merged in PR #2, 2026-10-31)
 Root cause: R3 checks an example's arithmetic but not whether each step meets the rule's thresholds/tick.
 Guardrail(s) added (008):
 - Fix: 001 § Correction, worked example: limit $0.23 (48.9% of $0.47), profit $23.80, day ≤ 11 of 35. A1 re-computed: 0.5 × 0.47 = 0.235 → $0.23 at the $0.01 tick; (0.47 − 0.23) × 100 − 0.20 = 23.80; 11 × 3 = 33 ≤ 35, 12 × 3 = 36 > 35.
@@ -64,7 +64,7 @@ Occurrences: 1
 ## RI-005: Numbers in the hand-off not re-checked against the rule they belong to
 Status: GUARDED (PR #3 merged 2026-10-31). Overlaps RI-004: item 018 and item 008 are the same 50% example, found by two separate runs.
 Root cause: R3 changes a rule (adds a buffer, sets a % trigger) but does not re-derive the thresholds and worked-example numbers from that rule's own formula, so the text and the check disagree.
-Guardrail(s) added: Self-check section in `templates/research-handoff.md` + R3 duty 5 + A1 spot-check (017, 018) - in PR daily-fixes/2026-10-30, GUARDED once merged
+Guardrail(s) added: Self-check section in `templates/research-handoff.md` + R3 duty 5 + A1 spot-check (017, 018); merged in PR #3. A1 checked every 025–030 Self-check 2026-11-01.
 Occurrences: 2
 - 2026-10-30 | 017 | work/001/03-handoff.md step 1, step 9(a) | "2 at ≥ $5.6k" / "one ≤ $55" fail step 1's own check `(price × 100 × positions) ≤ cash − $200` (need $5,800 / $5,700)
 - 2026-10-30 | 018 | work/001/03-handoff.md worked example | 50% exit filled at $0.24 on a $0.47 sale = 51.1% (> 50% trigger)
@@ -72,23 +72,24 @@ Occurrences: 2
 ## RI-006: Hand-counted totals in hand-off and logs
 Status: GUARDED (PR #3 merged 2026-10-31)
 Root cause: R3 counts fact-check rows by hand and "fixed" vs "removed" is undefined, so totals, the removed list and the log line drift apart.
-Guardrail(s) added: `scripts/check_handoff.py` run by R3, I3, A1 + fixed/removed definitions in template (019) - in PR daily-fixes/2026-10-30, GUARDED once merged
+Guardrail(s) added: `scripts/check_handoff.py` run by R3, I3, A1 + fixed/removed definitions in template (019); merged in PR #3. `--all` with LEGACY list since 028.
 Occurrences: 1
 - 2026-10-30 | 019 | work/001/03-handoff.md Totals + logs/research/2026-10-30.md 17:33 | 77 rows in table vs "76 rows → 60/12/4"; removed list has 7 entries vs "4 removed"
 
 ## RI-007: Work used before its pipeline steps ran
-Status: ESCALATED (3 occurrences, all found 2026-10-31). There was no guardrail: nothing checked that an item's step files exist before its result was used or merged.
+Status: ESCALATED (3 occurrences, all found 2026-10-31). 2026-11-01: 026 is merged and `check_pipeline.py` shows SKIPPED: none, which met the condition below. A1 kept it ESCALATED because the guardrail can be bypassed: a `Waived: 03 06` line from anyone turns an item with no fact check or verification into `complete` (probe, 031). No step has been skipped since; the 023/024 waivers were approved by the person (PR #6).
 Root cause: run-item.md has no rule for a person asking to go faster, and no check compares an item's files with its Scope. Steps are skipped silently; fixes made in other threads skip the pipeline entirely.
-Guardrail(s) added: proposed in 026: `scripts/check_pipeline.py` + test (A1 daily, I3 per item); `Scope: FAST (person, <date>)` may skip R2/I1, never R3 (claims) or I3; a fix made outside the pipeline gets a work item the same day.
-**Move to GUARDED when:** 026 is merged and the next daily run of `check_pipeline.py` shows no new skipped step.
+Guardrail(s) added: 026 (merged PR #6): `scripts/check_pipeline.py` + `tests/test_pipeline_check.py` (A1 daily, I3 per item); `Scope: FAST (person, <date>)` may skip R2/I1, never R3 or I3; `Waived:` lines; a fix made outside the pipeline gets a work item the same day.
+Proposed (031): a waiver of 03 or 06 counts only when the person gave it; otherwise SKIPPED.
+**Move to GUARDED when:** 031 is merged and the probe item (A1-written `Waived: 03 06`) shows SKIPPED.
 Occurrences: 3
 - 2026-10-31 | 026 | work/023 | RESEARCH ONLY item stopped after R1 (no 02/03/07); result changed 001 and opened 024
 - 2026-10-31 | 026 | work/024 | FULL item built and merged with only request + 05 ("short path"); no I3
 - 2026-10-31 | 026 | commits d994307, cf3ba3b | UTF-8 fix with no work item or log line; first commit missed 6 calls and added 3.12-only syntax (027)
 
 ## RI-008: Code not checked against the minimum Python the project declares
-Status: OPEN (fix proposed in 027)
+Status: GUARDED (027 merged PR #6; 2026-11-01 A1 compiled every tracked `.py` with python3.11: no errors). 032 proposes running that compile as a test.
 Root cause: tests run only on the machine's Python (3.13); `pyproject.toml` says ≥ 3.10.
-Guardrail(s) added: proposed in 027: token test for same-quote nested f-strings; I3 runs `python3.11 -m py_compile` where available.
+Guardrail(s) added (027): `test_fstrings_parse_on_python_310` + `test_same_quote_check_catches_the_027_line`; I3 step 2 runs `python3.11 -m py_compile` where available.
 Occurrences: 1
 - 2026-10-31 | 027 | scripts/check_handoff.py L49 | `f"...{...read_text(encoding="utf-8")...}"` → SyntaxError on Python 3.11
