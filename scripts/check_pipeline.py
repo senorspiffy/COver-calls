@@ -9,7 +9,8 @@ Required step files by `Scope:` in request.md (no Scope line = FULL):
   FAST           01 03 05 06 07   (the person asked to go faster: R2 and I1 may be skipped,
                                     never R3's fact check or I3's verification)
 A `Waived: <steps> (<who>, <date>: <why>)` line in request.md excuses those steps; it is
-printed every run so it stays visible.
+printed every run so it stays visible. 03 (fact check) and 06 (verification) can be waived
+only by the person: <who> must be `person`, otherwise the item is SKIPPED (item 031).
 
 Each item is one of:
   SKIPPED      a later required step exists while an earlier one is missing, or another
@@ -18,7 +19,9 @@ Each item is one of:
   STUCK        only request.md, and its Date is at least 1 day before --today
   not started  only request.md, opened today
   in progress  the required steps present so far have no gap
-  complete     every required step is present
+  awaiting A1  every required step is present, but 07-audit-task.md has no `A1 result:` line
+               (items dated 2026-10-31 or later; item 033). Listed, not an error.
+  complete     every required step is present and A1 recorded its result
 Items in LEGACY are older than this check and are reported as such.
 """
 import datetime as dt
@@ -32,6 +35,10 @@ STEPS = {"01": "01-research.md", "02": "02-improvements.md", "03": "03-handoff.m
 REQUIRED = {"FULL": ["01", "02", "03", "04", "05", "06", "07"],
             "RESEARCH ONLY": ["01", "02", "03", "07"],
             "FAST": ["01", "03", "05", "06", "07"]}
+# Only the person may waive these (run-item.md: R3 and I3 are never skipped; item 031).
+PERSON_ONLY = ("03", "06")
+# A1 records `A1 result: PASS | FAIL (<date>, <where>)` in 07 from this date on (item 033).
+A1_RESULT_FROM = dt.date(2026, 10, 31)
 # Older than the Scope/07 rules. Never add a new item here.
 LEGACY = {"001": "RESEARCH ONLY before 07-audit-task existed (item 021)",
           **{i: "07 is combined in work/003/07-audit-task.md" for i in ("004", "005", "006", "007", "008")}}
@@ -42,17 +49,22 @@ def read_request(path):
     scope = re.search(r"^Scope:\s*(FULL|RESEARCH ONLY|FAST)\b", text, re.M)
     date = re.search(r"^Date:\s*(\d{4}-\d{2}-\d{2})", text, re.M)
     waived = re.search(r"^Waived:\s*([0-9 ,]+)(.*)$", text, re.M)
+    who = re.match(r"\s*\(\s*([^,:)]+)", waived.group(2)) if waived else None
     return (scope.group(1) if scope else "FULL",
             dt.date.fromisoformat(date.group(1)) if date else None,
-            (re.findall(r"\d\d", waived.group(1)), waived.group(0).strip()) if waived else ([], ""))
+            (re.findall(r"\d\d", waived.group(1)), waived.group(0).strip(),
+             who.group(1).strip().lower() if who else "") if waived else ([], "", ""))
 
 
 def classify(item_dir, today):
     """(status, detail) for one work item folder."""
-    scope, opened, (waived, waived_line) = read_request(item_dir / "request.md")
+    scope, opened, (waived, waived_line, who) = read_request(item_dir / "request.md")
+    extra = f"; {waived_line}" if waived_line else ""
+    blocked = [s for s in waived if s in PERSON_ONLY and who != "person"]
+    if blocked:
+        return "SKIPPED", f"{scope}: {' '.join(blocked)} can be waived only by the person{extra}"
     need = [s for s in REQUIRED[scope] if s not in waived]
     have = [s for s in need if (item_dir / STEPS[s]).exists()]
-    extra = f"; {waived_line}" if waived_line else ""
     if not have and not any(f.name != "request.md" for f in item_dir.iterdir()):
         if opened is not None and (today - opened).days >= 1:
             return "STUCK", f"{scope}, opened {opened}, {(today - opened).days} day(s) with request.md only{extra}"
@@ -66,6 +78,10 @@ def classify(item_dir, today):
     if results and unchecked:
         return "SKIPPED", f"{scope}: {', '.join(results)} written before {' '.join(unchecked)}{extra}"
     if len(have) == len(need):
+        audit = item_dir / STEPS["07"]
+        if (opened is not None and opened >= A1_RESULT_FROM and audit.exists()
+                and not re.search(r"^A1 result:", audit.read_text(encoding="utf-8"), re.M)):
+            return "awaiting A1", f"{scope}{extra}"
         return "complete", f"{scope}{extra}"
     return "in progress", f"{scope}: next {need[len(have)]}{extra}"
 
@@ -77,7 +93,7 @@ def main(argv):
     elif argv:
         sys.exit(__doc__)
     work = Path("work")
-    skipped, stuck = [], []
+    skipped, stuck, awaiting = [], [], []
     for d in sorted(p for p in work.iterdir() if (p / "request.md").exists()):
         status, detail = classify(d, today)
         if d.name in LEGACY and status in ("SKIPPED", "in progress"):
@@ -87,7 +103,10 @@ def main(argv):
             skipped.append(d.name)
         if status == "STUCK":
             stuck.append(d.name)
+        if status == "awaiting A1":
+            awaiting.append(d.name)
     print(f"STUCK: {', '.join(stuck) or 'none'}")
+    print(f"AWAITING A1: {', '.join(awaiting) or 'none'}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped else 0
 
