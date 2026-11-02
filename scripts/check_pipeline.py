@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that every work item's step files match its Scope (items 026 and 029, RI-007).
+"""Check that every work item's step files match its Scope (items 026, 029, 034; RI-007, RI-009).
 
 Usage: python3 scripts/check_pipeline.py [--today YYYY-MM-DD]   (run from the repo root)
 
@@ -20,12 +20,20 @@ Each item is one of:
   not started  only request.md, opened today
   in progress  the required steps present so far have no gap
   awaiting A1  every required step is present, but 07-audit-task.md has no `A1 result:` line
-               (items dated 2026-10-31 or later; item 033). Listed, not an error.
+               (every item except the closed PRE_A1_LINE list; items 033, 035). Listed, not an error.
+  IN PR        stuck, not started or in progress here, but an unmerged remote branch has more of
+               its step files (item 034). Listed, not an error: it waits for the person's merge.
   complete     every required step is present and A1 recorded its result
 Items in LEGACY are older than this check and are reported as such.
+
+When run inside a git repo, it also prints OPEN BRANCHES: every remote branch not merged into
+HEAD, the work items it carries, whether it merges cleanly into HEAD (`git merge-tree`), and
+whether it edits logs/recurring-issues.md, which only A1's daily commit on main should (036).
+Outside a git repo (or without git) that part is skipped.
 """
 import datetime as dt
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -37,8 +45,11 @@ REQUIRED = {"FULL": ["01", "02", "03", "04", "05", "06", "07"],
             "FAST": ["01", "03", "05", "06", "07"]}
 # Only the person may waive these (run-item.md: R3 and I3 are never skipped; item 031).
 PERSON_ONLY = ("03", "06")
-# A1 records `A1 result: PASS | FAIL (<date>, <where>)` in 07 from this date on (item 033).
-A1_RESULT_FROM = dt.date(2026, 10, 31)
+# Items whose audit was recorded only in a daily report, before 07 carried an
+# `A1 result:` line (item 033). Every other item needs the line (item 035: a date cutoff let
+# items opened early but built later through). Never add a new item here.
+PRE_A1_LINE = {"002", "003", "017", "018", "019", "020", "021", "022"}
+RECURRING = "logs/recurring-issues.md"
 # Older than the Scope/07 rules. Never add a new item here.
 LEGACY = {"001": "RESEARCH ONLY before 07-audit-task existed (item 021)",
           **{i: "07 is combined in work/003/07-audit-task.md" for i in ("004", "005", "006", "007", "008")}}
@@ -79,11 +90,53 @@ def classify(item_dir, today):
         return "SKIPPED", f"{scope}: {', '.join(results)} written before {' '.join(unchecked)}{extra}"
     if len(have) == len(need):
         audit = item_dir / STEPS["07"]
-        if (opened is not None and opened >= A1_RESULT_FROM and audit.exists()
+        if (item_dir.name not in PRE_A1_LINE and audit.exists()
                 and not re.search(r"^A1 result:", audit.read_text(encoding="utf-8"), re.M)):
             return "awaiting A1", f"{scope}{extra}"
         return "complete", f"{scope}{extra}"
     return "in progress", f"{scope}: next {need[len(have)]}{extra}"
+
+
+def _git(*args):
+    """stdout and exit code of a git command in the current directory, or None if git is
+    missing or this directory is not the top of a git work tree."""
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, encoding="utf-8")
+        if top.returncode != 0 or Path(top.stdout.strip()).resolve() != Path.cwd().resolve():
+            return None
+        r = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    return r.stdout, r.returncode
+
+
+def open_branches():
+    """[(branch, {item: set of step codes}, conflicts, edits_recurring)] for every remote
+    branch not merged into HEAD (item 034)."""
+    out = _git("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
+    if out is None or out[1] != 0:
+        return []
+    found = []
+    for ref in out[0].split():
+        if ref.endswith("/HEAD") or "/" not in ref:
+            continue
+        # items the branch changes (since it left HEAD), with every step file it has for them
+        changed = _git("diff", "--name-only", f"HEAD...{ref}", "--", "work/")
+        touched = {n.split("/")[1] for n in (changed[0].splitlines() if changed else []) if n.count("/") == 2}
+        items = {i: set() for i in touched}
+        listing = _git("ls-tree", "-r", "--name-only", ref, "--", "work/")
+        for name in (listing[0].splitlines() if listing and listing[1] == 0 else []):
+            parts = name.split("/")
+            if len(parts) == 3 and parts[1] in items and parts[2] in STEPS.values():
+                items[parts[1]].add(parts[2][:2])
+        merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
+        conflicts = None
+        if merge is not None and merge[1] in (0, 1):
+            conflicts = merge[0].splitlines()[1:] if merge[1] == 1 else []
+        diff = _git("diff", "--name-only", f"HEAD...{ref}", "--", RECURRING)
+        found.append((ref, items, conflicts, bool(diff and diff[0].strip())))
+    return found
 
 
 def main(argv):
@@ -93,11 +146,19 @@ def main(argv):
     elif argv:
         sys.exit(__doc__)
     work = Path("work")
-    skipped, stuck, awaiting = [], [], []
+    skipped, stuck, awaiting, in_pr = [], [], [], []
+    branches = open_branches()
     for d in sorted(p for p in work.iterdir() if (p / "request.md").exists()):
         status, detail = classify(d, today)
         if d.name in LEGACY and status in ("SKIPPED", "in progress"):
             status, detail = "LEGACY", LEGACY[d.name]
+        if status in ("STUCK", "not started", "in progress"):
+            here = {s for s, f in STEPS.items() if (d / f).exists()}
+            best = max(((len(items.get(d.name, set()) - here), ref, items.get(d.name, set()))
+                        for ref, items, _, _ in branches), default=(0, "", set()))
+            if best[0] > 0:
+                status, detail = "IN PR", f"{best[1]} has {' '.join(sorted(best[2]))}; was {status} here"
+                in_pr.append(d.name)
         print(f"{d.name}: {status} ({detail})")
         if status == "SKIPPED":
             skipped.append(d.name)
@@ -107,6 +168,14 @@ def main(argv):
             awaiting.append(d.name)
     print(f"STUCK: {', '.join(stuck) or 'none'}")
     print(f"AWAITING A1: {', '.join(awaiting) or 'none'}")
+    print(f"IN PR: {', '.join(in_pr) or 'none'}")
+    if branches:
+        print("OPEN BRANCHES (not merged into HEAD):")
+        for ref, items, conflicts, recurring in branches:
+            merge = ("merge not checked" if conflicts is None else
+                     f"CONFLICTS: {', '.join(conflicts)}" if conflicts else "merges cleanly")
+            note = f"; edits {RECURRING} (item 036)" if recurring else ""
+            print(f"  {ref}: items {', '.join(sorted(items)) or 'none'}; {merge}{note}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped else 0
 

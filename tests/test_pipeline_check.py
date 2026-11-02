@@ -1,6 +1,10 @@
 """scripts/check_pipeline.py (items 026, 029; RI-007) and check_handoff.py --all (item 028)."""
+import os
+import shutil
 import subprocess
 import sys
+
+import pytest
 
 from conftest import REPO
 
@@ -130,9 +134,64 @@ def test_complete_needs_a1_result(tmp_path):
     _item(tmp_path, "110", ALL, a1=None)
     _item(tmp_path, "111", ALL)
     _item(tmp_path, "112", ALL, date="2026-10-30", a1=None)
+    _item(tmp_path, "017", ALL, date="2026-10-30", a1=None)
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-01")
     assert code == 0
     assert "110: awaiting A1 (FULL)" in out
     assert "111: complete (FULL)" in out
-    assert "112: complete (FULL)" in out
-    assert "AWAITING A1: 110" in out
+    # Item 035: opened before 2026-10-31 but not on the pre-033 list (the 009-016 case)
+    assert "112: awaiting A1 (FULL)" in out
+    assert "017: complete (FULL)" in out
+    assert "AWAITING A1: 110, 112" in out
+    assert "OPEN BRANCHES" not in out   # not a git repo: branch scan skipped
+
+
+def _git(cwd, *args):
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+           "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
+
+
+def _repo_with_open_branch(tmp_path):
+    """origin + clone. main: item 040 request only (and a recurring-issues line). Branch
+    `fix`, pushed and not merged: 040 fully built, and its own recurring-issues line."""
+    origin, repo = tmp_path / "origin.git", tmp_path / "repo"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    _git(tmp_path, "clone", "-q", str(origin), str(repo))
+    _git(repo, "checkout", "-q", "-b", "main")
+    _item(repo, "040", [], date="2026-10-30")
+    (repo / "logs").mkdir()
+    (repo / "logs" / "recurring-issues.md").write_text("RI\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "main")
+    _git(repo, "push", "-q", "origin", "main")
+    _git(repo, "checkout", "-q", "-b", "fix")
+    for f in ALL:
+        (repo / "work" / "040" / f).write_text("x\nA1 result: PASS (test)\n", encoding="utf-8")
+    (repo / "logs" / "recurring-issues.md").write_text("RI\nfrom fix\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "fix")
+    _git(repo, "push", "-q", "origin", "fix")
+    _git(repo, "checkout", "-q", "main")
+    return repo
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_item_built_on_open_branch_is_in_pr_not_stuck(tmp_path):
+    """Item 034 (RI-009): the 2026-11-01 case, 009-016 done in PR #7 but reported STUCK."""
+    repo = _repo_with_open_branch(tmp_path)
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    assert code == 0
+    assert "040: IN PR (origin/fix has 01 02 03 04 05 06 07; was STUCK here)" in out
+    assert "STUCK: none" in out
+    assert "IN PR: 040" in out
+    assert "  origin/fix: items 040; merges cleanly; edits logs/recurring-issues.md (item 036)" in out
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_open_branch_conflict_is_reported(tmp_path):
+    """Item 034: PR #7 conflicted with main and nobody said so."""
+    repo = _repo_with_open_branch(tmp_path)
+    (repo / "logs" / "recurring-issues.md").write_text("RI\nfrom main\n", encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", "daily audit")
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    assert code == 0
+    assert "  origin/fix: items 040; CONFLICTS: logs/recurring-issues.md; edits" in out
