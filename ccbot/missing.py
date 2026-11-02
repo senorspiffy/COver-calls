@@ -14,6 +14,13 @@ MISSING_POLICY = {
     "snapshot.ex_div_date": ("n/a", "days to ex-dividend: n/a (not supplied)"),
     "snapshot.iv": ("n/a", "equity n/a while an option is held (no vol to mark it); quotes keep their own delta"),
     "bh_benchmark": ("n/a", "100 shares cost more than cash − buffer"),
-    "broker.div_next": ("known_gap", "broker Day.div_next is 0.0, so the ex-dividend early-assignment "
-                                     "check is off on the broker path; A1 to open an item"),
+    # Broker path (014). Snapshots carry the ex-dividend date but no amount.
+    "broker.div_next": ("n/a", "EARLY_ASSIGN_CHECK_NA event: ITM call with an ex-date ahead and no amount; "
+                               "0.0 only when the ex-date is known and not the next trading day"),
+    "broker.dividend": ("n/a", "DIVIDEND_UNKNOWN event on the ex-date: amount not supplied, nothing credited"),
+    "broker.q": ("fallback", "q = 0 for model marks and the early-assignment time value on the broker path; "
+                             "entry uses the broker's own quotes (delta, mid)"),
+    "model.oi": ("fallback", "model-replay quotes have no OI; the screen runs with require_oi=False "
+                             "(SimBroker series mode, tests only, not reachable from the CLI)"),
+    "derived.capital": ("block", "CAPITAL_UNKNOWN"),   # equity NaN (e.g. option held, snapshot iv blank)
 }

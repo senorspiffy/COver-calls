@@ -7,7 +7,7 @@ from . import expiries
 from .pricing import pick_strike
 from .rules import CONTRACT
 
-TESTS = ("NO_QUOTES", "PRICE_CAP", "SINGLE_NAME_CAP", "NO_EXPIRY", "NO_STRIKE_IN_TOLERANCE",
+TESTS = ("NO_QUOTES", "CAPITAL_UNKNOWN", "PRICE_CAP", "SINGLE_NAME_CAP", "NO_EXPIRY", "NO_STRIKE_IN_TOLERANCE",
          "SPREAD", "OI_UNKNOWN", "OI", "EARNINGS_UNKNOWN", "EARNINGS")
 
 
@@ -17,9 +17,12 @@ def _reject(rows, cfg, capital, asof, calendar, require_oi):
         return "NO_QUOTES"
     first = rows.iloc[0]
     price = float(first["underlying_price"])
-    if price * CONTRACT > capital - cfg["cash_buffer"]:
+    if capital != capital:   # NaN: equity can't be marked (missing.py derived.capital)
+        return "CAPITAL_UNKNOWN"
+    # written to fail closed: a NaN on either side never passes (014)
+    if not price * CONTRACT <= capital - cfg["cash_buffer"]:
         return "PRICE_CAP"
-    if first["asset_type"] != "etf" and price * CONTRACT > cfg["max_single_name_frac"] * capital:
+    if first["asset_type"] != "etf" and not price * CONTRACT <= cfg["max_single_name_frac"] * capital:
         return "SINGLE_NAME_CAP"
     calls = rows[(rows["type"] == "C") & rows["symbol"].notna()]
     monthly = expiries.third_fridays(calendar)

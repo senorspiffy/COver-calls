@@ -50,6 +50,8 @@ def test_short_csv_reports_pbo_na_without_warnings(tmp_path, recwarn):
         assert main(["backtest", "--data", str(p), "--quick", "--asof", "2026-10-30", "--out", str(tmp_path)]) == 0
     md = (tmp_path / "backtest_SHORT_2026-10-30.md").read_text(encoding="utf-8")
     pbo = next(line for line in md.splitlines() if line.startswith("- PBO"))
-    assert "n/a (needs >= 8 non-held-out months" in pbo and "0.000" not in pbo
-    assert "not selected (no train years)" in md
+    assert "n/a (needs >= 8 non-held-out months, have 0)" in pbo and "0.000" not in pbo
+    # 010: one-config variants are fixed, so their held-out CAGR is shown; only V4 needs train years
+    assert "| V0 | V0 (fixed) | -1.94% |" in md
+    assert "| V4 | not selected (no train years) | n/a |" in md
     assert not [w for w in recwarn if issubclass(w.category, RuntimeWarning)]

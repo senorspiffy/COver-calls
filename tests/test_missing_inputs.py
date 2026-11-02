@@ -1,6 +1,8 @@
 """RI-002 guardrail (005/006): drop each optional input in MISSING_POLICY and check that the run
 gives the named reason or n/a, with no exception and no invented number."""
+import dataclasses
 import datetime as dt
+import math
 import shutil
 import warnings
 
@@ -14,6 +16,7 @@ from ccbot.bot import run_daily
 from ccbot.broker.sim import SimBroker
 from ccbot.data import OPTIONAL_CSV_COLUMNS, OPTIONAL_SNAPSHOT_FIELDS, load_prices, load_snapshots
 from ccbot.missing import MISSING_POLICY
+from ccbot.rules import Day, Short, State, settle_day
 from ccbot.screen import feasible_universe
 from ccbot.variants import BY_ID
 
@@ -118,19 +121,71 @@ def drop_bh_benchmark(tmp_path, cfg):
     assert f"n/a ({MISSING_POLICY['bh_benchmark'][1]})" in _backtest_md(tmp_path, p)
 
 
-def drop_broker_div_next(tmp_path, cfg):
-    # Known gap, pinned so that a fix has to update the policy: broker Days carry div_next 0.0.
+def _sim_day(tmp_path, cfg, date):
+    """SimBroker snapshot Day for SYNTH_A (ETF, ex-dividend 2026-12-18, no amount) on `date`."""
     df, meta = load_snapshots(SAMPLE / "SYNTH_SNAPSHOTS.csv")
-    broker = SimBroker(cfg, snapshots=df, meta=meta, ledger_path=tmp_path / "l.json")
-    broker.advance(DATE)
-    assert broker.get_underlying_quote("SYNTH_A").div_next == 0.0
-    assert MISSING_POLICY["broker.div_next"][0] == "known_gap"
+    broker = SimBroker(cfg, snapshots=df.assign(ts=date), meta=meta, ledger_path=tmp_path / f"{date}.json")
+    broker.advance(date)
+    return broker.get_underlying_quote("SYNTH_A")
+
+
+EX = dt.date(2026, 12, 18)
+
+
+def drop_broker_div_next(tmp_path, cfg):
+    """014: known ex-date not tomorrow → 0.0; eve of the ex-date with no amount → NaN, and an
+    ITM call gets EARLY_ASSIGN_CHECK_NA instead of a silent skip."""
+    assert _sim_day(tmp_path, cfg, DATE).div_next == 0.0
+    eve = _sim_day(tmp_path, cfg, dt.date(2026, 12, 17))
+    assert math.isnan(eve.div_next)
+    st = State(cash=0.0, ticker="SYNTH_A", shares=100, basis=20.0,
+               option=Short("C", 22.0, EX, 1, 0.5, DATE))
+    events = settle_day(st, eve, cfg)
+    assert [e["action"] for e in events] == ["EARLY_ASSIGN_CHECK_NA"] and st.shares == 100
+    assert MISSING_POLICY["broker.div_next"][0] == "n/a"
+
+
+def drop_broker_dividend(tmp_path, cfg):
+    """014: on the ex-date with no amount, nothing is credited and DIVIDEND_UNKNOWN is logged."""
+    day = _sim_day(tmp_path, cfg, EX)
+    assert math.isnan(day.dividend)
+    st = State(cash=0.0, ticker="SYNTH_A", shares=100, basis=20.0)
+    events = settle_day(st, day, cfg)
+    assert [e["action"] for e in events] == ["DIVIDEND_UNKNOWN"] and st.cash == 0.0
+
+
+def drop_broker_q(tmp_path, cfg):
+    """014: q is a labelled fallback on the broker path, set explicitly (not a Day default)."""
+    assert _sim_day(tmp_path, cfg, DATE).q == 0.0
+    assert MISSING_POLICY["broker.q"][0] == "fallback"
+
+
+def drop_model_oi(tmp_path, cfg):
+    """Model-replay quotes have no OI: the screen skips OI only when told the broker has none."""
+    df, _ = load_snapshots(SAMPLE / "SYNTH_SNAPSHOTS.csv")
+    df["oi"] = float("nan")
+    assert feasible_universe(cfg, df, cfg["cash"], DATE)[1]["SYNTH_A"] == "OI_UNKNOWN"
+    assert "SYNTH_A" in feasible_universe(cfg, df, cfg["cash"], DATE, require_oi=False)[0]
+    series = load_prices(SAMPLE / "SYNTH_A.csv")
+    assert SimBroker(cfg, series=series, ledger_path=tmp_path / "s.json").quotes_have_oi is False
+
+
+def drop_derived_capital(tmp_path, cfg):
+    """014: NaN capital passes no ticker (it used to pass both cap tests)."""
+    df, _ = load_snapshots(SAMPLE / "SYNTH_SNAPSHOTS.csv")
+    passing, rejects = feasible_universe(cfg, df, float("nan"), DATE)
+    assert passing == [] and set(rejects.values()) == {"CAPITAL_UNKNOWN"}
+    # the cap tests themselves fail closed: an unpriced underlying never passes PRICE_CAP
+    df["underlying_price"] = float("nan")
+    assert set(feasible_universe(cfg, df, cfg["cash"], DATE)[1].values()) == {"PRICE_CAP"}
 
 
 DROPS = {"csv.earnings": drop_csv_earnings, "csv.dividend": drop_csv_dividend, "csv.iv": drop_csv_iv,
          "snapshot.oi": drop_snapshot_oi, "snapshot.next_earnings": drop_snapshot_next_earnings,
          "snapshot.ex_div_date": drop_snapshot_ex_div_date, "snapshot.iv": drop_snapshot_iv,
-         "bh_benchmark": drop_bh_benchmark, "broker.div_next": drop_broker_div_next}
+         "bh_benchmark": drop_bh_benchmark, "broker.div_next": drop_broker_div_next,
+         "broker.dividend": drop_broker_dividend, "broker.q": drop_broker_q, "model.oi": drop_model_oi,
+         "derived.capital": drop_derived_capital}
 
 
 @pytest.mark.parametrize("key", list(MISSING_POLICY))
@@ -143,3 +198,40 @@ def test_policy_lists_every_optional_input():
     keys = {f"csv.{c}" for c in OPTIONAL_CSV_COLUMNS} | {f"snapshot.{c}" for c in OPTIONAL_SNAPSHOT_FIELDS}
     assert keys <= set(MISSING_POLICY)
     assert set(DROPS) == set(MISSING_POLICY)
+
+
+# Every Day field with a default, and where its "unknown" is handled (014). A new field with a
+# default fails here until it is listed; a float default other than NaN fails the next test.
+DAY_DEFAULTS = {
+    "prev_close": "None = first scan; only the up-day variant reads it (NOT_UP_DAY)",
+    "vol": "NaN; snapshot.iv / csv.iv",
+    "q": "broker.q", "dividend": "broker.dividend", "div_next": "broker.div_next",
+    "vol_pct": "NaN; report shows n/a",
+    "next_earnings": "snapshot.next_earnings", "ex_div_date": "snapshot.ex_div_date",
+    "asset_type": "'stock' fails safe: a stock needs a known earnings date (EARNINGS_UNKNOWN)",
+    "vol_warmup": "False; the backtest sets it from the vol series",
+    "earnings_known": "False fails safe (EARNINGS_UNKNOWN)",
+}
+
+
+def test_every_day_default_is_listed():
+    defaulted = {f.name for f in dataclasses.fields(Day) if f.default is not dataclasses.MISSING}
+    assert defaulted == set(DAY_DEFAULTS)
+    for v in DAY_DEFAULTS.values():
+        key = v.split(";")[0]
+        assert "." not in key or " " in key or key in MISSING_POLICY, key
+
+
+def test_day_float_defaults_are_nan():
+    """RI-002: a numeric Day default is unknown (NaN), never 0.0."""
+    for f in dataclasses.fields(Day):
+        if f.type in (float, "float") and f.default is not dataclasses.MISSING:
+            assert math.isnan(f.default), f.name
+
+
+def test_broker_capability_flags_have_policy_rows():
+    from ccbot.broker.base import Broker
+    flags = {k for k, v in vars(Broker).items() if isinstance(v, bool)}
+    # data capability flags need a policy row; the others label the run, they carry no market data
+    labels = {"dry_run", "synthetic", "modelled"}
+    assert flags - labels == {"quotes_have_oi"} and "model.oi" in MISSING_POLICY
