@@ -72,9 +72,9 @@ class Day:
     close: float
     prev_close: float | None = None
     vol: float = float("nan")
-    q: float = 0.0
-    dividend: float = 0.0
-    div_next: float = 0.0
+    q: float = float("nan")          # unknown unless the source sets it (014, missing.py)
+    dividend: float = float("nan")   # cash dividend going ex today; NaN = unknown
+    div_next: float = float("nan")   # dividend going ex on the next trading day; NaN = unknown
     vol_pct: float = float("nan")
     next_earnings: dt.date | None = None
     ex_div_date: dt.date | None = None
@@ -191,6 +191,10 @@ def settle_day(state, day, cfg):
         amount = day.dividend * state.shares
         state.cash += amount
         events.append({"action": "DIVIDEND", "price": day.dividend, "qty": state.shares, "amount": amount})
+    elif math.isnan(day.dividend) and state.shares > 0 and day.ex_div_date == day.date:
+        # ex-date known, amount not supplied: nothing credited, said so (014)
+        events.append({"action": "DIVIDEND_UNKNOWN", "price": None, "qty": state.shares, "amount": None,
+                       "detail": "ex-dividend today; amount not supplied, cash not credited"})
     o = state.option
     if o is not None:
         itm = day.close > o.strike if o.kind == "C" else day.close < o.strike
@@ -206,6 +210,12 @@ def settle_day(state, day, cfg):
             time_value = bs_price(day.close, o.strike, T, cfg["r"], day.q, day.vol, "C") - (day.close - o.strike)
             if time_value < day.div_next:
                 events.append(_assign(state, day, cfg, "EARLY_ASSIGNED"))
+        elif o.kind == "C" and itm and math.isnan(day.div_next) and day.ex_div_date is not None \
+                and day.ex_div_date > day.date and day.ex_div_date <= o.expiry:
+            # ex-date ahead and the amount unknown: the early-assignment check can't run (014)
+            events.append({"action": "EARLY_ASSIGN_CHECK_NA", "kind": o.kind, "strike": o.strike,
+                           "expiry": o.expiry, "qty": o.qty, "price": None, "fees": 0.0,
+                           "detail": f"ITM call, ex-dividend {day.ex_div_date}; amount not supplied"})
     state.last_settled = day.date
     return events
 

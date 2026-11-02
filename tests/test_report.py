@@ -116,3 +116,21 @@ def test_bh_na_line_weekly(cfg):
     assert "- Buy-and-hold P/L: n/a (100 shares cost more than cash − buffer)" in md
     ok = weekly_report("2026-10-30", trades, [{**s, "context": {"ticker": "X", "price": 24.0}} for s in scans], cfg)
     assert "- Buy-and-hold P/L: $0.00 (100 sh X" in ok
+
+
+def test_etf_earnings_shown_as_none_not_na(tmp_path, cfg):
+    """016: an ETF's known 'no earnings' reads 'none (ETF)'; 'n/a' is kept for unknown."""
+    import datetime as dt
+    md = _scan(tmp_path, cfg, dt.date(2026, 10, 30))
+    line = next(l for l in md.splitlines() if "Days to earnings" in l)
+    assert line.strip() == "- Days to earnings: none (ETF); days to ex-dividend: 49"
+
+
+def test_earnings_text_cases():
+    import datetime as dt
+    from ccbot.report import _earnings_text
+    asof = dt.date(2026, 10, 30)
+    assert _earnings_text({"earnings_known": False, "next_earnings": None}, asof) == "n/a (not supplied)"
+    assert _earnings_text({"earnings_known": True, "next_earnings": "2026-11-12"}, asof) == 13
+    assert _earnings_text({"earnings_known": True, "next_earnings": None, "asset_type": "etf"}, asof) == "none (ETF)"
+    assert _earnings_text({"earnings_known": True, "next_earnings": None, "asset_type": "stock"}, asof) == "none in data"

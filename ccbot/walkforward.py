@@ -69,7 +69,9 @@ def walk_forward(results, bh, cfg, spread, k):
             fold_rows.append({"variant": v.id, "train": f"{train[0]}-{train[-1]}", "test": test,
                               "chosen": chosen, "oos_return": yearly[chosen][test], "bh_return": bh_y[test]})
         pre = [y for y in days_per_year.index if y not in held]
-        chosen_h = select(yearly, pre) if pre else None   # None: nothing to select on
+        # one config: nothing to select, so it is "fixed" and its held-out CAGR is real (010);
+        # several configs and no train years: nothing to select on → None
+        chosen_h = configs[0] if len(configs) == 1 else (select(yearly, pre) if pre else None)
         years_oos = list(oos)
         n_oos, n_held = int(days_per_year[years_oos].sum()), int(days_per_year[held].sum())
         stitched = annualise(compound(oos, years_oos), n_oos)
@@ -77,7 +79,8 @@ def walk_forward(results, bh, cfg, spread, k):
         bh_held = annualise(compound(bh_y, held), n_held)
         summary_rows.append({"variant": v.id, "oos_years": f"{years_oos[0]}-{years_oos[-1]}" if oos else "-",
                              "oos_cagr": stitched, "bh_oos_cagr": annualise(compound(bh_y, years_oos), n_oos),
-                             "heldout_config": chosen_h or "not selected (no train years)",
+                             "heldout_config": (f"{chosen_h} (fixed)" if len(configs) == 1 else chosen_h)
+                                               or "not selected (no train years)",
                              "heldout_years": "-".join(map(str, held)),
                              "heldout_cagr": held_r, "bh_heldout_cagr": bh_held,
                              "heldout_excess": held_r - bh_held})
@@ -85,14 +88,31 @@ def walk_forward(results, bh, cfg, spread, k):
     matrix = matrix[[p.year not in held for p in matrix.index]]
     return {"folds": pd.DataFrame(fold_rows), "summary": pd.DataFrame(summary_rows),
             "holdout": held, "pbo": pbo_cscv(matrix.to_numpy()), "pbo_months": matrix.shape[0],
+            "pbo_na": pbo_na_reason(matrix.to_numpy()),
             "n_configs": matrix.shape[1]}
+
+
+def pbo_na_reason(R, S=8):
+    """Why PBO is undefined for R (T x N), or None if it can be computed (009).
+    Every failing condition is named, so the report never points at the wrong cause."""
+    R = np.asarray(R, dtype=float)
+    T, N = R.shape
+    reasons = []
+    if T < S:
+        reasons.append(f"needs >= {S} non-held-out months, have {T}")
+    if N < 2:
+        reasons.append(f"needs >= 2 configs, have {N}")
+    if R.size and not np.isfinite(R).all():
+        bad = int((~np.isfinite(R)).any(axis=1).sum())
+        reasons.append(f"{bad} month(s) with a non-finite return")
+    return "; ".join(reasons) or None
 
 
 def pbo_cscv(R, S=8):
     """Probability of backtest overfitting. R: T x N returns (rows = periods)."""
     R = np.asarray(R, dtype=float)
     T, N = R.shape
-    if T < S or N < 2 or not np.isfinite(R).all():
+    if pbo_na_reason(R, S):
         return float("nan")  # too little data: PBO is undefined, never a score (report prints n/a)
     blocks = np.array_split(np.arange(T - T % S), S)
     logits = []
