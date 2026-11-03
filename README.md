@@ -5,7 +5,7 @@ Three teams of Claude Code agents that research, build, and audit your covered-c
 ## The flow
 
 ```
- You or A1 open a work item (work/<ID>/request.md)
+ You or A1 open a work item (work/<ID>/request.md; the ID comes from `python3 scripts/check_pipeline.py --next-id`, item 037)
         |
  RESEARCH   R1 Researcher -> R2 Improver -> R3 Fact Checker
         |                                  (writes the implementation map)
