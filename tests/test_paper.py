@@ -1,4 +1,4 @@
-"""Item 025: webull-paper mode, per-ticker facts file, option marks for capital."""
+"""Item 040: webull-paper mode, per-ticker facts file, option marks for capital."""
 import datetime as dt
 import json
 import math
@@ -31,9 +31,13 @@ def test_enrich_estimates_earnings_from_last_report(tmp_path):
     cfg = _cfg(tmp_path, {})
     day = enrich(Day(DATE, 12.33), "F", {"F": FORD}, cfg)
     assert day.next_earnings == dt.date(2027, 1, 6) and day.earnings_known and day.earnings_estimated
-    assert day.ex_div_date == dt.date(2026, 11, 10) and day.dividend == 0.0
+    assert day.ex_div_date == dt.date(2026, 11, 10) and day.dividend == 0.0 and day.div_next == 0.0
+    before = enrich(Day(dt.date(2026, 11, 9), 12.33), "F", {"F": FORD}, cfg)
+    assert before.dividend == 0.0 and before.div_next == 0.15        # early-assignment check runs
     exday = enrich(Day(dt.date(2026, 11, 10), 12.33), "F", {"F": FORD}, cfg)
     assert exday.dividend == 0.15
+    vale = enrich(Day(DATE, 12.0), "VALE", {"VALE": {"asset_type": "stock", "ex_div_date": None, "dividend": None}}, cfg)
+    assert math.isnan(vale.dividend) and math.isnan(vale.div_next)   # unknown stays unknown
 
 
 def test_enrich_estimate_expires_and_blocks(tmp_path):

@@ -9,10 +9,15 @@ Two jobs:
 
 A) Per item - when `work/<ID>/07-audit-task.md` exists:
    Review the whole chain R1 to I3. Check that sources are real, math is right, tests pass, and the change does what the request asked.
+   Then append one line to `work/<ID>/07-audit-task.md`: `A1 result: PASS | FAIL (<YYYY-MM-DD>, <where the evidence is>)`. Until it is there, `check_pipeline.py` shows the item as `awaiting A1` (item 033).
 
 B) Daily review - run once a day over `logs/` (all teams, since the last daily review) and every item touched that day:
    - Is every log line backed by a file in `work/`? Any step skipped? Any item stuck?
-   - Do the strategy numbers still add up (premium, yield, breakeven, assignment scenarios)? Run `python3 scripts/check_handoff.py <ID>` on every item with a hand-off, and spot-check its Self-check table.
+   - Do the strategy numbers still add up (premium, yield, breakeven, assignment scenarios)? Run `python3 scripts/check_handoff.py --all` (LEGACY items are known; any FAIL is a finding) and spot-check each new Self-check table.
+   - Run `python3 scripts/check_pipeline.py` after `git fetch origin`. Every SKIPPED item is an error (RI-007). List STUCK items at the top of the report. Audit every AWAITING A1 item (job A) the same day.
+   - Open pull requests (item 034, RI-009): the IN PR items and the OPEN BRANCHES lines go at the top of the report, with every CONFLICTS line. An IN PR item is not stuck; never ask the person to start it. Audit (job A) the items on each open fix branch that has no daily report yet. If a new fix touches a file an open fix branch changes, build it on top of that branch and say so in the PR.
+   - Copy the guardrail status that fix branches wrote in their 05/06 ("RI-00x: ...") into `logs/recurring-issues.md` in the daily commit on main; fix branches don't edit that file (item 036).
+   - Any commit since the last review that changes code or rules without a work item is an error: open the item the same day (RI-007).
    - Any errors, failed tests, or contradictions between teams?
 
 Every error you find MUST be sent back. For each one:

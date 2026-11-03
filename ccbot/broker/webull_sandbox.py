@@ -150,8 +150,9 @@ class WebullSandboxBroker(Broker):
         price = _num(items[0], "price", "close", "last_price") if items else None
         if price is None:
             raise NoQuote(f"no sandbox quote for {ticker}")
-        # earnings unknown -> blocked (ccbot/missing.py) unless config/tickers.json supplies them
-        return enrich(Day(self.date, price), ticker, self.facts, self.cfg)
+        # earnings unknown -> blocked; dividend and ex-date unknown -> NaN (ccbot/missing.py);
+        # config/tickers.json can supply them (ccbot/tickers.py)
+        return enrich(Day(self.date, price, q=0.0), ticker, self.facts, self.cfg)   # q: missing.py broker.q
 
     def list_option_contracts(self, underlying, exp_from, exp_to, strike_lo, strike_hi):
         # SDK docs: start_date = exact expiration date, end_date = expiration lower bound.

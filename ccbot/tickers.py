@@ -1,4 +1,4 @@
-"""Per-ticker facts the broker feed lacks (item 025): asset type, earnings and dividend dates.
+"""Per-ticker facts the broker feed lacks (item 040): asset type, earnings and dividend dates.
 
 Read from the JSON file named by cfg["tickers_file"] (config/tickers.json). Every value there
 is entered from a source; null means unknown and keeps the missing-data policy (a stock with
@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 from .data import DataError
+from .expiries import load_holidays
 
 
 def _d(x):
@@ -48,7 +49,21 @@ def enrich(day, ticker, facts, cfg):
         nxt = None       # a stale date is unknown, never "no earnings"
     ex_div = _d(f.get("ex_div_date"))
     amount = f.get("dividend")
-    dividend = float(amount) if ex_div == day.date and amount else day.dividend
+    dividend, div_next = day.dividend, day.div_next   # unknown (NaN) unless both date and amount are known
+    if ex_div is not None and amount is not None:
+        nxt_day = _next_trading_day(day.date)
+        dividend = float(amount) if ex_div == day.date else 0.0
+        div_next = float(amount) if ex_div == nxt_day else 0.0
     return dataclasses.replace(day, asset_type=asset, next_earnings=nxt,
                                earnings_known=asset == "etf" or nxt is not None,
-                               earnings_estimated=estimated, ex_div_date=ex_div, dividend=dividend)
+                               earnings_estimated=estimated, ex_div_date=ex_div,
+                               dividend=dividend, div_next=div_next)
+
+
+def _next_trading_day(d):
+    """Next NYSE trading day after d (weekends and config/holidays.json closures skipped)."""
+    closed = set(load_holidays()["holidays"])
+    d += dt.timedelta(days=1)
+    while d.weekday() >= 5 or d.isoformat() in closed:
+        d += dt.timedelta(days=1)
+    return d

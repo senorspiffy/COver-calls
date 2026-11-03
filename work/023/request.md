@@ -1,6 +1,7 @@
 # Work item 023
 Type: IDEA
 Scope: RESEARCH ONLY
+Waived: 02 (A1, 2026-10-31, item 026: the screen was already delivered; R3's fact check was run afterwards in 026; the person can ask for the R2 language search)
 Opened by: person
 Date: 2026-10-31
 ## What we want

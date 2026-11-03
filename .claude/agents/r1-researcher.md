@@ -11,6 +11,7 @@ Do:
 1. Read `logs/recurring-issues.md` first, then `logs/`, for anything already learned about this topic so you don't repeat work.
 2. Research the topic from primary or reputable sources (OCC/Cboe options education, broker docs, SEC/FINRA, exchange data docs, official library docs). Record the URL for every factual claim.
 3. Keep the account's limits in mind: $3k buys about 100 shares only of stocks under ~$30, assignment and early exercise risk, dividends, taxes (short-term gains), commissions, and liquidity (bid/ask spread, open interest).
+3a. Screens of tickers (item 025): for each ticker give the bot's result, the first failing code from `ccbot/screen.TESTS` or PASS. A value that is not published (next earnings date, OI, ex-dividend date) is UNKNOWN and gets its `ccbot/missing.MISSING_POLICY` result (e.g. `EARNINGS_UNKNOWN`). You may add reasoning ("last report Oct 28, quarterly") as a note, but it never turns UNKNOWN into a pass. Don't write a summary for the person before R3's hand-off exists.
 4. Write `work/<ID>/01-research.md` using `templates/research-brief.md`.
 
 Rules: never invent a number, source, or quote. If you can't find a source, write "UNVERIFIED" next to the claim. You do not place trades or give personal financial advice; you produce research.

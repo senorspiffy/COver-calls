@@ -121,3 +121,25 @@ def test_weekly_bh_two_stocks(cfg):
     md = weekly_report("2026-10-30", trades, scans, cfg)
     # B: min(3000, 1700) → 1 lot ($1,200); D: min(1800, 1700) → 1 lot; +$1 × 200 sh
     assert "- Buy-and-hold P/L: $200.00 (100 sh B; 100 sh D, 2026-10-26 to 2026-10-30" in md
+
+
+def test_one_passing_ticker_opens_one(tmp_path):
+    """024 'done looks like': on a day only one of two names passes, open just that one
+    and say why the other was skipped (item 026, I3 of 024)."""
+    cfg = _cfg()
+    df, meta = _two_stocks()
+    wide = df["underlying"] == "SYNTH_D"
+    df.loc[wide, "ask"] = (df.loc[wide, "bid"] + 0.50).round(2)   # SYNTH_D fails SPREAD
+    scan, broker = _run(tmp_path, cfg, df, meta)
+    assert broker.get_positions().held() == ["SYNTH_B"]
+    assert {d["ticker"] for d in scan["decisions"] if d["status"] == "FILLED"} == {"SYNTH_B"}
+    assert scan["rejects"]["SYNTH_D"] == "SPREAD"
+
+
+def test_sim_broker_refuses_ticker_past_max_positions(tmp_path):
+    """The broker's own max_positions guard, not only the bot's slot count (I3 of 024:
+    removing it failed no test)."""
+    df, meta = _two_stocks()
+    _, broker = _run(tmp_path, _cfg(max_positions=1), df, meta)
+    r = broker.buy_shares("SYNTH_D", 100, 100.0)
+    assert r.status == "REJECTED" and r.detail == "max_positions reached"
