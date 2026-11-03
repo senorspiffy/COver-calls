@@ -22,17 +22,17 @@ Occurrences: 4
 - 2026-10-30 | 002 (fixed by I2, 05 deviation 3) | 002/04 test_calendar | "Weekly picks 5–9 DTE on every Monday" – 0 of 522 Mondays
 
 ## RI-002: Missing or uncomputable data silently turned into a value
-Status: ESCALATED (7 occurrences). The guardrail added in 005/006 works for loader inputs. Two occurrences on the broker path got past it (014), and one in research text (025, fixed and merged in PR #6, 2026-10-31). 2026-11-01: no new occurrence. 2026-11-02: correction, 014 was not "not started": it is built in PR #7 (2026-10-31, unmerged; see RI-009). A1 re-ran its two mutations in scratch: both fail a test.
+Status: ESCALATED (8 occurrences). 2026-11-03: the broker code path is now GUARDED on main (014 merged in PR #7, 2026-11-02; A1 re-ran `div_next` 0.0 → `test_day_float_defaults_are_nan` fails). New occurrence on open PR #5 (038), so the entry stays ESCALATED. The guardrail added in 005/006 works for loader inputs. Two occurrences on the broker path got past it (014), and one in research text (025, fixed and merged in PR #6, 2026-10-31). 2026-11-01: no new occurrence. 2026-11-02: correction, 014 was not "not started": it is built in PR #7 (2026-10-31, unmerged; see RI-009). A1 re-ran its two mutations in scratch: both fail a test.
 Root cause: when a value cannot be computed from the data available, the code fills, defaults, or tie-breaks it into a number (or into "OK") instead of keeping it NaN/n/a/unknown and saying why.
 Guardrail(s) added:
 - Standing rule (002/04 Revision 2). Tests (002): `test_realized_vol_uses_only_past_closes`, `test_no_option_sold_during_vol_warmup`, `test_pbo_undefined_on_too_few_months[0,1,7]`, `test_short_csv_reports_pbo_na_without_warnings`. They still pass.
 - Fix 005: `EARNINGS_UNKNOWN`, `OI_UNKNOWN`, `DIVIDEND_UNKNOWN`. `Day.earnings_known` (default False, so a bare Day fails safe). `PriceSeries.missing`. `## Missing inputs` report section.
 - Fix 006: `bh_lots` (no `max(1,`), `bh_na_reason`, B&H n/a with reason, weekly report n/a.
 - Guardrail (005/006): `ccbot/missing.py::MISSING_POLICY` (9 rows); `tests/test_missing_inputs.py::test_drop_each_input[9]` + `test_policy_lists_every_optional_input`; `test_benchmark_cash_never_negative`; the widened grep in i2; the r3 step 3a and i1 step 1a policy lines; the i3 mutation step. A1 re-ran the mutations in scratch: `max(1,` in `bh_lots` → 3 failed; `else 0` in data.py → 2 failed; removing the screen's `EARNINGS_UNKNOWN` → 2 failed.
-- Built (014, PR daily-fixes/2026-10-31-stuck; GUARDED for the code path once merged): `Day.q/dividend/div_next` default to NaN; sim sets dividend/div_next from the ex-date (unknown amount → NaN → `DIVIDEND_UNKNOWN` / `EARLY_ASSIGN_CHECK_NA` events); `q` is a labelled fallback; `_reject` returns `CAPITAL_UNKNOWN` and its cap tests fail closed; policy rows `broker.dividend`, `broker.q`, `model.oi`, `derived.capital`; tests `test_every_day_default_is_listed`, `test_day_float_defaults_are_nan`, `test_broker_capability_flags_have_policy_rows`, `test_drop_each_input[broker.*, model.oi, derived.capital]`. Mutations: q default 0.0 → 1 failed; no CAPITAL_UNKNOWN → 1 failed; `>` cap test → 1 failed; div_next 0.0 → 1 failed.
+- Built (014, merged PR #7 2026-11-02; GUARDED for the code path): `Day.q/dividend/div_next` default to NaN; sim sets dividend/div_next from the ex-date (unknown amount → NaN → `DIVIDEND_UNKNOWN` / `EARLY_ASSIGN_CHECK_NA` events); `q` is a labelled fallback; `_reject` returns `CAPITAL_UNKNOWN` and its cap tests fail closed; policy rows `broker.dividend`, `broker.q`, `model.oi`, `derived.capital`; tests `test_every_day_default_is_listed`, `test_day_float_defaults_are_nan`, `test_broker_capability_flags_have_policy_rows`, `test_drop_each_input[broker.*, model.oi, derived.capital]`. Mutations: q default 0.0 → 1 failed; no CAPITAL_UNKNOWN → 1 failed; `>` cap test → 1 failed; div_next 0.0 → 1 failed.
 - Fix 025 (merged PR #6): r1/r3 step 3a report each screened ticker's bot reject code; an unpublished value stays UNKNOWN (`MISSING_POLICY`); `test_drop_each_input[snapshot.next_earnings]` pins blank earnings → `EARNINGS_UNKNOWN`. A1 checked both agent files 2026-11-01.
 Why still ESCALATED: `test_policy_lists_every_optional_input` enumerates only `OPTIONAL_CSV_COLUMNS` and `OPTIONAL_SNAPSHOT_FIELDS`. Values that enter as dataclass defaults (`Day.q/dividend/div_next = 0.0`) or derived values (`capital`) are outside it, and the review grep cannot see them. I2 and I3 each flagged one (05 "Finding", 07 §1). A1 reproduced both. **Move to GUARDED when** 014's extended enumeration test is in and fails on the 0.0 defaults. 2026-10-31: the policy is enforced only in code. Research (023) filled an unknown earnings date with reasoning and told the person F and VALE pass. 025's research rule is now in r1/r3 (2026-10-31); still needs 014. 2026-11-02: 014's `test_day_float_defaults_are_nan` fails when `div_next` defaults to 0.0 (A1, scratch); GUARDED once PR #7 is merged.
-Occurrences: 7
+Occurrences: 8
 - 2026-10-30 | 002 (fixed) | ccbot/data.py::realized_vol | warm-up vol back-filled from later closes (look-ahead); I3 06 first pass
 - 2026-10-30 | 002 (fixed) | ccbot/walkforward.py::pbo_cscv | empty CSCV blocks → NaN → PBO 0.000; held-out config tie-broken on 0 train years; I3 06 Re-verification
 - 2026-10-30 | 005 (fixed) | ccbot/data.py L78–79, screen.py L36/L39, webull_sandbox.py L144 | missing earnings/OI/dividend treated as none/pass; earnings blackout never runs on the sandbox broker
@@ -40,6 +40,7 @@ Occurrences: 7
 - 2026-10-30 | 014 | ccbot/rules.py L75–77, broker/sim.py L67–71, broker/webull_sandbox.py L144 | broker `Day.q/dividend/div_next` = 0.0 → `DIVIDEND_UNKNOWN` can never fire on the broker path. SYNTH_A's snapshot ex-div is 2026-12-18 and today's call `SYNTH_A261218C00026000` expires that day, but the rules saw `div_next = 0.0` (A1 probe)
 - 2026-10-30 | 014 | ccbot/screen.py::_reject L28/L30 | NaN capital passes PRICE_CAP and SINGLE_NAME_CAP (`x > NaN` is False). The probe with capital NaN lets SYNTH_C through, while at $3,000 it gets PRICE_CAP
 - 2026-10-31 | 025 | work/023/01-research.md L70/L79, screen-summary.md, work/001/03-handoff.md Correction "Step 1 and 9(a)" | F and VALE reported as passing; next earnings dates unpublished → `EARNINGS_UNKNOWN` by 001 step 3 and `screen._reject`
+- 2026-11-03 | 038 | PR #5 (claude/project-thread-xrug2s) ccbot/tickers.py::enrich | unpublished next earnings estimated as last report + 70 days for F, VALE, AAL, so they pass instead of `EARNINGS_UNKNOWN`; written 2026-10-31 before 025's rule, never through R3/I3
 
 ## RI-003: Scan calendar ignores exchange holidays
 Status: GUARDED (since 2026-10-30, 007; merged in PR #2, 2026-10-31)
@@ -77,16 +78,18 @@ Occurrences: 1
 - 2026-10-30 | 019 | work/001/03-handoff.md Totals + logs/research/2026-10-30.md 17:33 | 77 rows in table vs "76 rows → 60/12/4"; removed list has 7 entries vs "4 removed"
 
 ## RI-007: Work used before its pipeline steps ran
-Status: ESCALATED (3 occurrences, all found 2026-10-31). 2026-11-01: 026 is merged and `check_pipeline.py` shows SKIPPED: none, which met the condition below. A1 kept it ESCALATED because the guardrail can be bypassed: a `Waived: 03 06` line from anyone turns an item with no fact check or verification into `complete` (probe, 031). No step has been skipped since; the 023/024 waivers were approved by the person (PR #6). 2026-11-02: 031 is in PR #8 (unmerged). Second gap found: 033's `awaiting A1` is keyed on the request date, so 009–016 (dated 10-30, built 10-31 in PR #7) would show complete unaudited (A1 probe on a scratch merge) → 035.
+Status: ESCALATED (4 occurrences). 2026-11-03: 031 and 035 are merged (PR #8, #9) and hold on main (`test_fact_check_and_verification_waivable_only_by_person`, `test_complete_needs_a1_result`; 009–016 got A1 lines in 5de9838). New occurrence: PR #5 has request + 05 only, and the check never applies Scope rules to open branches (038). 035/05: "RI-007: 035 closes the 033 date gap; still ESCALATED until 031 and 035 are merged." 2026-11-01: 026 is merged and `check_pipeline.py` shows SKIPPED: none, which met the condition below. A1 kept it ESCALATED because the guardrail can be bypassed: a `Waived: 03 06` line from anyone turns an item with no fact check or verification into `complete` (probe, 031). No step has been skipped since; the 023/024 waivers were approved by the person (PR #6). 2026-11-02: 031 is in PR #8 (unmerged). Second gap found: 033's `awaiting A1` is keyed on the request date, so 009–016 (dated 10-30, built 10-31 in PR #7) would show complete unaudited (A1 probe on a scratch merge) → 035.
 Root cause: run-item.md has no rule for a person asking to go faster, and no check compares an item's files with its Scope. Steps are skipped silently; fixes made in other threads skip the pipeline entirely.
 Guardrail(s) added: 026 (merged PR #6): `scripts/check_pipeline.py` + `tests/test_pipeline_check.py` (A1 daily, I3 per item); `Scope: FAST (person, <date>)` may skip R2/I1, never R3 or I3; `Waived:` lines; a fix made outside the pipeline gets a work item the same day.
-Proposed (031): a waiver of 03 or 06 counts only when the person gave it; otherwise SKIPPED.
-Proposed (035): every item except a closed pre-033 list needs an `A1 result:` line before it shows complete.
-**Move to GUARDED when:** 031 and 035 are merged, the probe item (A1-written `Waived: 03 06`) shows SKIPPED, and 009–016 show `awaiting A1` until A1 records them.
-Occurrences: 3
+Built (031, merged PR #8): a waiver of 03 or 06 counts only when the person gave it; otherwise SKIPPED.
+Built (035, merged PR #9): every item except a closed pre-033 list needs an `A1 result:` line before it shows complete.
+Proposed (038): `BRANCH SKIPPED:` for open-branch items that skip a step.
+**Move to GUARDED when:** 038 is merged and PR #5 is either closed or re-run through the pipeline under its own ID.
+Occurrences: 4
 - 2026-10-31 | 026 | work/023 | RESEARCH ONLY item stopped after R1 (no 02/03/07); result changed 001 and opened 024
 - 2026-10-31 | 026 | work/024 | FULL item built and merged with only request + 05 ("short path"); no I3
 - 2026-10-31 | 026 | commits d994307, cf3ba3b | UTF-8 fix with no work item or log line; first commit missed 6 calls and added 3.12-only syntax (027)
+- 2026-11-03 | 038 | PR #5 work/025 (branch claude/project-thread-xrug2s) | 18 files of code/config with request + 05 only (no 01–04, 06, 07); `classify` → SKIPPED; never reported because the check skips open-branch Scope
 
 ## RI-008: Code not checked against the minimum Python the project declares
 Status: GUARDED (027 merged PR #6; 2026-11-01 A1 compiled every tracked `.py` with python3.11: no errors). 032 proposes running that compile as a test.
@@ -96,9 +99,11 @@ Occurrences: 1
 - 2026-10-31 | 027 | scripts/check_handoff.py L49 | `f"...{...read_text(encoding="utf-8")...}"` → SyntaxError on Python 3.11
 
 ## RI-009: Work on unmerged branches invisible to the audit
-Status: OPEN (2 occurrences, found 2026-11-02)
+Status: ESCALATED (3 occurrences). 2026-11-03: 034 is merged (PR #9) and lists open branches, but it joins items by ID: PR #5 and main each have their own `work/025`, so `IN PR: none` while PR #5 waits (037). Why the guardrail didn't hold: it assumed one ID = one item across branches; nothing stops two threads taking the same next number. 034/05: "RI-009: guardrail built (034); moves to GUARDED when merged and the next daily audit shows IN PR correctly."
 Root cause: `check_pipeline.py` and A1's daily review read only the working tree (main). A fix branch waiting for the person's merge is outside it, so STUCK means "not on main", and new branches are built without the rules open PRs add.
-Guardrail(s) added: Proposed (034): `check_pipeline.py` reports `IN PR (<branch>)` for items whose steps exist on an unmerged remote branch, and an `OPEN BRANCHES:` line with each branch's items and merge conflicts against HEAD; A1 lists both at the top of the daily report. Proposed (036): fix branches don't edit this file.
-Occurrences: 2
+Guardrail(s) added: Built (034, merged PR #9): `check_pipeline.py` reports `IN PR (<branch>)` for items whose steps exist on an unmerged remote branch, and an `OPEN BRANCHES:` line with each branch's items and merge conflicts against HEAD; A1 lists both at the top of the daily report. Built (036, merged PR #9): fix branches don't edit this file. Proposed (037): `ID CLASH:` line and `--next-id` over HEAD and open branches.
+**Move to GUARDED when:** 037 is merged and the daily check shows the 025 clash (or PR #5 is settled) with `--next-id` used for new items.
+Occurrences: 3
 - 2026-11-01 | 034 | logs/audit/2026-11-01.md | 009–016 reported STUCK and 014 "not started"; all eight were done in PR #7 (2026-10-31 22:39 UTC). PR #7's conflicts with main went unreported
 - 2026-11-01 | 034 | work/032/06-verification.md | PR #8 built without PR #7's "scratch copy, never in the repo" i3 rule; I2's in-repo `git checkout` restore wiped the uncommitted 031 edit (re-applied)
+- 2026-11-03 | 037 | work/025 on main vs PR #5 | two different items numbered 025; check_pipeline reports `025: complete`, `IN PR: none`; PR #5 unflagged through two audits
