@@ -81,6 +81,7 @@ class Day:
     asset_type: str = "stock"
     vol_warmup: bool = False   # True while the trailing realised vol has too little history
     earnings_known: bool = False   # False: next_earnings None means unknown, not "none" (missing.py)
+    earnings_estimated: bool = False   # next_earnings is last report + earnings_gap_days (tickers.py)
 
 
 @dataclass

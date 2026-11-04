@@ -108,7 +108,8 @@ def drop_snapshot_iv(tmp_path, cfg):
     df["iv"] = float("nan")
     scan, md = _scan(tmp_path, cfg, df, meta)
     assert "SELL_CALL" in [d["action"] for d in scan["decisions"]]   # quotes carry their own delta
-    assert scan["equity"] != scan["equity"] and "equity n/a" in md     # NaN, shown as n/a
+    # 040: the open call is marked at its quoted mid, so equity no longer needs the iv input
+    assert scan["equity"] == scan["equity"] and "equity n/a" not in md
 
 
 def drop_bh_benchmark(tmp_path, cfg):
@@ -211,6 +212,7 @@ DAY_DEFAULTS = {
     "asset_type": "'stock' fails safe: a stock needs a known earnings date (EARNINGS_UNKNOWN)",
     "vol_warmup": "False; the backtest sets it from the vol series",
     "earnings_known": "False fails safe (EARNINGS_UNKNOWN)",
+    "earnings_estimated": "False; True only when tickers.py estimates next_earnings (report labels it)",
 }
 
 

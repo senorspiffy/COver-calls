@@ -38,7 +38,7 @@ def parser():
         c.add_argument("--state-dir", default="state")
         c.add_argument("--out", default="reports")
         if name == "scan":
-            c.add_argument("--broker", choices=["sim", "webull-sandbox"], default="sim")
+            c.add_argument("--broker", choices=["sim", "webull-sandbox", "webull-paper"], default="sim")
             c.add_argument("--snapshots", default="data/sample/SYNTH_SNAPSHOTS.csv")
             c.add_argument("--variant", default="V0", choices=["V0", "V1", "V2", "V3", "V4", "V5"])
             c.add_argument("--live", action="store_true", help="refused: live trading is not built")
@@ -87,7 +87,7 @@ def cmd_scan(a):
         snaps, meta = load_snapshots(a.snapshots)
         broker = make_broker("sim", cfg, snapshots=snaps, meta=meta, ledger_path=ledger)
     else:
-        broker = make_broker("webull-sandbox", cfg, ledger_path=ledger,
+        broker = make_broker(a.broker, cfg, ledger_path=ledger,
                              token_dir=Path(a.state_dir) / "webull_token")
     scan = run_daily(a.date, broker, cfg, a.variant, a.weekly, a.state_dir, a.out)
     if scan["skipped"]:
