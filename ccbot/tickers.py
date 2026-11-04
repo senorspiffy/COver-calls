@@ -18,6 +18,10 @@ from pathlib import Path
 from .data import DataError
 from .expiries import load_holidays
 
+# Optional keys of a tickers.json entry. Each has a `tickers.<key>` row in MISSING_POLICY
+# (item 041; tests/test_missing_inputs.py::test_policy_lists_every_optional_input).
+TICKER_FIELDS = ("next_earnings", "ex_div_date", "dividend")
+
 
 def _d(x):
     return dt.date.fromisoformat(x) if x else None
@@ -48,6 +52,8 @@ def enrich(day, ticker, facts, cfg):
     if nxt is not None and nxt < day.date:
         nxt = None       # a stale date is unknown, never "no earnings"
     ex_div = _d(f.get("ex_div_date"))
+    if ex_div is not None and ex_div < day.date:
+        ex_div = None    # a past ex-date says nothing about the next one: unknown, never 0.0 (041)
     amount = f.get("dividend")
     dividend, div_next = day.dividend, day.div_next   # unknown (NaN) unless both date and amount are known
     if ex_div is not None and amount is not None:

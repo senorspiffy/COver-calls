@@ -9,6 +9,8 @@ Required step files by `Scope:` in request.md (no Scope line = FULL):
   RESEARCH ONLY  01 02 03 07
   FAST           01 03 05 06 07   (the person asked to go faster: R2 and I1 may be skipped,
                                     never R3's fact check or I3's verification)
+FAST counts only as `Scope: FAST (person, YYYY-MM-DD)`: the person asked for it. Any other
+FAST line (no who, or another who) makes the item SKIPPED (item 042).
 A `Waived: <steps> (<who>, <date>: <why>)` line in request.md excuses those steps; it is
 printed every run so it stays visible. 03 (fact check) and 06 (verification) can be waived
 only by the person: <who> must be `person`, otherwise the item is SKIPPED (item 031).
@@ -24,8 +26,13 @@ Each item is one of:
                (every item except the closed PRE_A1_LINE list; items 033, 035). Listed, not an error.
   IN PR        stuck, not started or in progress here, but an unmerged remote branch has more of
                its step files (item 034). Listed, not an error: it waits for the person's merge.
-  complete     every required step is present and A1 recorded its result
+  A1 FAIL      every required step is present and the last `A1 result:` line is FAIL (item 042):
+               the item went back to the team and is not complete until a later PASS line (exit 1)
+  complete     every required step is present and A1's last result is PASS
 Items in LEGACY are older than this check and are reported as such.
+INCOMPLETE (item 043, exit 1): for items from CHECKLIST_FROM on, a 06 with no
+`Recurring issues checked:` line naming an RI-, or a step file whose agent wrote no
+`| <agent> | <ID> |` line in logs/research or logs/implementation.
 
 When run inside a git repo, it also prints OPEN BRANCHES: every remote branch not merged into
 HEAD, the work items it carries, whether it merges cleanly into HEAD (`git merge-tree`), and
@@ -59,6 +66,11 @@ PERSON_ONLY = ("03", "06")
 # items opened early but built later through). Never add a new item here.
 PRE_A1_LINE = {"002", "003", "017", "018", "019", "020", "021", "022"}
 RECURRING = "logs/recurring-issues.md"
+# Item 043: the step-0 line in 06 and a log line per step are checked from this ID on.
+# Earlier items are not re-checked (013-016 and 040 were found by A1 on 2026-11-04).
+CHECKLIST_FROM = 41
+AGENT = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"}
+FAST_BY_PERSON = re.compile(r"^Scope:\s*FAST\s*\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*\)", re.M)
 # Older than the Scope/07 rules. Never add a new item here.
 LEGACY = {"001": "RESEARCH ONLY before 07-audit-task existed (item 021)",
           **{i: "07 is combined in work/003/07-audit-task.md" for i in ("004", "005", "006", "007", "008")}}
@@ -80,6 +92,8 @@ def classify(item_dir, today):
     """(status, detail) for one work item folder."""
     scope, opened, (waived, waived_line, who) = read_request(item_dir / "request.md")
     extra = f"; {waived_line}" if waived_line else ""
+    if scope == "FAST" and not FAST_BY_PERSON.search((item_dir / "request.md").read_text(encoding="utf-8")):
+        return "SKIPPED", f"FAST needs (person, <date>): only the person may shorten the pipeline (item 042){extra}"
     blocked = [s for s in waived if s in PERSON_ONLY and who != "person"]
     if blocked:
         return "SKIPPED", f"{scope}: {' '.join(blocked)} can be waived only by the person{extra}"
@@ -99,11 +113,31 @@ def classify(item_dir, today):
         return "SKIPPED", f"{scope}: {', '.join(results)} written before {' '.join(unchecked)}{extra}"
     if len(have) == len(need):
         audit = item_dir / STEPS["07"]
-        if (item_dir.name not in PRE_A1_LINE and audit.exists()
-                and not re.search(r"^A1 result:", audit.read_text(encoding="utf-8"), re.M)):
+        verdicts = re.findall(r"^A1 result:\s*(\w+)", audit.read_text(encoding="utf-8"), re.M) \
+            if audit.exists() else []
+        if item_dir.name not in PRE_A1_LINE and not verdicts:
             return "awaiting A1", f"{scope}{extra}"
+        if verdicts and verdicts[-1].upper() == "FAIL":
+            return "A1 FAIL", f"{scope}; sent back, needs a later A1 PASS line (item 042){extra}"
         return "complete", f"{scope}{extra}"
     return "in progress", f"{scope}: next {need[len(have)]}{extra}"
+
+
+def incomplete(item_dir, logs=Path("logs")):
+    """Item 043: what is missing from a step's own checklist ([] = nothing)."""
+    if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
+        return []
+    missing = []
+    ver = item_dir / STEPS["06"]
+    if ver.exists() and not re.search(r"^.*Recurring issues checked:.*RI-\d", ver.read_text(encoding="utf-8"), re.M):
+        missing.append("06 has no 'Recurring issues checked: RI-...' line")
+    text = "".join(f.read_text(encoding="utf-8") for sub in ("research", "implementation")
+                   for f in sorted((logs / sub).glob("*.md")) if (logs / sub).is_dir())
+    unlogged = [AGENT[s] for s in sorted(AGENT) if (item_dir / STEPS[s]).exists()
+                and not re.search(rf"\|\s*{AGENT[s]}\s*\|\s*{item_dir.name}\s*\|", text)]
+    if unlogged:
+        missing.append(f"no log line for {' '.join(unlogged)}")
+    return missing
 
 
 def _git(*args):
@@ -197,7 +231,7 @@ def main(argv):
     elif argv:
         sys.exit(__doc__)
     work = Path("work")
-    skipped, stuck, awaiting, in_pr = [], [], [], []
+    skipped, stuck, awaiting, in_pr, failed, unfinished = [], [], [], [], [], []
     branches = open_branches(today)
     for d in sorted(p for p in work.iterdir() if (p / "request.md").exists()):
         status, detail = classify(d, today)
@@ -217,6 +251,11 @@ def main(argv):
             stuck.append(d.name)
         if status == "awaiting A1":
             awaiting.append(d.name)
+        if status == "A1 FAIL":
+            failed.append(d.name)
+        gaps = incomplete(d)
+        if gaps:
+            unfinished.append(f"{d.name} ({'; '.join(gaps)})")
     print(f"STUCK: {', '.join(stuck) or 'none'}")
     print(f"AWAITING A1: {', '.join(awaiting) or 'none'}")
     print(f"IN PR: {', '.join(in_pr) or 'none'}")
@@ -234,8 +273,10 @@ def main(argv):
     for b in branches:
         for item, detail in b["skipped"]:
             print(f"BRANCH SKIPPED: {item} ({b['ref']}: {detail})")
+    print(f"A1 FAIL: {', '.join(failed) or 'none'}")
+    print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
-    return 1 if skipped else 0
+    return 1 if skipped or failed or unfinished else 0
 
 
 if __name__ == "__main__":
