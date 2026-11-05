@@ -15,6 +15,9 @@ MISSING_POLICY = {
     "tickers.next_earnings": ("fallback", "estimated as last_earnings + earnings_gap_days (040, person's house rule), "
                                           "labelled 'estimated'; EARNINGS_UNKNOWN when there is no last_earnings "
                                           "or the estimate has passed"),
+    "tickers.asset_type": ("fallback", "the broker's asset type (Day default \"stock\"), so a stock's earnings "
+                                       "must still be known, else EARNINGS_UNKNOWN (046)"),
+    "tickers.last_earnings": ("block", "no estimate; with next_earnings null too → EARNINGS_UNKNOWN (046)"),
     "tickers.ex_div_date": ("n/a", "days to ex-dividend: n/a (not supplied); a past ex-date is unknown too (041), "
                                    "so dividend/div_next stay NaN"),
     "tickers.dividend": ("n/a", "dividend/div_next stay NaN (never 0.0) unless both ex-date and amount are known"),
