@@ -195,3 +195,64 @@ def test_open_branch_conflict_is_reported(tmp_path):
     code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
     assert code == 0
     assert "  origin/fix: items 040; CONFLICTS: logs/recurring-issues.md; edits" in out
+
+
+def _branch_adds(repo, branch, item, files, request_text=None):
+    """Push branch `branch` off main that adds work/<item> with `files` (item 037/038 tests)."""
+    _git(repo, "checkout", "-q", "-b", branch, "main")
+    d = repo / "work" / item
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "request.md").write_text(request_text or f"# Work item {item}\nScope: FULL\nDate: 2026-10-31\n",
+                                  encoding="utf-8")
+    for f in files:
+        (d / f).write_text("x\nA1 result: PASS (test)\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", branch)
+    _git(repo, "push", "-q", "origin", branch)
+    _git(repo, "checkout", "-q", "main")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_same_id_on_main_and_open_branch_is_a_clash(tmp_path):
+    """Item 037 (RI-009): main's 025 (A1 BUG) and PR #5's 025 (person's IDEA) hid PR #5."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "pr5", "050", ["05-build-report.md"], "# Work item 050\nType: IDEA\nScope: FULL\nDate: 2026-10-31\n")
+    _item(repo, "050", ALL)                     # main adds its own 050 after the branch left
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "main 050")
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-03")
+    assert code == 0
+    assert "ID CLASH: 050 (origin/pr5)" in out
+    # an item both sides share from the merge base (040 on origin/fix) is not a clash
+    assert "040 (origin/fix)" not in out.split("ID CLASH:")[1].splitlines()[0]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_next_id_counts_open_branches(tmp_path):
+    """Item 037: the next ID is above every open branch's items, not only HEAD's."""
+    repo = _repo_with_open_branch(tmp_path)
+    assert _run(repo, "check_pipeline.py", "--next-id")[1].strip() == "041"
+    _branch_adds(repo, "other", "057", [])
+    assert _run(repo, "check_pipeline.py", "--next-id")[1].strip() == "058"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_open_branch_item_that_skips_steps_is_reported(tmp_path):
+    """Item 038 (RI-007): PR #5 had request + 05 only and nothing said so."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "short", "060", ["05-build-report.md"])
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-03")
+    assert code == 0                               # a branch never fails main's check
+    assert "BRANCH SKIPPED: 060 (origin/short: FULL: missing 01 02 03 04 before 05)" in out
+    assert "BRANCH SKIPPED: 040" not in out        # origin/fix has 01-07 for 040
+    assert "SKIPPED: none" in out
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_open_branch_line_shows_last_commit_age(tmp_path):
+    """Item 039: a branch waiting for days stands out."""
+    repo = _repo_with_open_branch(tmp_path)
+    when = subprocess.run(["git", "log", "-1", "--format=%cs", "origin/fix"], cwd=repo,
+                          capture_output=True, text=True).stdout.strip()
+    import datetime as dt
+    today = dt.date.fromisoformat(when) + dt.timedelta(days=3)
+    out = _run(repo, "check_pipeline.py", "--today", today.isoformat())[1]
+    assert f"(item 036); last commit {when} (3 days)" in out

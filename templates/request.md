@@ -1,4 +1,5 @@
 # Work item <ID>
+<!-- <ID> = `python3 scripts/check_pipeline.py --next-id` (counts open branches; item 037). -->
 Type: IDEA | BUG | EFFICIENCY
 Scope: FULL | RESEARCH ONLY | FAST (person, <date>)
 <!-- Optional: Waived: <steps> (<who>, <date>: <why>). 03 and 06 only with <who> = person (item 031). -->

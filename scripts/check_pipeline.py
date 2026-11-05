@@ -2,6 +2,7 @@
 """Check that every work item's step files match its Scope (items 026, 029, 034; RI-007, RI-009).
 
 Usage: python3 scripts/check_pipeline.py [--today YYYY-MM-DD]   (run from the repo root)
+       python3 scripts/check_pipeline.py --next-id   (the ID to give a new work item, item 037)
 
 Required step files by `Scope:` in request.md (no Scope line = FULL):
   FULL           01 02 03 04 05 06 07
@@ -28,13 +29,21 @@ Items in LEGACY are older than this check and are reported as such.
 
 When run inside a git repo, it also prints OPEN BRANCHES: every remote branch not merged into
 HEAD, the work items it carries, whether it merges cleanly into HEAD (`git merge-tree`), and
-whether it edits logs/recurring-issues.md, which only A1's daily commit on main should (036).
-Outside a git repo (or without git) that part is skipped.
+whether it edits logs/recurring-issues.md, which only A1's daily commit on main should (036),
+and its last commit date and age (039). Two more lines come from the branches:
+  ID CLASH        HEAD and an open branch each added work/<ID>/request.md since their merge
+                  base, with different text: two items share one ID (item 037). Rename one.
+  BRANCH SKIPPED  an item the open branch changes skips a step by the rules above, using the
+                  branch's own files (item 038). An error for A1 (RI-007); exit code unchanged,
+                  since the branch is not part of HEAD.
+--next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
+never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 """
 import datetime as dt
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 STEPS = {"01": "01-research.md", "02": "02-improvements.md", "03": "03-handoff.md",
@@ -111,12 +120,13 @@ def _git(*args):
     return r.stdout, r.returncode
 
 
-def open_branches():
-    """[(branch, {item: set of step codes}, conflicts, edits_recurring)] for every remote
-    branch not merged into HEAD (item 034)."""
+def open_branches(today=None):
+    """One dict per remote branch not merged into HEAD (items 034, 037, 038, 039): ref, items
+    {item: set of step codes}, conflicts, recurring, clashes, skipped [(item, detail)], last."""
     out = _git("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
     if out is None or out[1] != 0:
         return []
+    today = today or dt.datetime.now(dt.timezone.utc).date()
     found = []
     for ref in out[0].split():
         if ref.endswith("/HEAD") or "/" not in ref:
@@ -125,29 +135,70 @@ def open_branches():
         changed = _git("diff", "--name-only", f"HEAD...{ref}", "--", "work/")
         touched = {n.split("/")[1] for n in (changed[0].splitlines() if changed else []) if n.count("/") == 2}
         items = {i: set() for i in touched}
+        files = {i: [] for i in touched}
         listing = _git("ls-tree", "-r", "--name-only", ref, "--", "work/")
         for name in (listing[0].splitlines() if listing and listing[1] == 0 else []):
             parts = name.split("/")
-            if len(parts) == 3 and parts[1] in items and parts[2] in STEPS.values():
-                items[parts[1]].add(parts[2][:2])
+            if len(parts) == 3 and parts[1] in items:
+                files[parts[1]].append(parts[2])
+                if parts[2] in STEPS.values():
+                    items[parts[1]].add(parts[2][:2])
         merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
         conflicts = None
         if merge is not None and merge[1] in (0, 1):
             conflicts = merge[0].splitlines()[1:] if merge[1] == 1 else []
         diff = _git("diff", "--name-only", f"HEAD...{ref}", "--", RECURRING)
-        found.append((ref, items, conflicts, bool(diff and diff[0].strip())))
+        base = _git("merge-base", "HEAD", ref)
+        base = base[0].strip() if base and base[1] == 0 else None
+        clashes, skipped = [], []
+        for item in sorted(touched):
+            req = f"work/{item}/request.md"
+            theirs = _git("show", f"{ref}:{req}")
+            mine = Path(req)
+            if (base and theirs and theirs[1] == 0 and mine.exists()
+                    and _git("cat-file", "-e", f"{base}:{req}")[1] != 0
+                    and theirs[0] != mine.read_text(encoding="utf-8")):
+                clashes.append(item)
+            if theirs and theirs[1] == 0 and item not in LEGACY:
+                with tempfile.TemporaryDirectory() as tmp:
+                    d = Path(tmp) / item
+                    d.mkdir()
+                    for f in files[item]:
+                        body = _git("show", f"{ref}:work/{item}/{f}")
+                        (d / f).write_text(body[0] if body else "", encoding="utf-8")
+                    status, detail = classify(d, today)
+                if status == "SKIPPED":
+                    skipped.append((item, detail))
+        when = _git("log", "-1", "--format=%cs", ref)
+        last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
+        found.append({"ref": ref, "items": items, "conflicts": conflicts,
+                      "recurring": bool(diff and diff[0].strip()), "clashes": clashes,
+                      "skipped": skipped, "last": last})
     return found
+
+
+def next_id():
+    """The next free work item ID over HEAD and every unmerged remote branch (item 037)."""
+    ids = [int(p.name) for p in Path("work").iterdir() if p.name.isdigit()] if Path("work").is_dir() else []
+    out = _git("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
+    for ref in (out[0].split() if out and out[1] == 0 else []):
+        listing = _git("ls-tree", "-d", "--name-only", f"{ref}:work")
+        ids += [int(n) for n in (listing[0].split() if listing and listing[1] == 0 else []) if n.isdigit()]
+    return f"{max(ids, default=0) + 1:03d}"
 
 
 def main(argv):
     today = dt.datetime.now(dt.timezone.utc).date()
+    if argv[:1] == ["--next-id"]:
+        print(next_id())
+        return 0
     if argv[:1] == ["--today"]:
         today = dt.date.fromisoformat(argv[1])
     elif argv:
         sys.exit(__doc__)
     work = Path("work")
     skipped, stuck, awaiting, in_pr = [], [], [], []
-    branches = open_branches()
+    branches = open_branches(today)
     for d in sorted(p for p in work.iterdir() if (p / "request.md").exists()):
         status, detail = classify(d, today)
         if d.name in LEGACY and status in ("SKIPPED", "in progress"):
@@ -155,7 +206,7 @@ def main(argv):
         if status in ("STUCK", "not started", "in progress"):
             here = {s for s, f in STEPS.items() if (d / f).exists()}
             best = max(((len(items.get(d.name, set()) - here), ref, items.get(d.name, set()))
-                        for ref, items, _, _ in branches), default=(0, "", set()))
+                        for ref, items in ((b["ref"], b["items"]) for b in branches)), default=(0, "", set()))
             if best[0] > 0:
                 status, detail = "IN PR", f"{best[1]} has {' '.join(sorted(best[2]))}; was {status} here"
                 in_pr.append(d.name)
@@ -171,11 +222,18 @@ def main(argv):
     print(f"IN PR: {', '.join(in_pr) or 'none'}")
     if branches:
         print("OPEN BRANCHES (not merged into HEAD):")
-        for ref, items, conflicts, recurring in branches:
+        for b in branches:
+            conflicts = b["conflicts"]
             merge = ("merge not checked" if conflicts is None else
                      f"CONFLICTS: {', '.join(conflicts)}" if conflicts else "merges cleanly")
-            note = f"; edits {RECURRING} (item 036)" if recurring else ""
-            print(f"  {ref}: items {', '.join(sorted(items)) or 'none'}; {merge}{note}")
+            note = f"; edits {RECURRING} (item 036)" if b["recurring"] else ""
+            age = f"; last commit {b['last']} ({(today - b['last']).days} days)" if b["last"] else ""
+            print(f"  {b['ref']}: items {', '.join(sorted(b['items'])) or 'none'}; {merge}{note}{age}")
+    clashes = [f"{i} ({b['ref']})" for b in branches for i in b["clashes"]]
+    print(f"ID CLASH: {', '.join(clashes) or 'none'}")
+    for b in branches:
+        for item, detail in b["skipped"]:
+            print(f"BRANCH SKIPPED: {item} ({b['ref']}: {detail})")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped else 0
 
