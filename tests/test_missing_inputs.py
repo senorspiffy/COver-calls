@@ -18,6 +18,7 @@ from ccbot.data import OPTIONAL_CSV_COLUMNS, OPTIONAL_SNAPSHOT_FIELDS, load_pric
 from ccbot.missing import MISSING_POLICY
 from ccbot.rules import Day, Short, State, settle_day
 from ccbot.screen import feasible_universe
+from ccbot.tickers import TICKER_FIELDS, enrich
 from ccbot.variants import BY_ID
 
 DATE = dt.date(2026, 10, 30)
@@ -181,12 +182,39 @@ def drop_derived_capital(tmp_path, cfg):
     assert set(feasible_universe(cfg, df, cfg["cash"], DATE)[1].values()) == {"PRICE_CAP"}
 
 
+FORD = {"asset_type": "stock", "next_earnings": None, "last_earnings": "2026-10-28",
+        "ex_div_date": "2026-11-10", "dividend": 0.15}
+GAP = {"earnings_gap_days": 70}
+
+
+def drop_tickers_next_earnings(tmp_path, cfg):
+    """040/041: no next date → labelled estimate; no last report either → EARNINGS_UNKNOWN."""
+    est = enrich(Day(DATE, 12.0), "F", {"F": FORD}, GAP)
+    assert est.earnings_known and est.earnings_estimated
+    none = enrich(Day(DATE, 12.0), "F", {"F": {**FORD, "last_earnings": None}}, GAP)
+    assert none.next_earnings is None and none.earnings_known is False
+
+
+def drop_tickers_ex_div_date(tmp_path, cfg):
+    """041: no ex-date, or a past one → date None, dividend/div_next NaN."""
+    for facts, d in (({**FORD, "ex_div_date": None}, DATE), (FORD, dt.date(2026, 11, 20))):
+        day = enrich(Day(d, 12.0), "F", {"F": facts}, GAP)
+        assert day.ex_div_date is None and math.isnan(day.dividend) and math.isnan(day.div_next)
+
+
+def drop_tickers_dividend(tmp_path, cfg):
+    """041: ex-date without an amount → NaN, never 0.0."""
+    day = enrich(Day(dt.date(2026, 11, 9), 12.0), "F", {"F": {**FORD, "dividend": None}}, GAP)
+    assert math.isnan(day.dividend) and math.isnan(day.div_next)
+
+
 DROPS = {"csv.earnings": drop_csv_earnings, "csv.dividend": drop_csv_dividend, "csv.iv": drop_csv_iv,
          "snapshot.oi": drop_snapshot_oi, "snapshot.next_earnings": drop_snapshot_next_earnings,
          "snapshot.ex_div_date": drop_snapshot_ex_div_date, "snapshot.iv": drop_snapshot_iv,
          "bh_benchmark": drop_bh_benchmark, "broker.div_next": drop_broker_div_next,
          "broker.dividend": drop_broker_dividend, "broker.q": drop_broker_q, "model.oi": drop_model_oi,
-         "derived.capital": drop_derived_capital}
+         "derived.capital": drop_derived_capital, "tickers.next_earnings": drop_tickers_next_earnings,
+         "tickers.ex_div_date": drop_tickers_ex_div_date, "tickers.dividend": drop_tickers_dividend}
 
 
 @pytest.mark.parametrize("key", list(MISSING_POLICY))
@@ -197,6 +225,7 @@ def test_drop_each_input(tmp_path, cfg, key):
 
 def test_policy_lists_every_optional_input():
     keys = {f"csv.{c}" for c in OPTIONAL_CSV_COLUMNS} | {f"snapshot.{c}" for c in OPTIONAL_SNAPSHOT_FIELDS}
+    keys |= {f"tickers.{c}" for c in TICKER_FIELDS}     # 041: the ticker facts file (040)
     assert keys <= set(MISSING_POLICY)
     assert set(DROPS) == set(MISSING_POLICY)
 

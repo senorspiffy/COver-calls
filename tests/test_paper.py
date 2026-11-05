@@ -40,6 +40,14 @@ def test_enrich_estimates_earnings_from_last_report(tmp_path):
     assert math.isnan(vale.dividend) and math.isnan(vale.div_next)   # unknown stays unknown
 
 
+def test_enrich_past_ex_div_is_unknown(tmp_path):
+    """041 (RI-002): once the file's ex-date has passed, the next one is unknown: NaN, never 0.0."""
+    cfg = _cfg(tmp_path, {})
+    after = enrich(Day(dt.date(2026, 11, 20), 12.33), "F", {"F": FORD}, cfg)
+    assert after.ex_div_date is None
+    assert math.isnan(after.dividend) and math.isnan(after.div_next)
+
+
 def test_enrich_estimate_expires_and_blocks(tmp_path):
     cfg = _cfg(tmp_path, {})
     late = enrich(Day(dt.date(2027, 1, 7), 12.0), "F", {"F": FORD}, cfg)

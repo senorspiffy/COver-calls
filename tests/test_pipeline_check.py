@@ -9,7 +9,14 @@ import pytest
 from conftest import REPO
 
 
-def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A1 result: PASS (test)"):
+AGENTS = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"}
+
+
+def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A1 result: PASS (test)",
+          logged=True):
+    """A fixture item. Its 06 carries the step-0 line and each step gets its log line (item 043)."""
+    if scope == "FAST":
+        scope = "FAST (person, 2026-10-31)"
     d = root / "work" / item
     d.mkdir(parents=True)
     lines = [f"# Work item {item}", f"Scope: {scope}", f"Date: {date}"]
@@ -18,7 +25,15 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
     (d / "request.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     for f in files:
         body = f"x\n{a1}\n" if f == "07-audit-task.md" and a1 else "x\n"
+        if f == "06-verification.md":
+            body += "Recurring issues checked: RI-007\n"
         (d / f).write_text(body, encoding="utf-8")
+        agent = AGENTS.get(f[:2])
+        if agent and logged:
+            log = root / "logs" / ("research" if agent[0] == "R" else "implementation") / f"{date}.md"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with log.open("a", encoding="utf-8") as fh:
+                fh.write(f"12:00 | {agent} | {item} | test\n")
 
 
 def _run(root, script, *args):
@@ -256,3 +271,60 @@ def test_open_branch_line_shows_last_commit_age(tmp_path):
     today = dt.date.fromisoformat(when) + dt.timedelta(days=3)
     out = _run(repo, "check_pipeline.py", "--today", today.isoformat())[1]
     assert f"(item 036); last commit {when} (3 days)" in out
+
+
+def test_fast_needs_person_and_date(tmp_path):
+    """042: FAST shortens the pipeline only when the person asked, with a date."""
+    files = ["01-research.md", "03-handoff.md", "05-build-report.md", "06-verification.md", "07-audit-task.md"]
+    _item(tmp_path, "110", files, scope="FAST (I2, 2026-11-04)")
+    _item(tmp_path, "111", files, scope="FAST (person, 2026-11-03)")
+    d = tmp_path / "work" / "112"
+    _item(tmp_path, "112", files)
+    (d / "request.md").write_text("# Work item 112\nScope: FAST\nDate: 2026-10-31\n", encoding="utf-8")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-04")
+    assert code == 1
+    assert "110: SKIPPED (FAST needs (person, <date>)" in out
+    assert "112: SKIPPED (FAST needs (person, <date>)" in out
+    assert "111: complete (FAST)" in out
+
+
+def test_a1_fail_is_not_complete(tmp_path):
+    """042: the last A1 line decides; FAIL is not complete and exits 1."""
+    _item(tmp_path, "120", ALL, a1="A1 result: FAIL (2026-11-04, test)")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-04")
+    assert code == 1 and "120: A1 FAIL" in out and "A1 FAIL: 120" in out
+
+
+def test_later_a1_pass_clears_fail(tmp_path):
+    _item(tmp_path, "121", ALL, a1="A1 result: FAIL (2026-11-04, test)\nA1 result: PASS (2026-11-05, re-run)")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    assert code == 0 and "121: complete (FULL)" in out and "A1 FAIL: none" in out
+
+
+def test_incomplete_06_and_missing_log_line(tmp_path):
+    """043: from 041 on, 06 names the recurring issues checked and every step has a log line."""
+    _item(tmp_path, "130", ALL, logged=False)
+    _item(tmp_path, "131", ALL)
+    (tmp_path / "work" / "131" / "06-verification.md").write_text("x\n", encoding="utf-8")
+    _item(tmp_path, "040", ALL, logged=False)          # before CHECKLIST_FROM: not re-checked
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-04")
+    assert code == 1
+    assert "130 (no log line for R1 R2 R3 I1 I2 I3)" in out
+    assert "131 (06 has no 'Recurring issues checked: RI-...' line)" in out
+    assert "040 (" not in out.split("INCOMPLETE:")[1]
+
+
+def test_complete_item_with_logs_is_not_incomplete(tmp_path):
+    _item(tmp_path, "132", ALL)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-04")
+    assert code == 0 and "INCOMPLETE: none" in out
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_all_names_branch_with_handoff(tmp_path):
+    """044: a hand-off that exists only on an open branch is IN PR, not 'no hand-off'."""
+    repo = _repo_with_open_branch(tmp_path)
+    _item(repo, "041", [])
+    code, out = _run(repo, "check_handoff.py", "--all")
+    assert "040: IN PR (origin/fix)" in out
+    assert "041: no hand-off" in out

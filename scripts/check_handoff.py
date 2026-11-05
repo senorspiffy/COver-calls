@@ -87,14 +87,27 @@ def main(item):
     return 1 if problems else 0
 
 
+def _branch_with_handoff(item):
+    """The first open branch (scripts/check_pipeline.py OPEN BRANCHES) that has this item's
+    03-handoff.md, or None (item 044). Without git, None."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from check_pipeline import open_branches
+    for b in open_branches():
+        if "03" in b["items"].get(item, set()):
+            return b["ref"]
+    return None
+
+
 def check_all(work=Path("work")):
-    """One line per work item: PASS, LEGACY, FAIL or 'no hand-off'. Exit 1 only on FAIL."""
+    """One line per work item: PASS, LEGACY, FAIL, 'IN PR (<branch>)' (the hand-off is only on an
+    open branch, item 044) or 'no hand-off'. Exit 1 only on FAIL."""
     import contextlib
     import io
     failed = []
     for d in sorted(p for p in work.iterdir() if p.is_dir()):
         if not (d / "03-handoff.md").exists():
-            print(f"{d.name}: no hand-off")
+            ref = _branch_with_handoff(d.name)
+            print(f"{d.name}: IN PR ({ref})" if ref else f"{d.name}: no hand-off")
             continue
         out = io.StringIO()
         with contextlib.redirect_stdout(out):

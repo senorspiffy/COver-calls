@@ -1,6 +1,6 @@
 # Work item 040 (built in the 023 thread as "025"; renumbered: main already has a 025)
 Type: IDEA
-Scope: FAST
+Scope: FAST (person, 2026-11-03)
 Opened by: person (023 thread, 2026-10-31: paper trade Ford/Vale from the VPS)
 <!-- FAST: on 2026-11-03 the person chose "estimate the date and merge" over "run it through the full team review" (decision card in the 023 thread). R2 and I1 skipped; R3 fact check (03) and I3 verification (06) done. -->
 Date: 2026-10-31
