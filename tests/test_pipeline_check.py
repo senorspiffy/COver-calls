@@ -10,6 +10,10 @@ from conftest import REPO
 
 
 AGENTS = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"}
+# One well-formed field set per agent (item 045, LOG_FORMAT).
+FIELDS = {"R1": "brief written | 0", "R2": "3 for / 3 against | languages: N/A",
+          "R3": "1 verified, 0 fixed, 0 removed | READY", "I1": "FIT | 1 files planned",
+          "I2": "1 files changed | tests 1/1", "I3": "PASS | sent to audit: yes"}
 
 
 def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A1 result: PASS (test)",
@@ -33,7 +37,7 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
             log = root / "logs" / ("research" if agent[0] == "R" else "implementation") / f"{date}.md"
             log.parent.mkdir(parents=True, exist_ok=True)
             with log.open("a", encoding="utf-8") as fh:
-                fh.write(f"12:00 | {agent} | {item} | test\n")
+                fh.write(f"12:00 | {agent} | {item} | {FIELDS[agent]}\n")
 
 
 def _run(root, script, *args):
@@ -328,3 +332,97 @@ def test_all_names_branch_with_handoff(tmp_path):
     code, out = _run(repo, "check_handoff.py", "--all")
     assert "040: IN PR (origin/fix)" in out
     assert "041: no hand-off" in out
+
+
+def test_log_writes_utc_line(tmp_path):
+    """045: --log stamps the current UTC time and files the line under the agent's team."""
+    import datetime as dt
+    (tmp_path / "work" / "150").mkdir(parents=True)
+    (tmp_path / "work" / "150" / "request.md").write_text("# Work item 150\n", encoding="utf-8")
+    before = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
+    code, out = _run(tmp_path, "check_pipeline.py", "--log", "I2", "150", "2 files changed | tests 9/9")
+    after = dt.datetime.now(dt.timezone.utc)
+    assert code == 0
+    logs = list((tmp_path / "logs" / "implementation").glob("*.md"))
+    assert len(logs) == 1 and not (tmp_path / "logs" / "research").exists()
+    text = logs[0].read_text(encoding="utf-8")
+    assert text.startswith("# Implementation log - ")
+    line = text.splitlines()[-1]
+    stamp = dt.datetime.fromisoformat(f"{logs[0].stem}T{line[:5]}+00:00")
+    assert before <= stamp <= after
+    assert line[5:] == " | I2 | 150 | 2 files changed | tests 9/9"
+
+
+@pytest.mark.parametrize("agent, fields", [("I2", "see 05"), ("I1", "FIT | see 04"), ("R9", "x"),
+                                           ("R1", "brief written | many")])
+def test_log_refuses_bad_fields(tmp_path, agent, fields):
+    """045: the 2026-11-04 placeholders are refused and nothing is written."""
+    code, _ = _run(tmp_path, "check_pipeline.py", "--log", agent, "150", fields)
+    assert code == 2 and not (tmp_path / "logs").exists()
+
+
+def test_log_refuses_item_without_request(tmp_path):
+    """047: a well-formed line for an ID with no work/<ID>/request.md is refused, nothing written."""
+    (tmp_path / "work" / "999").mkdir(parents=True)   # folder alone is not enough
+    code, _ = _run(tmp_path, "check_pipeline.py", "--log", "I2", "999", "1 file changed | tests 1/1")
+    assert code == 2 and not (tmp_path / "logs").exists()
+
+
+def test_orphan_log_line_is_reported(tmp_path):
+    """047: a log line for an item with no work folder is ORPHAN LOG (exit 1); real items are not."""
+    _item(tmp_path, "150", ALL)
+    with (tmp_path / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+        fh.write("12:05 | I2 | 999 | 1 file changed | tests 1/1\n")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    line = [l for l in out.splitlines() if l.startswith("ORPHAN LOG:")][0]
+    assert code == 1
+    assert line == "ORPHAN LOG: 999 (logs/implementation/2026-10-31.md)"
+    shutil.rmtree(tmp_path / "logs" / "implementation")
+    shutil.rmtree(tmp_path / "logs" / "research")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    assert "ORPHAN LOG: none" in out
+
+
+def test_malformed_log_line_is_incomplete(tmp_path):
+    """045: from 045 on a line must match its agent's format; 041-044's `see 05` is not re-checked."""
+    for item in ("150", "044"):
+        _item(tmp_path, item, ALL)
+        with (tmp_path / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+            fh.write(f"12:00 | I2 | {item} | see 05 | tests 1/1\n")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    assert code == 1
+    assert "150 (log line for I2 does not match its format (item 045))" in out
+    assert "044 (" not in out.split("INCOMPLETE:")[1].splitlines()[0]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_log_line_after_its_commit_is_flagged(tmp_path):
+    """045: the 2026-11-04 case. A line timed 23:10 in a commit made at 22:24:41 UTC is LOG TIME;
+    a line in the commit's own minute is fine; items before 045 are not checked."""
+    _item(tmp_path, "150", ALL, logged=False)
+    log = tmp_path / "logs" / "implementation" / "2026-11-04.md"
+    log.parent.mkdir(parents=True)
+    log.write_text("22:24 | I1 | 150 | FIT | 1 files planned\n23:10 | I2 | 150 | 1 files changed | tests 1/1\n"
+                   "23:10 | I2 | 044 | see 05 | tests 182/184\n", encoding="utf-8")
+    research = tmp_path / "logs" / "research" / "2026-11-04.md"
+    research.parent.mkdir(parents=True)
+    research.write_text("".join(f"22:00 | {a} | 150 | {FIELDS[a]}\n" for a in ("R1", "R2", "R3")), encoding="utf-8")
+    (tmp_path / "logs" / "implementation" / "2026-11-05.md").write_text("09:00 | I3 | 150 | PASS | sent to audit: yes\n",
+                                                                    encoding="utf-8")
+    env = {**os.environ, "GIT_AUTHOR_DATE": "2026-11-04T22:24:41+00:00",
+           "GIT_COMMITTER_DATE": "2026-11-04T22:24:41+00:00"}
+    for cmd in (["init", "-q"], ["add", "-A"],
+                ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]):
+        subprocess.run(["git", *cmd], cwd=tmp_path, check=True, env=env)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    line = [l for l in out.splitlines() if l.startswith("LOG TIME:")][0]
+    assert code == 1
+    assert "150 I2 (2026-11-04 23:10 after commit 2026-11-04 22:24 UTC)" in line
+    assert "150 I3 (2026-11-05 09:00" in line
+    assert "I1" not in line and "044" not in line and "R1" not in line
+
+
+def test_log_time_not_checked_outside_git(tmp_path):
+    _item(tmp_path, "150", ALL)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    assert code == 0 and "LOG TIME: not checked (no git)" in out

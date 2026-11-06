@@ -1,10 +1,13 @@
 """RI-002 guardrail (005/006): drop each optional input in MISSING_POLICY and check that the run
 gives the named reason or n/a, with no exception and no invented number."""
 import dataclasses
+import json
+import re
 import datetime as dt
 import math
 import shutil
 import warnings
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -18,7 +21,7 @@ from ccbot.data import OPTIONAL_CSV_COLUMNS, OPTIONAL_SNAPSHOT_FIELDS, load_pric
 from ccbot.missing import MISSING_POLICY
 from ccbot.rules import Day, Short, State, settle_day
 from ccbot.screen import feasible_universe
-from ccbot.tickers import TICKER_FIELDS, enrich
+from ccbot.tickers import TICKER_FIELDS, TICKER_NOTES, enrich
 from ccbot.variants import BY_ID
 
 DATE = dt.date(2026, 10, 30)
@@ -195,6 +198,20 @@ def drop_tickers_next_earnings(tmp_path, cfg):
     assert none.next_earnings is None and none.earnings_known is False
 
 
+def drop_tickers_asset_type(tmp_path, cfg):
+    """046: no asset type → the broker's (Day default "stock"); a stock with no earnings date
+    and no last report is EARNINGS_UNKNOWN, never treated as an ETF."""
+    facts = {**FORD, "asset_type": None, "next_earnings": None, "last_earnings": None}
+    day = enrich(Day(DATE, 12.0), "F", {"F": facts}, GAP)
+    assert day.asset_type == "stock" and day.earnings_known is False
+
+
+def drop_tickers_last_earnings(tmp_path, cfg):
+    """046: no last report → no estimate; with no next date either, earnings unknown."""
+    day = enrich(Day(DATE, 12.0), "F", {"F": {**FORD, "next_earnings": None, "last_earnings": None}}, GAP)
+    assert day.earnings_estimated is False and day.next_earnings is None and day.earnings_known is False
+
+
 def drop_tickers_ex_div_date(tmp_path, cfg):
     """041: no ex-date, or a past one → date None, dividend/div_next NaN."""
     for facts, d in (({**FORD, "ex_div_date": None}, DATE), (FORD, dt.date(2026, 11, 20))):
@@ -214,6 +231,7 @@ DROPS = {"csv.earnings": drop_csv_earnings, "csv.dividend": drop_csv_dividend, "
          "bh_benchmark": drop_bh_benchmark, "broker.div_next": drop_broker_div_next,
          "broker.dividend": drop_broker_dividend, "broker.q": drop_broker_q, "model.oi": drop_model_oi,
          "derived.capital": drop_derived_capital, "tickers.next_earnings": drop_tickers_next_earnings,
+         "tickers.asset_type": drop_tickers_asset_type, "tickers.last_earnings": drop_tickers_last_earnings,
          "tickers.ex_div_date": drop_tickers_ex_div_date, "tickers.dividend": drop_tickers_dividend}
 
 
@@ -228,6 +246,18 @@ def test_policy_lists_every_optional_input():
     keys |= {f"tickers.{c}" for c in TICKER_FIELDS}     # 041: the ticker facts file (040)
     assert keys <= set(MISSING_POLICY)
     assert set(DROPS) == set(MISSING_POLICY)
+
+
+def test_ticker_fields_cover_file_and_code():
+    """046: every key in config/tickers.json and every key ccbot/tickers.py reads is in
+    TICKER_FIELDS (so it has a policy row above). A hand list alone missed two (A1, 2026-11-05)."""
+    root = Path(__file__).resolve().parents[1]
+    entries = json.loads((root / "config" / "tickers.json").read_text(encoding="utf-8"))
+    in_file = {k for t, e in entries.items() if not t.startswith("_") for k in e}
+    code = (root / "ccbot" / "tickers.py").read_text(encoding="utf-8")
+    in_code = set(re.findall(r'\bf(?:\.get\(|\[)"(\w+)"', code))
+    assert in_code, "the key pattern found nothing in ccbot/tickers.py"
+    assert (in_file | in_code) - set(TICKER_NOTES) <= set(TICKER_FIELDS)
 
 
 # Every Day field with a default, and where its "unknown" is handled (014). A new field with a
