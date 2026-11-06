@@ -50,6 +50,9 @@ fields that don't match the agent's format (LOG_FORMAT). Every step logs this wa
 writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
   LOG TIME        a committed log line timed after the commit that added it (git blame): it was
                   not written when its step ran (exit 1; RI-010).
+  ORPHAN LOG      a log line whose item has no work/<ID>/ folder (exit 1; item 047). --log
+                  refuses an ID without work/<ID>/request.md (exit 2), so a typo'd ID is caught
+                  when it is written.
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 """
@@ -172,6 +175,9 @@ def write_log(agent, item, fields, now=None):
         print(f"--log refused: {agent} | {item} | {fields} does not match "
               f"{LOG_FORMAT.get(agent, 'an agent R1 R2 R3 I1 I2 I3')}", file=sys.stderr)
         return 2
+    if not (Path("work") / item / "request.md").exists():
+        print(f"--log refused: no work/{item}/request.md (item 047)", file=sys.stderr)
+        return 2
     now = now or dt.datetime.now(dt.timezone.utc)
     team = "research" if agent[0] == "R" else "implementation"
     log = Path("logs") / team / f"{now:%Y-%m-%d}.md"
@@ -182,6 +188,16 @@ def write_log(agent, item, fields, now=None):
         fh.write(f"{head}{line}\n")
     print(line)
     return 0
+
+
+def orphan_log_lines():
+    """Item 047: `<ID> (<log file>)` for every agent log line whose work/<ID>/ folder is missing."""
+    orphans = []
+    for team in ("research", "implementation"):
+        for f in sorted((Path("logs") / team).glob("????-??-??.md")):
+            ids = {m[4] for m in map(LOG_LINE.match, f.read_text(encoding="utf-8").splitlines()) if m}
+            orphans += [f"{i} ({f.as_posix()})" for i in sorted(ids) if not (Path("work") / i).is_dir()]
+    return orphans
 
 
 def late_log_lines():
@@ -352,8 +368,10 @@ def main(argv):
     print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
     late = late_log_lines()
     print(f"LOG TIME: {'not checked (no git)' if late is None else ', '.join(late) or 'none'}")
+    orphans = orphan_log_lines()
+    print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
-    return 1 if skipped or failed or unfinished or late else 0
+    return 1 if skipped or failed or unfinished or late or orphans else 0
 
 
 if __name__ == "__main__":

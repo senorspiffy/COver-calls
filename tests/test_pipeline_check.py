@@ -337,6 +337,8 @@ def test_all_names_branch_with_handoff(tmp_path):
 def test_log_writes_utc_line(tmp_path):
     """045: --log stamps the current UTC time and files the line under the agent's team."""
     import datetime as dt
+    (tmp_path / "work" / "150").mkdir(parents=True)
+    (tmp_path / "work" / "150" / "request.md").write_text("# Work item 150\n", encoding="utf-8")
     before = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
     code, out = _run(tmp_path, "check_pipeline.py", "--log", "I2", "150", "2 files changed | tests 9/9")
     after = dt.datetime.now(dt.timezone.utc)
@@ -357,6 +359,28 @@ def test_log_refuses_bad_fields(tmp_path, agent, fields):
     """045: the 2026-11-04 placeholders are refused and nothing is written."""
     code, _ = _run(tmp_path, "check_pipeline.py", "--log", agent, "150", fields)
     assert code == 2 and not (tmp_path / "logs").exists()
+
+
+def test_log_refuses_item_without_request(tmp_path):
+    """047: a well-formed line for an ID with no work/<ID>/request.md is refused, nothing written."""
+    (tmp_path / "work" / "999").mkdir(parents=True)   # folder alone is not enough
+    code, _ = _run(tmp_path, "check_pipeline.py", "--log", "I2", "999", "1 file changed | tests 1/1")
+    assert code == 2 and not (tmp_path / "logs").exists()
+
+
+def test_orphan_log_line_is_reported(tmp_path):
+    """047: a log line for an item with no work folder is ORPHAN LOG (exit 1); real items are not."""
+    _item(tmp_path, "150", ALL)
+    with (tmp_path / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+        fh.write("12:05 | I2 | 999 | 1 file changed | tests 1/1\n")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    line = [l for l in out.splitlines() if l.startswith("ORPHAN LOG:")][0]
+    assert code == 1
+    assert line == "ORPHAN LOG: 999 (logs/implementation/2026-10-31.md)"
+    shutil.rmtree(tmp_path / "logs" / "implementation")
+    shutil.rmtree(tmp_path / "logs" / "research")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    assert "ORPHAN LOG: none" in out
 
 
 def test_malformed_log_line_is_incomplete(tmp_path):
