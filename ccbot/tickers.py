@@ -19,8 +19,10 @@ from .data import DataError
 from .expiries import load_holidays
 
 # Optional keys of a tickers.json entry. Each has a `tickers.<key>` row in MISSING_POLICY
-# (item 041; tests/test_missing_inputs.py::test_policy_lists_every_optional_input).
-TICKER_FIELDS = ("next_earnings", "ex_div_date", "dividend")
+# (items 041, 046). tests/test_missing_inputs.py::test_ticker_fields_cover_file_and_code reads
+# the keys from config/tickers.json and from this module, so a new key fails until listed here.
+TICKER_FIELDS = ("asset_type", "next_earnings", "last_earnings", "ex_div_date", "dividend")
+TICKER_NOTES = ("sources",)   # documentation in the file; never read as an input
 
 
 def _d(x):

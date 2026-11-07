@@ -15,4 +15,4 @@ Do:
 4. Verdict: PASS, or FAIL with a list of specific problems sent back to I1 or I2.
 5. On PASS, write `work/<ID>/06-verification.md` using `templates/verification.md`, then create the audit task `work/<ID>/07-audit-task.md` listing what Audit should look at.
 
-Append to `logs/implementation/<YYYY-MM-DD>.md`: `<time> | I3 | <ID> | <PASS/FAIL> | sent to audit: <yes/no>`.
+Append to `logs/implementation/<YYYY-MM-DD>.md`: `<UTC HH:MM> | I3 | <ID> | <PASS/FAIL> | sent to audit: <yes/no>`. Write it with `python3 scripts/check_pipeline.py --log I3 <ID> "<PASS/FAIL> | sent to audit: <yes/no>"` right after writing your step file: it adds the UTC time and refuses a line not in this format. Never type a log line by hand (item 045).

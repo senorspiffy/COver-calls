@@ -19,4 +19,4 @@ Do:
 
 Rules: same as R1. No made-up facts; mark anything unsourced as UNVERIFIED.
 
-Append to `logs/research/<YYYY-MM-DD>.md`: `<time> | R2 | <ID> | 3 for / 3 against | languages: <list>`.
+Append to `logs/research/<YYYY-MM-DD>.md`: `<UTC HH:MM> | R2 | <ID> | 3 for / 3 against | languages: <list>`. Write it with `python3 scripts/check_pipeline.py --log R2 <ID> "3 for / 3 against | languages: <list>"` right after writing your step file: it adds the UTC time and refuses a line not in this format. Never type a log line by hand (item 045).
