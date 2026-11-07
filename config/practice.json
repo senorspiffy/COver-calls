@@ -1,0 +1,24 @@
+{
+  "_about": "Practice account (work/048): each stock gets $5,000 of pretend money (1/13 of the account), tracked side by side. Separate from config/paper.json. Run with --state-dir state_practice --out reports_practice.",
+  "universe": [
+    "F",
+    "VALE",
+    "AAL",
+    "T",
+    "VZ",
+    "PFE",
+    "KMI",
+    "CMCSA",
+    "KEY",
+    "HBAN",
+    "PBR",
+    "ITUB",
+    "KGC"
+  ],
+  "broker": "webull-paper",
+  "tickers_file": "config/tickers.json",
+  "earnings_gap_days": 70,
+  "cash": 65200,
+  "max_positions": 13,
+  "max_single_name_frac": 0.076923
+}

@@ -1,6 +1,11 @@
 {
-  "universe": ["F", "VALE", "AAL"],
+  "universe": [
+    "F",
+    "VALE",
+    "AAL"
+  ],
   "broker": "webull-paper",
   "tickers_file": "config/tickers.json",
-  "earnings_gap_days": 70
+  "earnings_gap_days": 70,
+  "cash": 5000
 }

@@ -1,5 +1,5 @@
 {
-  "_about": "Per-ticker facts the broker feed does not carry. Fill only from a source; leave null when unknown (null earnings blocks a stock). Checked 2026-10-31, work/023.",
+  "_about": "Per-ticker facts the broker feed does not carry. Fill only from a source; leave null when unknown (null earnings blocks a stock). F/VALE/AAL checked 2026-10-31 (work/023); the rest 2026-11-07 (work/048).",
   "F": {
     "asset_type": "stock",
     "next_earnings": null,
@@ -17,7 +17,9 @@
     "last_earnings": "2026-10-29",
     "ex_div_date": null,
     "dividend": null,
-    "sources": ["https://stockanalysis.com/stocks/vale/"]
+    "sources": [
+      "https://stockanalysis.com/stocks/vale/"
+    ]
   },
   "AAL": {
     "asset_type": "stock",
@@ -25,6 +27,130 @@
     "last_earnings": "2026-10-22",
     "ex_div_date": null,
     "dividend": 0.0,
-    "sources": ["https://stockanalysis.com/stocks/aal/", "https://stockanalysis.com/stocks/aal/dividend/ (no dividend since 2020)"]
+    "sources": [
+      "https://stockanalysis.com/stocks/aal/",
+      "https://stockanalysis.com/stocks/aal/dividend/ (no dividend since 2020)"
+    ]
+  },
+  "T": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-21",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/t/",
+      "https://stockanalysis.com/stocks/t/dividend/",
+      "last ex-div Oct 9 2026 $0.2775; next ex-date not listed"
+    ]
+  },
+  "VZ": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-26",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/vz/",
+      "https://stockanalysis.com/stocks/vz/dividend/",
+      "last ex-div Oct 9 2026 $0.7075; next ex-date not listed"
+    ]
+  },
+  "PFE": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-11-03",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/pfe/",
+      "https://stockanalysis.com/stocks/pfe/dividend/",
+      "https://stockanalysis.com/stocks/pfe/statistics/ (confirmed date Nov 3 2026, before open)",
+      "last ex-div Nov 6 2026 $0.43; next not listed"
+    ]
+  },
+  "KMI": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-21",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/kmi/",
+      "https://stockanalysis.com/stocks/kmi/dividend/",
+      "last ex-div Nov 2 2026 $0.2975; next not listed"
+    ]
+  },
+  "CMCSA": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-22",
+    "ex_div_date": "2027-01-06",
+    "dividend": 0.33,
+    "sources": [
+      "https://stockanalysis.com/stocks/cmcsa/",
+      "https://stockanalysis.com/stocks/cmcsa/dividend/",
+      "https://stockanalysis.com/stocks/cmcsa/statistics/ (last earnings Oct 22 2026)"
+    ]
+  },
+  "KEY": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-20",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/key/",
+      "https://stockanalysis.com/stocks/key/dividend/",
+      "last ex-div Sep 1 2026 $0.205; next not listed"
+    ]
+  },
+  "HBAN": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-22",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/hban/",
+      "https://stockanalysis.com/stocks/hban/dividend/",
+      "last ex-div Sep 17 2026 $0.155; next not listed"
+    ]
+  },
+  "PBR": {
+    "asset_type": "stock",
+    "next_earnings": "2026-11-10",
+    "last_earnings": null,
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/pbr/",
+      "https://stockanalysis.com/stocks/pbr/dividend/",
+      "upcoming earnings Nov 10 2026: after it passes, enter last_earnings or the stock is blocked"
+    ]
+  },
+  "ITUB": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-11-03",
+    "ex_div_date": "2026-12-02",
+    "dividend": 0.00273,
+    "sources": [
+      "https://stockanalysis.com/stocks/itub/",
+      "https://stockanalysis.com/stocks/itub/dividend/",
+      "earnings date Nov 3 2026 shown on Oct 31 snapshot; monthly dividend table lists Dec 2 2026 $0.00273"
+    ]
+  },
+  "KGC": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-28",
+    "ex_div_date": "2026-11-19",
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/kgc/",
+      "https://stockanalysis.com/stocks/kgc/dividend/",
+      "ex-div Nov 19 2026 from overview; amount: headline 'US$0.04 quarterly, payable Dec 3' only, so left null"
+    ]
   }
 }
