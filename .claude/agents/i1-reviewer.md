@@ -15,4 +15,4 @@ Do:
 3. Write a concrete build plan: files to create or change, functions, tests, and the expected result.
 4. Write `work/<ID>/04-build-plan.md` using `templates/build-plan.md`.
 
-Append to `logs/implementation/<YYYY-MM-DD>.md`: `<time> | I1 | <ID> | <verdict> | <n> files planned`.
+Append to `logs/implementation/<YYYY-MM-DD>.md`: `<UTC HH:MM> | I1 | <ID> | <verdict> | <n> files planned`. Write it with `python3 scripts/check_pipeline.py --log I1 <ID> "<verdict> | <n> files planned"` right after writing your step file: it adds the UTC time and refuses a line not in this format. Never type a log line by hand (item 045).

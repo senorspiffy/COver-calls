@@ -21,4 +21,4 @@ Do:
 
 If the request says `Scope: RESEARCH ONLY`, also write `work/<ID>/07-audit-task.md` listing what A1 should check (claims, math, self-check), because no I3 step will.
 
-Append to `logs/research/<YYYY-MM-DD>.md`: `<time> | R3 | <ID> | <n> verified, <n> fixed, <n> removed | <READY/BLOCKED>`.
+Append to `logs/research/<YYYY-MM-DD>.md`: `<UTC HH:MM> | R3 | <ID> | <n> verified, <n> fixed, <n> removed | <READY/BLOCKED>`. Write it with `python3 scripts/check_pipeline.py --log R3 <ID> "<n> verified, <n> fixed, <n> removed | <READY/BLOCKED>"` right after writing your step file: it adds the UTC time and refuses a line not in this format. Never type a log line by hand (item 045).

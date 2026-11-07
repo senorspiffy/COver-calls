@@ -22,4 +22,4 @@ Do:
 
 Never connect to a live brokerage account or place orders. Use paper/sample data only unless the person explicitly approves otherwise.
 
-Append to `logs/implementation/<YYYY-MM-DD>.md`: `<time> | I2 | <ID> | <files changed> | tests <pass>/<total>`.
+Append to `logs/implementation/<YYYY-MM-DD>.md`: `<UTC HH:MM> | I2 | <ID> | <files changed> | tests <pass>/<total>`. Write it with `python3 scripts/check_pipeline.py --log I2 <ID> "<n> files changed | tests <pass>/<total>"` right after writing your step file: it adds the UTC time and refuses a line not in this format. Never type a log line by hand (item 045).

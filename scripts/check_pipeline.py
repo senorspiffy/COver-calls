@@ -2,6 +2,7 @@
 """Check that every work item's step files match its Scope (items 026, 029, 034; RI-007, RI-009).
 
 Usage: python3 scripts/check_pipeline.py [--today YYYY-MM-DD]   (run from the repo root)
+       python3 scripts/check_pipeline.py --log <agent> <ID> "<fields>"   (item 045)
        python3 scripts/check_pipeline.py --next-id   (the ID to give a new work item, item 037)
 
 Required step files by `Scope:` in request.md (no Scope line = FULL):
@@ -43,6 +44,15 @@ and its last commit date and age (039). Two more lines come from the branches:
   BRANCH SKIPPED  an item the open branch changes skips a step by the rules above, using the
                   branch's own files (item 038). An error for A1 (RI-007); exit code unchanged,
                   since the branch is not part of HEAD.
+--log <agent> <ID> "<fields>" (item 045) appends `HH:MM | <agent> | <ID> | <fields>` with the
+current UTC time to logs/research or logs/implementation/<UTC date>.md, and refuses (exit 2)
+fields that don't match the agent's format (LOG_FORMAT). Every step logs this way, right after
+writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
+  LOG TIME        a committed log line timed after the commit that added it (git blame): it was
+                  not written when its step ran (exit 1; RI-010).
+  ORPHAN LOG      a log line whose item has no work/<ID>/ folder (exit 1; item 047). --log
+                  refuses an ID without work/<ID>/request.md (exit 2), so a typo'd ID is caught
+                  when it is written.
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 """
@@ -70,6 +80,18 @@ RECURRING = "logs/recurring-issues.md"
 # Earlier items are not re-checked (013-016 and 040 were found by A1 on 2026-11-04).
 CHECKLIST_FROM = 41
 AGENT = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"}
+# Item 045: from this ID on, each log line must match its agent's format, and a committed line
+# may not be timed after the commit that added it. Lines are written with --log, never by hand.
+LOG_CHECK_FROM = 45
+LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*.md)
+    "R1": r"brief written \| \d+",
+    "R2": r"3 for / 3 against \| languages: \S.*",
+    "R3": r"\d+ (verified|as-is), \d+ fixed, \d+ removed \| (READY|BLOCKED)\b.*",
+    "I1": r"(FIT|FIT WITH CHANGES|NOT A FIT) \| \d+ files planned\b.*",
+    "I2": r"\d+ files? changed \| tests \d+/\d+\b.*",
+    "I3": r"(PASS|FAIL) \| sent to audit: (yes|no)\b.*",
+}
+LOG_LINE = re.compile(r"^(\d{2}):(\d{2}) \| (R1|R2|R3|I1|I2|I3) \| (\d{3}) \| (.*)$")
 FAST_BY_PERSON = re.compile(r"^Scope:\s*FAST\s*\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*\)", re.M)
 # Older than the Scope/07 rules. Never add a new item here.
 LEGACY = {"001": "RESEARCH ONLY before 07-audit-task existed (item 021)",
@@ -137,7 +159,72 @@ def incomplete(item_dir, logs=Path("logs")):
                 and not re.search(rf"\|\s*{AGENT[s]}\s*\|\s*{item_dir.name}\s*\|", text)]
     if unlogged:
         missing.append(f"no log line for {' '.join(unlogged)}")
+    if int(item_dir.name) >= LOG_CHECK_FROM:
+        bad = sorted({m[3] for m in (LOG_LINE.match(l) for l in text.splitlines())
+                      if m and m[4] == item_dir.name and not re.fullmatch(LOG_FORMAT[m[3]], m[5].strip())})
+        if bad:
+            missing.append(f"log line for {' '.join(bad)} does not match its format (item 045)")
     return missing
+
+
+def write_log(agent, item, fields, now=None):
+    """Item 045: append `HH:MM | agent | ID | fields` (UTC) to today's research or implementation
+    log. Exit code 2 and nothing written when the agent, ID or fields are not in the format."""
+    if agent not in LOG_FORMAT or not re.fullmatch(r"\d{3}", item) \
+            or not re.fullmatch(LOG_FORMAT[agent], fields.strip()):
+        print(f"--log refused: {agent} | {item} | {fields} does not match "
+              f"{LOG_FORMAT.get(agent, 'an agent R1 R2 R3 I1 I2 I3')}", file=sys.stderr)
+        return 2
+    if not (Path("work") / item / "request.md").exists():
+        print(f"--log refused: no work/{item}/request.md (item 047)", file=sys.stderr)
+        return 2
+    now = now or dt.datetime.now(dt.timezone.utc)
+    team = "research" if agent[0] == "R" else "implementation"
+    log = Path("logs") / team / f"{now:%Y-%m-%d}.md"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    head = "" if log.exists() else f"# {team.capitalize()} log - {now:%Y-%m-%d}\n\n"
+    line = f"{now:%H:%M} | {agent} | {item} | {fields.strip()}"
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(f"{head}{line}\n")
+    print(line)
+    return 0
+
+
+def orphan_log_lines():
+    """Item 047: `<ID> (<log file>)` for every agent log line whose work/<ID>/ folder is missing."""
+    orphans = []
+    for team in ("research", "implementation"):
+        for f in sorted((Path("logs") / team).glob("????-??-??.md")):
+            ids = {m[4] for m in map(LOG_LINE.match, f.read_text(encoding="utf-8").splitlines()) if m}
+            orphans += [f"{i} ({f.as_posix()})" for i in sorted(ids) if not (Path("work") / i).is_dir()]
+    return orphans
+
+
+def late_log_lines():
+    """Item 045: committed log lines (items from LOG_CHECK_FROM on) timed after the commit that
+    added them, by `git blame`. None when git is not available here."""
+    if _git("rev-parse", "HEAD") is None:
+        return None
+    late = []
+    for team in ("research", "implementation"):
+        for f in sorted((Path("logs") / team).glob("????-??-??.md")):
+            out = _git("blame", "--line-porcelain", "--", str(f))
+            if out is None or out[1] != 0:
+                continue
+            ctime = None
+            for row in out[0].splitlines():
+                if row.startswith("committer-time "):
+                    ctime = int(row.split()[1])
+                elif row.startswith("\t"):
+                    m = LOG_LINE.match(row[1:])
+                    if m and ctime and int(m[4]) >= LOG_CHECK_FROM:
+                        stated = dt.datetime.fromisoformat(f"{f.stem}T{m[1]}:{m[2]}+00:00")
+                        commit = dt.datetime.fromtimestamp(ctime, dt.timezone.utc).replace(second=0)
+                        if stated > commit:
+                            late.append(f"{m[4]} {m[3]} ({f.stem} {m[1]}:{m[2]} after commit "
+                                        f"{commit:%Y-%m-%d %H:%M} UTC)")
+                    ctime = None
+    return late
 
 
 def _git(*args):
@@ -226,6 +313,10 @@ def main(argv):
     if argv[:1] == ["--next-id"]:
         print(next_id())
         return 0
+    if argv[:1] == ["--log"]:
+        if len(argv) != 4:
+            sys.exit(__doc__)
+        return write_log(*argv[1:])
     if argv[:1] == ["--today"]:
         today = dt.date.fromisoformat(argv[1])
     elif argv:
@@ -275,8 +366,12 @@ def main(argv):
             print(f"BRANCH SKIPPED: {item} ({b['ref']}: {detail})")
     print(f"A1 FAIL: {', '.join(failed) or 'none'}")
     print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
+    late = late_log_lines()
+    print(f"LOG TIME: {'not checked (no git)' if late is None else ', '.join(late) or 'none'}")
+    orphans = orphan_log_lines()
+    print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
-    return 1 if skipped or failed or unfinished else 0
+    return 1 if skipped or failed or unfinished or late or orphans else 0
 
 
 if __name__ == "__main__":
