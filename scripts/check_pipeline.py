@@ -103,6 +103,16 @@ LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*
     "I2": r"\d+ files? changed \| tests \d+/\d+\b.*",
     "I3": r"(PASS|FAIL) \| sent to audit: (yes|no)\b.*",
 }
+# Item 050: the same formats in plain words (as the agent files write them), with an example
+# that fits each regex (tests check both), for INCOMPLETE and --log refusals.
+LOG_HINT = {
+    "R1": ("brief written | <sources count>", "brief written | 3"),
+    "R2": ("3 for / 3 against | languages: <list or N/A>", "3 for / 3 against | languages: N/A"),
+    "R3": ("<n> verified, <n> fixed, <n> removed | READY or BLOCKED", "5 verified, 1 fixed, 0 removed | READY"),
+    "I1": ("FIT or FIT WITH CHANGES or NOT A FIT | <n> files planned", "FIT | 2 files planned"),
+    "I2": ("<n> files changed | tests <pass>/<total>", "2 files changed | tests 9/9"),
+    "I3": ("PASS or FAIL | sent to audit: yes or no", "PASS | sent to audit: yes"),
+}
 LOG_LINE = re.compile(r"^(\d{2}):(\d{2}) \| (R1|R2|R3|I1|I2|I3) \| (\d{3}) \| (.*)$")
 FAST_BY_PERSON = re.compile(r"^Scope:\s*FAST\s*\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*\)", re.M)
 # Older than the Scope/07 rules. Never add a new item here.
@@ -175,7 +185,8 @@ def incomplete(item_dir, logs=Path("logs")):
         bad = sorted({m[3] for m in (LOG_LINE.match(l) for l in text.splitlines())
                       if m and m[4] == item_dir.name and not re.fullmatch(LOG_FORMAT[m[3]], m[5].strip())})
         if bad:
-            missing.append(f"log line for {' '.join(bad)} does not match its format (item 045)")
+            wants = "; ".join(f'{a} wants "{LOG_HINT[a][0]}"' for a in bad)
+            missing.append(f"log line for {' '.join(bad)} does not match its format (item 045): {wants}")
     return missing
 
 
@@ -185,7 +196,8 @@ def write_log(agent, item, fields, now=None):
     if agent not in LOG_FORMAT or not re.fullmatch(r"\d{3}", item) \
             or not re.fullmatch(LOG_FORMAT[agent], fields.strip()):
         print(f"--log refused: {agent} | {item} | {fields} does not match "
-              f"{LOG_FORMAT.get(agent, 'an agent R1 R2 R3 I1 I2 I3')}", file=sys.stderr)
+              f"{chr(34) + LOG_HINT[agent][0] + chr(34) if agent in LOG_HINT else 'an agent R1 R2 R3 I1 I2 I3'}",
+              file=sys.stderr)
         return 2
     if not (Path("work") / item / "request.md").exists():
         print(f"--log refused: no work/{item}/request.md (item 047)", file=sys.stderr)

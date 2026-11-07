@@ -391,7 +391,7 @@ def test_malformed_log_line_is_incomplete(tmp_path):
             fh.write(f"12:00 | I2 | {item} | see 05 | tests 1/1\n")
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
     assert code == 1
-    assert "150 (log line for I2 does not match its format (item 045))" in out
+    assert "150 (log line for I2 does not match its format (item 045)" in out
     assert "044 (" not in out.split("INCOMPLETE:")[1].splitlines()[0]
 
 
@@ -500,3 +500,29 @@ def test_recommitted_log_line_is_checked_against_new_commit(tmp_path):
     _commit_all(tmp_path, "2026-11-07T22:00:00+00:00")
     _, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-08")
     assert "LOG TIME: none" in out
+
+
+def test_log_hints_match_formats():
+    """050: one plain-word hint per agent format, and each hint's example fits its regex."""
+    import re
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_pipeline
+    assert set(check_pipeline.LOG_HINT) == set(check_pipeline.LOG_FORMAT)
+    for agent, (_, example) in check_pipeline.LOG_HINT.items():
+        assert re.fullmatch(check_pipeline.LOG_FORMAT[agent], example), agent
+
+
+def test_malformed_log_line_names_expected_format(tmp_path):
+    """050: the 2026-11-07 case (048's `see 04` / `see 05`): INCOMPLETE and --log say what they want."""
+    _item(tmp_path, "150", ALL)
+    with (tmp_path / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+        fh.write("12:00 | I1 | 150 | FIT | see 04\n12:00 | I2 | 150 | see 05 | tests 1/1\n")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    assert code == 1
+    assert ('150 (log line for I1 I2 does not match its format (item 045): '
+            'I1 wants "FIT or FIT WITH CHANGES or NOT A FIT | <n> files planned"; '
+            'I2 wants "<n> files changed | tests <pass>/<total>")') in out
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), "--log", "I2", "150", "see 05"],
+                       cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 2
+    assert r.stderr.strip() == '--log refused: I2 | 150 | see 05 does not match "<n> files changed | tests <pass>/<total>"'
