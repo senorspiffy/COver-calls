@@ -59,6 +59,9 @@ writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMP
   ORPHAN LOG      a log line whose item has no work/<ID>/ folder (exit 1; item 047). --log
                   refuses an ID without work/<ID>/request.md (exit 2), so a typo'd ID is caught
                   when it is written.
+  MAIN AHEAD      HEAD is behind origin/main: merge main first. origin/main and branches whose
+                  tip is already in it are then left out of OPEN BRANCHES (item 051); --next-id
+                  still counts them.
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 """
@@ -272,9 +275,13 @@ def open_branches(today=None):
     if out is None or out[1] != 0:
         return []
     today = today or dt.datetime.now(dt.timezone.utc).date()
+    behind = main_ahead() > 0
     found = []
     for ref in out[0].split():
         if ref.endswith("/HEAD") or "/" not in ref:
+            continue
+        # HEAD is behind main: main and refs already in main are not open work (item 051)
+        if behind and (ref == MAIN or _git("merge-base", "--is-ancestor", ref, MAIN)[1] == 0):
             continue
         # items the branch changes (since it left HEAD), with every step file it has for them
         changed = _git("diff", "--name-only", f"HEAD...{ref}", "--", "work/")
@@ -322,6 +329,18 @@ def open_branches(today=None):
                       "recurring": bool(diff and diff[0].strip()), "clashes": clashes,
                       "skipped": skipped, "last": last, "rules": rules})
     return found
+
+
+MAIN = "origin/main"
+
+
+def main_ahead():
+    """Commits on origin/main that HEAD lacks (item 051); 0 when there is no origin/main."""
+    ref = _git("rev-parse", "--verify", "-q", MAIN)
+    if ref is None or ref[1] != 0:
+        return 0
+    n = _git("rev-list", "--count", f"HEAD..{MAIN}")
+    return int(n[0].strip()) if n and n[1] == 0 and n[0].strip().isdigit() else 0
 
 
 def next_id():
@@ -376,6 +395,9 @@ def main(argv):
     print(f"STUCK: {', '.join(stuck) or 'none'}")
     print(f"AWAITING A1: {', '.join(awaiting) or 'none'}")
     print(f"IN PR: {', '.join(in_pr) or 'none'}")
+    ahead = main_ahead()
+    if ahead:
+        print(f"MAIN AHEAD: {MAIN} has {ahead} commits not in HEAD; merge it before building (item 051)")
     if branches:
         print("OPEN BRANCHES (not merged into HEAD):")
         for b in branches:

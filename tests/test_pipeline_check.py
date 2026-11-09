@@ -526,3 +526,25 @@ def test_malformed_log_line_names_expected_format(tmp_path):
                        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 2
     assert r.stderr.strip() == '--log refused: I2 | 150 | see 05 does not match "<n> files changed | tests <pass>/<total>"'
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_branch_behind_main_says_main_ahead(tmp_path):
+    """Item 051: on PR #15's branch after the 11-08 audit, origin/main and a thread branch
+    sitting on main were listed as open branches with a false item-036 warning."""
+    repo = _repo_with_open_branch(tmp_path)
+    _item(repo, "041", [], date="2026-11-09")              # A1's daily commit on main
+    (repo / "logs" / "recurring-issues.md").write_text("RI\ndaily\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "daily audit")
+    _git(repo, "push", "-q", "origin", "main")
+    _git(repo, "push", "-q", "origin", "main:mirror")      # a thread branch on main's commit
+    _git(repo, "checkout", "-q", "fix")
+    out = _run(repo, "check_pipeline.py", "--today", "2026-11-09")[1]
+    assert "MAIN AHEAD: origin/main has 1 commits not in HEAD; merge it before building (item 051)" in out
+    assert "origin/main:" not in out and "origin/mirror:" not in out
+    assert "(item 036)" not in out
+    assert _run(repo, "check_pipeline.py", "--next-id")[1].strip() == "042"   # main's 041 still counts
+    _git(repo, "checkout", "-q", "main")
+    out = _run(repo, "check_pipeline.py", "--today", "2026-11-09")[1]
+    assert "MAIN AHEAD" not in out
+    assert "origin/fix: items 040" in out
