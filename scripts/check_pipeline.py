@@ -50,6 +50,12 @@ fields that don't match the agent's format (LOG_FORMAT). Every step logs this wa
 writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
   LOG TIME        a committed log line timed after the commit that added it (git blame): it was
                   not written when its step ran (exit 1; RI-010).
+                  Items in LOG_TIME_EXCEPT are not checked and are named with their reason
+                  (item 049). Known gap: blame gives a line's latest commit, so a line edited
+                  in a later commit is checked against that later commit.
+  RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
+                  scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
+                  of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
   ORPHAN LOG      a log line whose item has no work/<ID>/ folder (exit 1; item 047). --log
                   refuses an ID without work/<ID>/request.md (exit 2), so a typo'd ID is caught
                   when it is written.
@@ -83,6 +89,12 @@ AGENT = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"}
 # Item 045: from this ID on, each log line must match its agent's format, and a committed line
 # may not be timed after the commit that added it. Lines are written with --log, never by hand.
 LOG_CHECK_FROM = 45
+# Item 049: items whose log times can't be checked, with why. 048 was built on a branch cut
+# before 045 merged; its six lines were typed by hand with a time after their commit, and the
+# real times are lost. Never add a new item here.
+LOG_TIME_EXCEPT = {"048": "built before 045's --log rule reached main; times typed by hand, not recoverable (item 049)"}
+# Item 049: an open branch changing any of these changes the rules new items are built under.
+RULE_PATHS = (".claude/", "templates/", "scripts/check_pipeline.py", "scripts/check_handoff.py")
 LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*.md)
     "R1": r"brief written \| \d+",
     "R2": r"3 for / 3 against \| languages: \S.*",
@@ -90,6 +102,16 @@ LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*
     "I1": r"(FIT|FIT WITH CHANGES|NOT A FIT) \| \d+ files planned\b.*",
     "I2": r"\d+ files? changed \| tests \d+/\d+\b.*",
     "I3": r"(PASS|FAIL) \| sent to audit: (yes|no)\b.*",
+}
+# Item 050: the same formats in plain words (as the agent files write them), with an example
+# that fits each regex (tests check both), for INCOMPLETE and --log refusals.
+LOG_HINT = {
+    "R1": ("brief written | <sources count>", "brief written | 3"),
+    "R2": ("3 for / 3 against | languages: <list or N/A>", "3 for / 3 against | languages: N/A"),
+    "R3": ("<n> verified, <n> fixed, <n> removed | READY or BLOCKED", "5 verified, 1 fixed, 0 removed | READY"),
+    "I1": ("FIT or FIT WITH CHANGES or NOT A FIT | <n> files planned", "FIT | 2 files planned"),
+    "I2": ("<n> files changed | tests <pass>/<total>", "2 files changed | tests 9/9"),
+    "I3": ("PASS or FAIL | sent to audit: yes or no", "PASS | sent to audit: yes"),
 }
 LOG_LINE = re.compile(r"^(\d{2}):(\d{2}) \| (R1|R2|R3|I1|I2|I3) \| (\d{3}) \| (.*)$")
 FAST_BY_PERSON = re.compile(r"^Scope:\s*FAST\s*\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*\)", re.M)
@@ -163,7 +185,8 @@ def incomplete(item_dir, logs=Path("logs")):
         bad = sorted({m[3] for m in (LOG_LINE.match(l) for l in text.splitlines())
                       if m and m[4] == item_dir.name and not re.fullmatch(LOG_FORMAT[m[3]], m[5].strip())})
         if bad:
-            missing.append(f"log line for {' '.join(bad)} does not match its format (item 045)")
+            wants = "; ".join(f'{a} wants "{LOG_HINT[a][0]}"' for a in bad)
+            missing.append(f"log line for {' '.join(bad)} does not match its format (item 045): {wants}")
     return missing
 
 
@@ -173,7 +196,8 @@ def write_log(agent, item, fields, now=None):
     if agent not in LOG_FORMAT or not re.fullmatch(r"\d{3}", item) \
             or not re.fullmatch(LOG_FORMAT[agent], fields.strip()):
         print(f"--log refused: {agent} | {item} | {fields} does not match "
-              f"{LOG_FORMAT.get(agent, 'an agent R1 R2 R3 I1 I2 I3')}", file=sys.stderr)
+              f"{chr(34) + LOG_HINT[agent][0] + chr(34) if agent in LOG_HINT else 'an agent R1 R2 R3 I1 I2 I3'}",
+              file=sys.stderr)
         return 2
     if not (Path("work") / item / "request.md").exists():
         print(f"--log refused: no work/{item}/request.md (item 047)", file=sys.stderr)
@@ -217,7 +241,7 @@ def late_log_lines():
                     ctime = int(row.split()[1])
                 elif row.startswith("\t"):
                     m = LOG_LINE.match(row[1:])
-                    if m and ctime and int(m[4]) >= LOG_CHECK_FROM:
+                    if m and ctime and int(m[4]) >= LOG_CHECK_FROM and m[4] not in LOG_TIME_EXCEPT:
                         stated = dt.datetime.fromisoformat(f"{f.stem}T{m[1]}:{m[2]}+00:00")
                         commit = dt.datetime.fromtimestamp(ctime, dt.timezone.utc).replace(second=0)
                         if stated > commit:
@@ -269,6 +293,8 @@ def open_branches(today=None):
         if merge is not None and merge[1] in (0, 1):
             conflicts = merge[0].splitlines()[1:] if merge[1] == 1 else []
         diff = _git("diff", "--name-only", f"HEAD...{ref}", "--", RECURRING)
+        ruled = _git("diff", "--name-only", f"HEAD...{ref}", "--", *RULE_PATHS)
+        rules = ruled[0].split() if ruled and ruled[1] == 0 else []
         base = _git("merge-base", "HEAD", ref)
         base = base[0].strip() if base and base[1] == 0 else None
         clashes, skipped = [], []
@@ -294,7 +320,7 @@ def open_branches(today=None):
         last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
         found.append({"ref": ref, "items": items, "conflicts": conflicts,
                       "recurring": bool(diff and diff[0].strip()), "clashes": clashes,
-                      "skipped": skipped, "last": last})
+                      "skipped": skipped, "last": last, "rules": rules})
     return found
 
 
@@ -359,6 +385,9 @@ def main(argv):
             note = f"; edits {RECURRING} (item 036)" if b["recurring"] else ""
             age = f"; last commit {b['last']} ({(today - b['last']).days} days)" if b["last"] else ""
             print(f"  {b['ref']}: items {', '.join(sorted(b['items'])) or 'none'}; {merge}{note}{age}")
+    if _git("rev-parse", "HEAD") is not None:
+        ruling = [f"{b['ref']} changes {', '.join(b['rules'])}" for b in branches if b["rules"]]
+        print(f"RULES BRANCH: {'; '.join(ruling) + '; build new items on top of it (item 049)' if ruling else 'none'}")
     clashes = [f"{i} ({b['ref']})" for b in branches for i in b["clashes"]]
     print(f"ID CLASH: {', '.join(clashes) or 'none'}")
     for b in branches:
@@ -367,7 +396,10 @@ def main(argv):
     print(f"A1 FAIL: {', '.join(failed) or 'none'}")
     print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
     late = late_log_lines()
-    print(f"LOG TIME: {'not checked (no git)' if late is None else ', '.join(late) or 'none'}")
+    excepted = "; ".join(f"{i}: {why}" for i, why in sorted(LOG_TIME_EXCEPT.items())
+                         if (work / i / "request.md").exists())
+    excepted = f" (not checked: {excepted})" if excepted and late is not None else ""
+    print(f"LOG TIME: {'not checked (no git)' if late is None else (', '.join(late) or 'none') + excepted}")
     orphans = orphan_log_lines()
     print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")

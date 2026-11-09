@@ -391,7 +391,7 @@ def test_malformed_log_line_is_incomplete(tmp_path):
             fh.write(f"12:00 | I2 | {item} | see 05 | tests 1/1\n")
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
     assert code == 1
-    assert "150 (log line for I2 does not match its format (item 045))" in out
+    assert "150 (log line for I2 does not match its format (item 045)" in out
     assert "044 (" not in out.split("INCOMPLETE:")[1].splitlines()[0]
 
 
@@ -426,3 +426,103 @@ def test_log_time_not_checked_outside_git(tmp_path):
     _item(tmp_path, "150", ALL)
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
     assert code == 0 and "LOG TIME: not checked (no git)" in out
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_rules_branch_is_reported(tmp_path):
+    """049 (RI-010): 048 was built on main while PR #12 changed the logging rules. An open branch
+    that changes .claude/, templates/ or the check scripts is named; one that changes only work/
+    and logs/ is not."""
+    repo = _repo_with_open_branch(tmp_path)
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    assert "RULES BRANCH: none" in out
+    _git(repo, "checkout", "-q", "-b", "rules")
+    agent = repo / ".claude" / "agents" / "x.md"
+    agent.parent.mkdir(parents=True)
+    agent.write_text("new rule\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "rules")
+    _git(repo, "push", "-q", "origin", "rules")
+    _git(repo, "checkout", "-q", "main")
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    line = [l for l in out.splitlines() if l.startswith("RULES BRANCH:")][0]
+    assert line == "RULES BRANCH: origin/rules changes .claude/agents/x.md; build new items on top of it (item 049)"
+    assert "origin/fix" not in line
+
+
+def _commit_all(root, when):
+    env = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    if not (root / ".git").exists():
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True, env=env)
+    for cmd in (["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]):
+        subprocess.run(["git", *cmd], cwd=root, check=True, env=env)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_log_time_exception_is_named_and_closed(tmp_path):
+    """049: the 2026-11-07 case. 048's lines say 20:40, their commit is 20:20. 048 is named with
+    its reason, not flagged; the same late line for 150 is still flagged. The list stays {048}."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_pipeline
+    assert set(check_pipeline.LOG_TIME_EXCEPT) == {"048"}
+    for item in ("048", "150"):
+        _item(tmp_path, item, ALL, date="2026-11-07", logged=False)
+        log = tmp_path / "logs" / "implementation" / "2026-11-07.md"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(f"20:40 | I3 | {item} | PASS | sent to audit: yes\n")
+        research = tmp_path / "logs" / "research" / "2026-11-07.md"
+        research.parent.mkdir(parents=True, exist_ok=True)
+        with research.open("a", encoding="utf-8") as fh:
+            fh.write("".join(f"20:00 | {a} | {item} | {FIELDS[a]}\n" for a in ("R1", "R2", "R3")))
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write("".join(f"20:00 | {a} | {item} | {FIELDS[a]}\n" for a in ("I1", "I2")))
+    _commit_all(tmp_path, "2026-11-07T20:20:51+00:00")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-08")
+    line = [l for l in out.splitlines() if l.startswith("LOG TIME:")][0]
+    assert code == 1
+    assert line.startswith("LOG TIME: 150 I3 (2026-11-07 20:40 after commit 2026-11-07 20:20 UTC)")
+    assert "048 I3" not in line
+    assert "(not checked: 048: built before 045's --log rule reached main" in line
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_recommitted_log_line_is_checked_against_new_commit(tmp_path):
+    """049, known gap (written in the docstring): blame gives a line's latest commit, so a late
+    line that is edited in a later commit is no longer flagged."""
+    _item(tmp_path, "150", ALL, date="2026-11-07", logged=False)
+    log = tmp_path / "logs" / "implementation" / "2026-11-07.md"
+    log.parent.mkdir(parents=True)
+    log.write_text("20:40 | I2 | 150 | see 05 | tests 1/1\n", encoding="utf-8")
+    _commit_all(tmp_path, "2026-11-07T20:20:00+00:00")
+    _, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-08")
+    assert "LOG TIME: 150 I2" in out
+    log.write_text("20:40 | I2 | 150 | 1 files changed | tests 1/1\n", encoding="utf-8")
+    _commit_all(tmp_path, "2026-11-07T22:00:00+00:00")
+    _, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-08")
+    assert "LOG TIME: none" in out
+
+
+def test_log_hints_match_formats():
+    """050: one plain-word hint per agent format, and each hint's example fits its regex."""
+    import re
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_pipeline
+    assert set(check_pipeline.LOG_HINT) == set(check_pipeline.LOG_FORMAT)
+    for agent, (_, example) in check_pipeline.LOG_HINT.items():
+        assert re.fullmatch(check_pipeline.LOG_FORMAT[agent], example), agent
+
+
+def test_malformed_log_line_names_expected_format(tmp_path):
+    """050: the 2026-11-07 case (048's `see 04` / `see 05`): INCOMPLETE and --log say what they want."""
+    _item(tmp_path, "150", ALL)
+    with (tmp_path / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+        fh.write("12:00 | I1 | 150 | FIT | see 04\n12:00 | I2 | 150 | see 05 | tests 1/1\n")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    assert code == 1
+    assert ('150 (log line for I1 I2 does not match its format (item 045): '
+            'I1 wants "FIT or FIT WITH CHANGES or NOT A FIT | <n> files planned"; '
+            'I2 wants "<n> files changed | tests <pass>/<total>")') in out
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), "--log", "I2", "150", "see 05"],
+                       cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
+    assert r.returncode == 2
+    assert r.stderr.strip() == '--log refused: I2 | 150 | see 05 does not match "<n> files changed | tests <pass>/<total>"'
