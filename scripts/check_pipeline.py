@@ -36,7 +36,9 @@ INCOMPLETE (item 043, exit 1): for items from CHECKLIST_FROM on, a 06 with no
 `| <agent> | <ID> |` line in logs/research or logs/implementation.
 
 When run inside a git repo, it also prints OPEN BRANCHES: every remote branch not merged into
-HEAD, the work items it carries, whether it merges cleanly into HEAD (`git merge-tree`), and
+HEAD, the work items it carries (what merging it into HEAD would change, from the
+`git merge-tree` result, so a branch with two merge bases is not credited with work already in
+HEAD; item 052), whether it merges cleanly into HEAD (`git merge-tree`), and
 whether it edits logs/recurring-issues.md, which only A1's daily commit on main should (036),
 and its last commit date and age (039). Two more lines come from the branches:
   ID CLASH        HEAD and an open branch each added work/<ID>/request.md since their merge
@@ -283,9 +285,22 @@ def open_branches(today=None):
         # HEAD is behind main: main and refs already in main are not open work (item 051)
         if behind and (ref == MAIN or _git("merge-base", "--is-ancestor", ref, MAIN)[1] == 0):
             continue
-        # items the branch changes (since it left HEAD), with every step file it has for them
-        changed = _git("diff", "--name-only", f"HEAD...{ref}", "--", "work/")
-        touched = {n.split("/")[1] for n in (changed[0].splitlines() if changed else []) if n.count("/") == 2}
+        merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
+        conflicts = None
+        if merge is not None and merge[1] in (0, 1):
+            conflicts = merge[0].splitlines()[1:] if merge[1] == 1 else []
+        # what merging the branch would change: HEAD vs the merge result. `HEAD...ref` uses one
+        # merge base, so with two (criss-cross) a PR already merged looks like this branch's (052)
+        tree = merge[0].split()[0] if conflicts is not None and merge[0].strip() else None
+
+        def changed(*paths):
+            out = _git("diff", "--name-only", "HEAD", tree, "--", *paths) if tree else None
+            if out is None or out[1] != 0:
+                out = _git("diff", "--name-only", f"HEAD...{ref}", "--", *paths)
+            return out[0].split() if out and out[1] == 0 else []
+
+        # items the branch changes, with every step file it has for them
+        touched = {n.split("/")[1] for n in changed("work/") if n.count("/") == 2}
         items = {i: set() for i in touched}
         files = {i: [] for i in touched}
         listing = _git("ls-tree", "-r", "--name-only", ref, "--", "work/")
@@ -295,22 +310,17 @@ def open_branches(today=None):
                 files[parts[1]].append(parts[2])
                 if parts[2] in STEPS.values():
                     items[parts[1]].add(parts[2][:2])
-        merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
-        conflicts = None
-        if merge is not None and merge[1] in (0, 1):
-            conflicts = merge[0].splitlines()[1:] if merge[1] == 1 else []
-        diff = _git("diff", "--name-only", f"HEAD...{ref}", "--", RECURRING)
-        ruled = _git("diff", "--name-only", f"HEAD...{ref}", "--", *RULE_PATHS)
-        rules = ruled[0].split() if ruled and ruled[1] == 0 else []
-        base = _git("merge-base", "HEAD", ref)
-        base = base[0].strip() if base and base[1] == 0 else None
+        recurring = bool(changed(RECURRING))
+        rules = changed(*RULE_PATHS)
+        bases = _git("merge-base", "--all", "HEAD", ref)
+        bases = bases[0].split() if bases and bases[1] == 0 else []
         clashes, skipped = [], []
         for item in sorted(touched):
             req = f"work/{item}/request.md"
             theirs = _git("show", f"{ref}:{req}")
             mine = Path(req)
-            if (base and theirs and theirs[1] == 0 and mine.exists()
-                    and _git("cat-file", "-e", f"{base}:{req}")[1] != 0
+            if (bases and theirs and theirs[1] == 0 and mine.exists()
+                    and all(_git("cat-file", "-e", f"{b}:{req}")[1] != 0 for b in bases)
                     and theirs[0] != mine.read_text(encoding="utf-8")):
                 clashes.append(item)
             if theirs and theirs[1] == 0 and item not in LEGACY:
@@ -326,7 +336,7 @@ def open_branches(today=None):
         when = _git("log", "-1", "--format=%cs", ref)
         last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
         found.append({"ref": ref, "items": items, "conflicts": conflicts,
-                      "recurring": bool(diff and diff[0].strip()), "clashes": clashes,
+                      "recurring": recurring, "clashes": clashes,
                       "skipped": skipped, "last": last, "rules": rules})
     return found
 

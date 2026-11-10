@@ -548,3 +548,41 @@ def test_branch_behind_main_says_main_ahead(tmp_path):
     out = _run(repo, "check_pipeline.py", "--today", "2026-11-09")[1]
     assert "MAIN AHEAD" not in out
     assert "origin/fix: items 040" in out
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_criss_cross_branch_lists_only_its_own_changes(tmp_path, monkeypatch):
+    """Item 052 (RI-011): PR #16 was cut from PR #15's branch and merged main; then main merged
+    PR #15. Two merge bases, so `HEAD...ref` credited PR #16 with PR #15's items and rule files.
+    Commit dates as on 2026-11-07..10: git's `...` then picks main's newer daily commit as the base."""
+    repo = _repo_with_open_branch(tmp_path)               # origin/fix carries item 040
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-07T22:00:00Z")
+    _git(repo, "checkout", "-q", "fix")
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "rule.md").write_text("rule\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "fix: rule change")
+    _git(repo, "push", "-q", "origin", "fix")
+    _git(repo, "checkout", "-q", "-b", "next")            # built on top of the open PR
+    _git(repo, "checkout", "-q", "main")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-09T22:16:00Z")
+    _item(repo, "041", [], date="2026-11-09")             # A1's daily commit on main
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "daily audit")
+    _git(repo, "push", "-q", "origin", "main")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-09T22:19:00Z")
+    _git(repo, "checkout", "-q", "next")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    (repo / "work" / "041" / "01-research.md").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "next: 041")
+    _git(repo, "push", "-q", "origin", "next")
+    _git(repo, "checkout", "-q", "main")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-09T23:34:00Z")
+    _git(repo, "merge", "-q", "--no-ff", "--no-edit", "fix")   # the person merges the open PR
+    _git(repo, "push", "-q", "origin", "main")
+    bases = subprocess.run(["git", "merge-base", "--all", "HEAD", "origin/next"], cwd=repo,
+                           capture_output=True, text=True).stdout.split()
+    assert len(bases) == 2                                # the criss-cross this test is about
+    out = _run(repo, "check_pipeline.py", "--today", "2026-11-10")[1]
+    assert "origin/next: items 041;" in out
+    assert "RULES BRANCH: none" in out
+    assert "(item 036)" not in out
+    assert "ID CLASH: none" in out
