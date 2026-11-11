@@ -33,10 +33,10 @@ def test_every_universe_ticker_has_sourced_facts():
 
 
 def test_earnings_known_for_dec_18_on_2026_11_09():
-    """Monday's first run: every name but PBR (reports Nov 10) clears the Dec 18 expiry."""
+    """Monday's first run: every name clears the Dec 18 expiry."""
     cfg = _cfg("practice.json")
     facts = load_facts(cfg)
     day = Day(dt.date(2026, 11, 9), 20.0, q=0.0)
     clear = {t for t in cfg["universe"]
              if (d := enrich(day, t, facts, cfg)).earnings_known and d.next_earnings > dt.date(2026, 12, 18)}
-    assert set(cfg["universe"]) - clear == {"PBR"}
+    assert set(cfg["universe"]) - clear == set()   # PBR: last report Nov 10 (2026-11-11 follow-up)

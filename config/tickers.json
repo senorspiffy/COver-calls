@@ -119,14 +119,13 @@
   },
   "PBR": {
     "asset_type": "stock",
-    "next_earnings": "2026-11-10",
-    "last_earnings": null,
+    "next_earnings": null,
+    "last_earnings": "2026-11-10",
     "ex_div_date": null,
     "dividend": null,
     "sources": [
-      "https://stockanalysis.com/stocks/pbr/",
-      "https://stockanalysis.com/stocks/pbr/dividend/",
-      "upcoming earnings Nov 10 2026: after it passes, enter last_earnings or the stock is blocked"
+      "https://stockanalysis.com/stocks/pbr/statistics/ (\"next confirmed earnings date is Tuesday, November 10, 2026, after market close\"; read 2026-11-11, snapshot Oct 27: the report itself not confirmed)",
+      "https://stockanalysis.com/stocks/pbr/dividend/ (last ex-div Aug 25 2026 $0.44103; next not listed)"
     ]
   },
   "ITUB": {
