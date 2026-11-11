@@ -124,8 +124,9 @@
     "ex_div_date": null,
     "dividend": null,
     "sources": [
-      "https://stockanalysis.com/stocks/pbr/statistics/ (\"next confirmed earnings date is Tuesday, November 10, 2026, after market close\"; read 2026-11-11, snapshot Oct 27: the report itself not confirmed)",
-      "https://stockanalysis.com/stocks/pbr/dividend/ (last ex-div Aug 25 2026 $0.44103; next not listed)"
+      "https://agencia.petrobras.com.br/en/w/negocio/petrobras-registra-lucro-l%C3%ADquido-de-r-39-8-bilh%C3%B5es-no-terceiro-trimestre-de-2026 (3Q26 results released 2026-11-10, posted 2026.11.10)",
+      "https://agencia.petrobras.com.br/en/w/institucional/petrobras-aprova-pagamento-de-r-15-3-bilh%C3%B5es-aos-seus-acionistas (ADR record date 2026-12-23, ex-date not published; amount per ADR not published (R$ 1.18732774/share in 2 installments, form set by 2026-12-10))",
+      "https://stockanalysis.com/stocks/pbr/dividend/ (last ex-div Aug 25 2026 $0.44103)"
     ]
   },
   "ITUB": {

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check that every work item's step files match its Scope (items 026, 029, 034; RI-007, RI-009).
 
-Usage: python3 scripts/check_pipeline.py [--today YYYY-MM-DD]   (run from the repo root)
+Usage: python3 scripts/check_pipeline.py [--today YYYY-MM-DD] [--untracked-from SHA]   (run from the repo root;
+       --untracked-from is for tests only; the daily run uses the item-053 constant UNTRACKED_FROM)
        python3 scripts/check_pipeline.py --log <agent> <ID> "<fields>"   (item 045)
        python3 scripts/check_pipeline.py --next-id   (the ID to give a new work item, item 037)
 
@@ -64,6 +65,21 @@ writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMP
   MAIN AHEAD      HEAD is behind origin/main: merge main first. origin/main and branches whose
                   tip is already in it are then left out of OPEN BRANCHES (item 051); --next-id
                   still counts them.
+  UNTRACKED CHANGE  (item 053, exit 1; RI-007) a commit on HEAD's first-parent chain after the
+                  cutoff UNTRACKED_FROM that changes CODE_PATHS (ccbot/, config/, scripts/, tests/,
+                  .claude/, templates/) and changes no step file 01-06 of a work item that is open at
+                  the commit's first parent (07 absent, no `A1 result:` line, or last line FAIL;
+                  PRE_A1_LINE and LEGACY items are closed). Each commit is judged against its first
+                  parent (`git diff-tree --no-renames`), so a merge is one unit. 07 never covers code.
+                  A follow-up to a completed item is a new item. "not checked (no git)" without git;
+                  "not checked (... shallow clone ...)" when the cutoff is missing from a shallow
+                  clone (exit unchanged); a cutoff missing from a full clone is an error (exit 1).
+                  Known gaps: (a) one open item's 01-06 file covers unrelated code in the same unit;
+                  (b) on a branch each direct commit is its own unit, so commit code together with
+                  your 05; (c) PRs must land as merge commits (squash or rebase drops the cutoff ->
+                  exit 1); (d) a merge's conflict edits are judged together with the whole merge
+                  against its first parent; (e) paths outside CODE_PATHS (pyproject.toml, README.md,
+                  data/) are not checked; (f) non-ASCII paths are quoted (no -z).
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 """
@@ -100,6 +116,12 @@ LOG_CHECK_FROM = 45
 LOG_TIME_EXCEPT = {"048": "built before 045's --log rule reached main; times typed by hand, not recoverable (item 049)"}
 # Item 049: an open branch changing any of these changes the rules new items are built under.
 RULE_PATHS = (".claude/", "templates/", "scripts/check_pipeline.py", "scripts/check_handoff.py")
+# Item 053: a commit changing any of these must change a step file 01-06 of an open work item.
+CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/", ".claude/", "templates/")
+# item 053: HEAD of daily-fixes/2026-11-11 just before I2's first code commit; never move it forward
+UNTRACKED_FROM = "694bf4d0038e25bb82bd111018fbd67a94bbc74d"
+STEP_FILE = re.compile(r"^work/(\d{3})/(01-research|02-improvements|03-handoff|04-build-plan|"
+                       r"05-build-report|06-verification)\.md$")
 LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*.md)
     "R1": r"brief written \| \d+",
     "R2": r"3 for / 3 against \| languages: \S.*",
@@ -341,6 +363,53 @@ def open_branches(today=None):
     return found
 
 
+def _open_at(parent, item):
+    """Item 053: is work item `item` still going through the pipeline at commit `parent`?
+    PRE_A1_LINE and LEGACY items are closed; otherwise open when its 07 is absent there, has no
+    `A1 result:` line, or its last one is FAIL (as classify)."""
+    if item in PRE_A1_LINE or item in LEGACY:
+        return False
+    audit = _git("show", f"{parent}:work/{item}/07-audit-task.md")
+    if audit is None or audit[1] != 0:
+        return True
+    verdicts = re.findall(r"^A1 result:\s*(\w+)", audit[0], re.M)
+    return not verdicts or verdicts[-1].upper() == "FAIL"
+
+
+def untracked_changes(cutoff=UNTRACKED_FROM):
+    """Item 053 (RI-007): None without git, else (text after `UNTRACKED CHANGE: `, failed)."""
+    if _git("rev-parse", "HEAD") is None:
+        return None
+    note = f" (cutoff {cutoff[:7]} from --untracked-from)" if cutoff != UNTRACKED_FROM else ""
+    known = _git("rev-parse", "--verify", "-q", f"{cutoff}^{{commit}}")
+    if known[1] != 0 or _git("merge-base", "--is-ancestor", cutoff, "HEAD")[1] != 0:
+        shallow = _git("rev-parse", "--is-shallow-repository")
+        if shallow[1] == 0 and shallow[0].strip() == "true":
+            return (f"not checked (cutoff {cutoff[:7]} not in this shallow clone; run git fetch --unshallow)"
+                    + note, False)
+        return f"cutoff {cutoff[:7]} not in HEAD's history (squash/rebase or wrong SHA)" + note, True
+    walk = _git("rev-list", "--first-parent", "--reverse", f"{cutoff}..HEAD")
+    if walk[1] != 0:
+        return f"cutoff {cutoff[:7]}: git rev-list failed" + note, True
+    entries = []
+    for c in walk[0].split():
+        diff = _git("diff-tree", "-r", "--name-only", "--no-renames", f"{c}^1", c)
+        if diff[1] != 0:
+            entries.append(f"{c[:7]} (git diff-tree failed)")
+            continue
+        files = diff[0].split("\n")
+        code = [f for f in files if f.startswith(CODE_PATHS)]
+        if not code:
+            continue
+        items = sorted({m[1] for m in map(STEP_FILE.match, files) if m})
+        if not any(_open_at(f"{c}^1", i) for i in items):
+            entries.append(f"{c[:7]} {' '.join(code)}")
+    if not entries:
+        return "none" + note, False
+    return ("; ".join(entries) + " (item 053: code, config, tests or rules changed with no step file of an "
+            "open work item; a follow-up to a completed item is a new item)" + note, True)
+
+
 MAIN = "origin/main"
 
 
@@ -372,10 +441,15 @@ def main(argv):
         if len(argv) != 4:
             sys.exit(__doc__)
         return write_log(*argv[1:])
-    if argv[:1] == ["--today"]:
-        today = dt.date.fromisoformat(argv[1])
-    elif argv:
-        sys.exit(__doc__)
+    cutoff, rest = UNTRACKED_FROM, list(argv)
+    while rest:
+        if len(rest) < 2 or rest[0] not in ("--today", "--untracked-from"):
+            sys.exit(__doc__)
+        if rest[0] == "--today":
+            today = dt.date.fromisoformat(rest[1])
+        else:
+            cutoff = rest[1]
+        rest = rest[2:]
     work = Path("work")
     skipped, stuck, awaiting, in_pr, failed, unfinished = [], [], [], [], [], []
     branches = open_branches(today)
@@ -432,10 +506,12 @@ def main(argv):
                          if (work / i / "request.md").exists())
     excepted = f" (not checked: {excepted})" if excepted and late is not None else ""
     print(f"LOG TIME: {'not checked (no git)' if late is None else (', '.join(late) or 'none') + excepted}")
+    untracked = untracked_changes(cutoff)
+    print(f"UNTRACKED CHANGE: {'not checked (no git)' if untracked is None else untracked[0]}")
     orphans = orphan_log_lines()
     print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
-    return 1 if skipped or failed or unfinished or late or orphans else 0
+    return 1 if skipped or failed or unfinished or late or orphans or (untracked and untracked[1]) else 0
 
 
 if __name__ == "__main__":
