@@ -9,3 +9,4 @@ A1, please check:
 - For the person (05): the merge-commit rule; don't open a Jan 2027 PBR call without the ADR ex-date; the IDEA "ADR ex = ADR record date (FINRA 11140)" is offered, not built.
 - Minor (06): `test_untracked_from_is_fixed` passes silently via bare `return` when git is missing or the clone is shallow. Decide whether it should use `pytest.skip`.
 - Known gaps listed in the docstring (a)–(f), e.g. one open item's step file covers unrelated code in the same commit, and `pyproject.toml`/`README.md`/`data/` are not checked. Decide whether any needs an IDEA.
+A1 result: PASS (2026-11-11, A1 re-ran on 95a3f08: pytest 221 passed 1 skipped; check_pipeline exit 0, UNTRACKED CHANGE none; diff of ccbot/tickers.py and config/tickers.json read against 04; PBR facts cite Petrobras's own release; I3's mutation table in 06. Minor: test_untracked_from_is_fixed returns silently without git, noted, not a failure)
