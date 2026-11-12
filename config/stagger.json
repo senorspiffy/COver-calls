@@ -1,0 +1,32 @@
+{
+  "_about": "Budget test A (work/058, from 057 B4; person 2026-11-12): $20k, 7 stocks at 1/7 each, monthly calls with staggered expiries: F, AAL, PFE, CMCSA 30-45 DTE; VALE, T, HBAN 60-75 DTE. Run with --state-dir state_stagger --out reports_stagger.",
+  "broker": "webull-paper",
+  "tickers_file": "config/tickers.json",
+  "earnings_gap_days": 70,
+  "universe": [
+    "F",
+    "VALE",
+    "AAL",
+    "T",
+    "PFE",
+    "HBAN",
+    "CMCSA"
+  ],
+  "cash": 20000,
+  "max_positions": 7,
+  "max_single_name_frac": 0.142857,
+  "monthly_dte_by_ticker": {
+    "VALE": [
+      60,
+      75
+    ],
+    "T": [
+      60,
+      75
+    ],
+    "HBAN": [
+      60,
+      75
+    ]
+  }
+}
