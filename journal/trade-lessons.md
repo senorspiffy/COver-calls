@@ -1,7 +1,7 @@
 # Trade lessons (knowledge base)
 
 Lessons from the paper bot's real trades, newest first. Each line: date, lesson, evidence. UNCONFIRMED = seen once; CONFIRMED = seen 3+ times.
-Paper only, research, not financial advice.
+Paper only, research, not financial advice. Lessons are notes only: no setting is tuned from paper results; any change waits for the Sunday review.
 
 ## 2026-11-11
 - **Premium only cushions a small part of a share drop.** VALE (main): shares -$78, short calls +$17. The call offsets about 22% of the drop. Strategy risk sits in the stock, not the call. UNCONFIRMED.
