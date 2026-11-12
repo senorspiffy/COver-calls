@@ -43,11 +43,24 @@ def test_earnings_known_for_dec_18_on_2026_11_09():
 
 
 def test_weekly_account_gives_each_stock_8000_and_has_facts():
-    """Item 054: 12 weekly-option stocks, $8,000 each, all with sourced facts."""
+    """Item 054 (trimmed to 7 quality names in 055): $8,000 each, all with sourced facts."""
     cfg = _cfg("weekly.json")
     n = len(cfg["universe"])
-    assert n == cfg["max_positions"] == 12
+    assert n == cfg["max_positions"] == 7
     assert 8000 <= cfg["max_single_name_frac"] * cfg["cash"] < 8000 + 200
+    facts = load_facts(cfg)
+    assert all(t in facts and facts[t]["sources"] for t in cfg["universe"])
+    day = Day(dt.date(2026, 11, 13), 20.0, q=0.0)
+    assert all(enrich(day, t, facts, cfg).earnings_known for t in cfg["universe"])
+
+
+def test_quality_account_14_names_8000_each():
+    """Item 055: the 14 names scoring 4/5 or 5/5, $8,000 each, monthly; all with facts."""
+    cfg = _cfg("quality.json")
+    n = len(cfg["universe"])
+    assert n == cfg["max_positions"] == 14
+    assert 8000 <= cfg["max_single_name_frac"] * cfg["cash"] < 8000 + 200
+    assert set(_cfg("weekly.json")["universe"]) <= set(cfg["universe"])
     facts = load_facts(cfg)
     assert all(t in facts and facts[t]["sources"] for t in cfg["universe"])
     day = Day(dt.date(2026, 11, 13), 20.0, q=0.0)

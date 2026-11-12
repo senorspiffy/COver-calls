@@ -217,5 +217,49 @@
       "https://stockanalysis.com/stocks/ccl/",
       "'Est. Earnings' Dec 18 2026 is the site's estimate, not a company date; used as the blackout date (work/054)"
     ]
+  },
+  "BMY": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-29",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/bmy/",
+      "https://stockanalysis.com/stocks/bmy/dividend/ (last ex-div Oct 2 2026 $0.63; next not listed; read 2026-11-12, work/055)"
+    ]
+  },
+  "USB": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-15",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/usb/",
+      "https://stockanalysis.com/stocks/usb/dividend/ (last ex-div Sep 30 2026 $0.54; next not listed; read 2026-11-12, work/055)"
+    ]
+  },
+  "MO": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-29",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/mo/",
+      "https://stockanalysis.com/stocks/mo/dividend/ (last ex-div Sep 15 2026 $1.11; next not listed; read 2026-11-12, work/055)"
+    ]
+  },
+  "MDLZ": {
+    "asset_type": "stock",
+    "next_earnings": null,
+    "last_earnings": "2026-10-29",
+    "ex_div_date": null,
+    "dividend": null,
+    "sources": [
+      "https://stockanalysis.com/stocks/mdlz/",
+      "https://stockanalysis.com/stocks/mdlz/dividend/ (last ex-div Sep 30 2026 $0.52; next not listed; read 2026-11-12, work/055)"
+    ]
   }
 }
