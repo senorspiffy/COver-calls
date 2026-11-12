@@ -57,6 +57,12 @@ class TokenBucket:
         self.next_at = now + self.interval
 
 
+def _rate_limited(text):
+    """True if an SDK error message is Webull's rate-limit reply (HTTP 429)."""
+    low = text.lower()
+    return "429" in low or "too many requests" in low or "too_many_requests" in low
+
+
 def to_sdk_payload(order):
     """Order dict in the shape of the SDK's samples/order/order_option_client.py."""
     side = "SELL" if order.side == "SELL_TO_OPEN" else "BUY"
@@ -109,6 +115,7 @@ class WebullSandboxBroker(Broker):
         self.account_id = env.get("WEBULL_ACCOUNT_ID", "")
         self.sdk = sdk if sdk is not None else load_sdk()
         self.limiter = limiter or TokenBucket(1.0)
+        self.retry_sleep = time.sleep   # rate-limit backoff (item 056); tests replace it
         api = self.sdk.ApiClient(env["WEBULL_APP_KEY"], env["WEBULL_APP_SECRET"], "us")
         api.set_logger(log)
         # The SDK adds stdout + webull_*_sdk.log handlers unless these flags are set.
@@ -137,13 +144,30 @@ class WebullSandboxBroker(Broker):
             return self.ledger.advance(date)
         return []   # dry-run: nothing fills, so the paper ledger has nothing to settle
 
+    RETRY_WAITS = (2, 4, 8, 16, 32)   # seconds; item 056
+
     def _call(self, fn, *args, **kw):
-        self._assert_sandbox()
-        self.limiter.take()
-        resp = fn(*args, **kw)
-        if getattr(resp, "status_code", 200) != 200:
-            raise RuntimeError(f"HTTP {resp.status_code}")
-        return resp.json() if hasattr(resp, "json") else resp
+        """One SDK request. On Webull's rate limit (HTTP 429 / "too many requests"), wait and
+        retry, up to len(RETRY_WAITS) times, then raise (item 056)."""
+        for wait in (*self.RETRY_WAITS, None):
+            self._assert_sandbox()
+            self.limiter.take()
+            try:
+                resp = fn(*args, **kw)
+            except Exception as exc:  # the SDK raises on non-2xx with the status in the text
+                if wait is None or not _rate_limited(str(exc)):
+                    raise
+                log.warning("Webull rate limit; retrying in %ss", wait)
+                self.retry_sleep(wait)
+                continue
+            status = getattr(resp, "status_code", 200)
+            if status == 429 and wait is not None:
+                log.warning("Webull rate limit; retrying in %ss", wait)
+                self.retry_sleep(wait)
+                continue
+            if status != 200:
+                raise RuntimeError(f"HTTP {status}")
+            return resp.json() if hasattr(resp, "json") else resp
 
     def get_underlying_quote(self, ticker):
         items = _items(self._call(self.data.market_data.get_snapshot, ticker, "US_STOCK"))

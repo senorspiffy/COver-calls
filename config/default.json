@@ -12,6 +12,8 @@
   "monthly_dte": [30, 45],
   "monthly_slack_days": 7,
   "weekly_dte": [5, 9],
+  "monthly_dte_by_ticker": {},
+  "dip_entry": null,
   "spread": {"model": "fixed", "value": 0.05, "floor": 0.01},
   "k": 1.0,
   "rv_window": 20,
