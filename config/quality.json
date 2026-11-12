@@ -1,0 +1,25 @@
+{
+  "_about": "Quality practice account (work/055): the 14 stocks scoring 4/5 or 5/5 on the financial checklist (person's choice 2026-11-12), $8,000 each, monthly calls (V0). Replaces practice.json in the daily run; practice.json and its state are kept as a record. Run with --state-dir state_quality --out reports_quality.",
+  "universe": [
+    "OXY",
+    "CSX",
+    "BMY",
+    "VZ",
+    "USB",
+    "PYPL",
+    "PFE",
+    "PBR",
+    "MO",
+    "MDLZ",
+    "KGC",
+    "HBAN",
+    "CMCSA",
+    "BAC"
+  ],
+  "broker": "webull-paper",
+  "tickers_file": "config/tickers.json",
+  "earnings_gap_days": 70,
+  "cash": 112200,
+  "max_positions": 14,
+  "max_single_name_frac": 0.071429
+}
