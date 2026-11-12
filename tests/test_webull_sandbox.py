@@ -192,3 +192,37 @@ def test_occ_fallback_builds_thursday_symbols(tmp_path, cfg):
     exp = dt.date(2026, 6, 18)
     fb = _broker(tmp_path, cfg, sdk=FakeSDK(contracts_error=True)).list_option_contracts("X", exp, exp, 25, 27)
     assert fb and all("260618" in s for s in fb)
+
+
+def test_rate_limit_is_retried_then_succeeds(tmp_path, cfg):
+    """Item 056: a 429 (as a response or as an SDK error) waits and retries, not crashes."""
+    b = _broker(tmp_path, cfg)
+    waits = []
+    b.retry_sleep = waits.append
+    replies = [Resp({}, 429), RuntimeError("HTTP Status: 429, Code: TOO_MANY_REQUESTS"), Resp({"ok": 1})]
+
+    def fn():
+        r = replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    assert b._call(fn) == {"ok": 1}
+    assert waits == [2, 4]
+
+
+def test_rate_limit_gives_up_after_five_retries(tmp_path, cfg):
+    b = _broker(tmp_path, cfg)
+    waits = []
+    b.retry_sleep = waits.append
+    with pytest.raises(RuntimeError, match="HTTP 429"):
+        b._call(lambda: Resp({}, 429))
+    assert waits == [2, 4, 8, 16, 32]
+
+
+def test_other_errors_are_not_retried(tmp_path, cfg):
+    b = _broker(tmp_path, cfg)
+    waits = []
+    b.retry_sleep = waits.append
+    with pytest.raises(RuntimeError, match="UNAUTHORIZED"):
+        b._call(lambda: (_ for _ in ()).throw(RuntimeError("HTTP Status: 401, Code: UNAUTHORIZED")))
+    assert waits == []
