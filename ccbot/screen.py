@@ -4,6 +4,7 @@ import collections
 import pandas as pd
 
 from . import expiries
+from .config import for_ticker
 from .pricing import pick_strike
 from .rules import CONTRACT
 
@@ -58,7 +59,7 @@ def feasible_universe(cfg, snapshots, cash, asof, calendar=None, require_oi=True
     snaps = snapshots[snapshots["ts"] == asof]
     passing, rejects = [], {}
     for t in cfg["universe"]:
-        reason = _reject(snaps[snaps["underlying"] == t], cfg, cash, asof, calendar, require_oi)
+        reason = _reject(snaps[snaps["underlying"] == t], for_ticker(cfg, t), cash, asof, calendar, require_oi)
         if reason:
             rejects[t] = reason
         else:

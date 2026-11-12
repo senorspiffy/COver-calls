@@ -1,0 +1,18 @@
+{
+  "_about": "Budget test B, base part (work/058, from 057 B5): $16k (80% of $20k), 7 stocks at 1/7 each, monthly V0 calls. The other $4k is config/dip_reserve.json. Run with --state-dir state_dip_base --out reports_dip_base.",
+  "broker": "webull-paper",
+  "tickers_file": "config/tickers.json",
+  "earnings_gap_days": 70,
+  "universe": [
+    "F",
+    "VALE",
+    "AAL",
+    "T",
+    "PFE",
+    "HBAN",
+    "CMCSA"
+  ],
+  "cash": 16000,
+  "max_positions": 7,
+  "max_single_name_frac": 0.142857
+}

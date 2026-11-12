@@ -59,6 +59,6 @@ def test_every_reason_code_is_produced(runs):
     seen |= set().union(*(set(r.trades["action"]) for r in runs.values()))
     assert "BUY_TO_CLOSE" in set(runs["V1"].trades["action"])   # PROFIT_TARGET_HIT exits
     # OK = every fill; EARNINGS_BLACKOUT, VOL_WARMUP, EARNINGS_UNKNOWN: test_backtest; UNIVERSE_EMPTY:
-    # test_screen_bot; DIVIDEND_UNKNOWN: test_missing_inputs
+    # test_screen_bot; DIVIDEND_UNKNOWN: test_missing_inputs; NO_DIP (bot only): test_budget_paper
     assert set(REASONS) - seen == {"OK", "EARNINGS_BLACKOUT", "UNIVERSE_EMPTY", "PROFIT_TARGET_HIT", "VOL_WARMUP",
-                                   "EARNINGS_UNKNOWN", "DIVIDEND_UNKNOWN"}
+                                   "EARNINGS_UNKNOWN", "DIVIDEND_UNKNOWN", "NO_DIP"}

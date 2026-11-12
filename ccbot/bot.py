@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import expiries
+from .config import for_ticker
 from .broker.base import NoQuote, OptionOrder, chunk
 from .data import SNAPSHOT_COLUMNS
 from .report import daily_report, weekly_report
@@ -154,6 +155,29 @@ def _capital(portfolio, days, markets, cfg):
     return total
 
 
+def _dip(ticker, date, close, state_dir, cfg):
+    """None when a new position may open; else why not (item 058). With cfg["dip_entry"] set,
+    a new entry needs close <= (1 - drop) x the highest close over the last `lookback`
+    scans (today included), read from this account's own paper_snapshots.csv, and at least
+    `min_days` recorded closes. Positions already held are never gated."""
+    rule = cfg.get("dip_entry")
+    if not rule:
+        return None
+    path = Path(state_dir) / "paper_snapshots.csv"
+    past = pd.Series(dtype=float)
+    if path.exists():
+        snaps = pd.read_csv(path, usecols=["ts", "underlying", "underlying_price", "symbol"])
+        rows = snaps[(snaps["underlying"] == ticker) & snaps["symbol"].isna() & (snaps["ts"] < date.isoformat())]
+        past = rows.drop_duplicates("ts", keep="last").sort_values("ts")["underlying_price"].astype(float)
+    closes = list(past.tail(rule["lookback"] - 1)) + [close]
+    if len(closes) < rule["min_days"]:
+        return f"{len(closes)} of {rule['min_days']} closes recorded; dip rule not ready"
+    high = max(closes)
+    if close <= (1 - rule["drop"]) * high + 1e-9:
+        return None
+    return f"close {close:.2f} is {100 * (1 - close / high):.1f}% below the {len(closes)}-scan high {high:.2f}; needs {100 * rule['drop']:g}%"
+
+
 def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", reports_dir="reports"):
     state_dir, reports_dir = Path(state_dir), Path(reports_dir)
     trades_path = state_dir / "paper_trades.csv"
@@ -182,7 +206,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
             continue
         days[t], markets[t] = day, BrokerMarket(broker, t, date, log)
         log.append(_snap_row(day, t))
-        pick = markets[t].pick(date, "monthly", cfg["monthly_dte"], cfg["monthly_slack_days"])
+        pick = markets[t].pick(date, "monthly", for_ticker(cfg, t)["monthly_dte"], cfg["monthly_slack_days"])
         if pick:
             markets[t].chain(day, pick[0], "C")
     held = start.held(v.wheel)
@@ -199,7 +223,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
         rows.append(_row(date, variant, None, action="NONE", reason="UNIVERSE_EMPTY", status="NO_ORDER",
                          dry_run=dry, detail=banner))
     for t in held:   # positions already open: manage them first
-        spread, _ = _manage(t, broker, v, variant, cfg, date, days[t], markets[t], t in passing, capital,
+        spread, _ = _manage(t, broker, v, variant, for_ticker(cfg, t), date, days[t], markets[t], t in passing, capital,
                             rejects, rows, dry)
         contexts.append(_context(t, days[t], spread))
         tried.append(t)
@@ -207,13 +231,19 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
     for t in (t for t in passing if t not in held):   # then open new ones, in universe order
         if slots <= 0:
             break
-        spread, opened = _manage(t, broker, v, variant, cfg, date, days[t], markets[t], True, capital,
+        dip = _dip(t, date, days[t].close, state_dir, cfg)
+        if dip is not None:   # item 058: dip_entry set and no dip today
+            rows.append(_row(date, variant, t, action="NONE", reason="NO_DIP", status="NO_ORDER",
+                             dry_run=dry, detail=dip))
+            contexts.append(_context(t, days[t], None))
+            continue
+        spread, opened = _manage(t, broker, v, variant, for_ticker(cfg, t), date, days[t], markets[t], True, capital,
                                  rejects, rows, dry)
         contexts.append(_context(t, days[t], spread))
         tried.append(t)
         slots -= opened
     state = broker.get_positions()
-    would = {t: {x.label: _would_act(start, t, days[t], x, cfg, markets[t], t in passing,
+    would = {t: {x.label: _would_act(start, t, days[t], x, for_ticker(cfg, t), markets[t], t in passing,
                                      entry_budget(start, capital, days[t].asset_type, cfg)) for x in REGISTRY}
              for t in tried}
     _append_csv(trades_path, rows, TRADE_COLUMNS)
