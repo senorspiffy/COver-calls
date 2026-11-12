@@ -1,0 +1,23 @@
+{
+  "_about": "Weekly practice account (work/054): 12 stocks with weekly options, $8,000 of pretend money each, run with --variant V2 (weekly 5-9 DTE calls). Separate from paper.json and practice.json. Run with --state-dir state_weekly --out reports_weekly.",
+  "universe": [
+    "F",
+    "AAL",
+    "T",
+    "KGC",
+    "SOFI",
+    "PFE",
+    "VZ",
+    "CCL",
+    "BAC",
+    "CSX",
+    "OXY",
+    "PYPL"
+  ],
+  "broker": "webull-paper",
+  "tickers_file": "config/tickers.json",
+  "earnings_gap_days": 70,
+  "cash": 96200,
+  "max_positions": 12,
+  "max_single_name_frac": 0.083333
+}

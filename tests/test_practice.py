@@ -40,3 +40,15 @@ def test_earnings_known_for_dec_18_on_2026_11_09():
     clear = {t for t in cfg["universe"]
              if (d := enrich(day, t, facts, cfg)).earnings_known and d.next_earnings > dt.date(2026, 12, 18)}
     assert set(cfg["universe"]) - clear == set()   # PBR: last report Nov 10 (2026-11-11 follow-up)
+
+
+def test_weekly_account_gives_each_stock_8000_and_has_facts():
+    """Item 054: 12 weekly-option stocks, $8,000 each, all with sourced facts."""
+    cfg = _cfg("weekly.json")
+    n = len(cfg["universe"])
+    assert n == cfg["max_positions"] == 12
+    assert 8000 <= cfg["max_single_name_frac"] * cfg["cash"] < 8000 + 200
+    facts = load_facts(cfg)
+    assert all(t in facts and facts[t]["sources"] for t in cfg["universe"])
+    day = Day(dt.date(2026, 11, 13), 20.0, q=0.0)
+    assert all(enrich(day, t, facts, cfg).earnings_known for t in cfg["universe"])
