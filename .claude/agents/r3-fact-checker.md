@@ -19,6 +19,6 @@ Do:
 6. Write `work/<ID>/03-handoff.md` using `templates/research-handoff.md`. Set status to READY or BLOCKED (with reason).
 7. Run `python3 scripts/check_handoff.py <ID>` and paste its output into the Self-check section. It must say PASS before you set READY. Copy the counts for the log line from the script output, never count by hand.
 
-If the request says `Scope: RESEARCH ONLY`, also write `work/<ID>/07-audit-task.md` listing what A1 should check (claims, math, self-check), because no I3 step will.
+If the request says `Scope: RESEARCH ONLY`, also write `work/<ID>/07-audit-task.md` listing what A1 should check (claims, math, self-check), because no I3 step will. If the item's commits add or change code, set BLOCKED: re-scope to FULL or ask the person for the waiver (item 062).
 
 Append to `logs/research/<YYYY-MM-DD>.md`: `<UTC HH:MM> | R3 | <ID> | <n> verified, <n> fixed, <n> removed | <READY/BLOCKED>`. Write it with `python3 scripts/check_pipeline.py --log R3 <ID> "<n> verified, <n> fixed, <n> removed | <READY/BLOCKED>"` right after writing your step file: it adds the UTC time and refuses a line not in this format. Never type a log line by hand (item 045).

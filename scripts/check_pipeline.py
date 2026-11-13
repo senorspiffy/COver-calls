@@ -80,6 +80,21 @@ writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMP
                   exit 1); (d) a merge's conflict edits are judged together with the whole merge
                   against its first parent; (e) paths outside CODE_PATHS (pyproject.toml, README.md,
                   data/) are not checked; (f) non-ASCII paths are quoted (no -z).
+  RESEARCH CODE   (item 062, RI-007) a RESEARCH ONLY item whose unit changes RESEARCH_CODE_PATHS
+                  (ccbot/, config/, scripts/, tests/) with no I1-I3. A unit is one HEAD commit after
+                  the cutoff (as 053, against its first parent) or one open branch as a whole. On
+                  HEAD the item's line becomes `<ID>: SKIPPED (<sha7> RESEARCH ONLY: changes <files>
+                  ...)` (exit 1) and the line lists the IDs, or none, "not checked (no git)", or
+                  "not checked (see UNTRACKED CHANGE)" when the cutoff can't be used. On a branch it
+                  is `BRANCH SKIPPED: <ID> (<ref>: RESEARCH ONLY: changes <files> ...)`, joined to the
+                  item's classify detail when that is SKIPPED too (exit unchanged). Scope and waiver
+                  are read from request.md at the tip; a missing request.md is flagged, never passed.
+                  Only `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)` excuses it. Known gaps:
+                  (g) a FULL/FAST item's 04 or 05 in the same unit covers the research item's code;
+                  (h) .claude/ and templates/ edits are 053's only; (i) on a branch, code committed
+                  without the research item's step file is caught by 053 on HEAD, not by 062;
+                  (j) only the first `Waived:` line is read, so 04 05 06 go on the item's single
+                  Waived line.
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 """
@@ -120,6 +135,11 @@ RULE_PATHS = (".claude/", "templates/", "scripts/check_pipeline.py", "scripts/ch
 CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/", ".claude/", "templates/")
 # item 053: HEAD of daily-fixes/2026-11-11 just before I2's first code commit; never move it forward
 UNTRACKED_FROM = "694bf4d0038e25bb82bd111018fbd67a94bbc74d"
+# Item 062: a RESEARCH ONLY item may not change these unless I1-I3 ran or the person waived them.
+# .claude/ and templates/ are left to 053 (gap h).
+RESEARCH_CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/")
+WAIVE_BUILD = {"04", "05", "06"}
+WAIVE_BUILD_BY_PERSON = re.compile(r"\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*:")
 STEP_FILE = re.compile(r"^work/(\d{3})/(01-research|02-improvements|03-handoff|04-build-plan|"
                        r"05-build-report|06-verification)\.md$")
 LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*.md)
@@ -148,7 +168,11 @@ LEGACY = {"001": "RESEARCH ONLY before 07-audit-task existed (item 021)",
 
 
 def read_request(path):
-    text = path.read_text(encoding="utf-8")
+    return parse_request(path.read_text(encoding="utf-8"))
+
+
+def parse_request(text):
+    """(scope, date, (waived steps, first Waived: line, who)) from request.md text."""
     scope = re.search(r"^Scope:\s*(FULL|RESEARCH ONLY|FAST)\b", text, re.M)
     date = re.search(r"^Date:\s*(\d{4}-\d{2}-\d{2})", text, re.M)
     waived = re.search(r"^Waived:\s*([0-9 ,]+)(.*)$", text, re.M)
@@ -157,6 +181,39 @@ def read_request(path):
             dt.date.fromisoformat(date.group(1)) if date else None,
             (re.findall(r"\d\d", waived.group(1)), waived.group(0).strip(),
              who.group(1).strip().lower() if who else "") if waived else ([], "", ""))
+
+
+def _build_waived(text):
+    """Item 062: the item's first `Waived:` line excuses 04 05 06 and was written by the person
+    with a date: `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)`."""
+    _, _, (steps, waived_line, who) = parse_request(text)
+    return WAIVE_BUILD <= set(steps) and who == "person" and bool(WAIVE_BUILD_BY_PERSON.search(waived_line))
+
+
+def _research_code(files, request_text_of):
+    """Item 062 (RI-007): [(ID, detail)] for the RESEARCH ONLY items in one unit (a HEAD commit
+    or an open branch) whose `files` change RESEARCH_CODE_PATHS with no I1-I3 and no person's
+    waiver. `request_text_of(ID)` is the item's request.md text at the tip, or None. Items come
+    from the paths only, never from commit messages (RI-012)."""
+    code = [f for f in files if f.startswith(RESEARCH_CODE_PATHS)]
+    if not code:
+        return []
+    items = sorted({m[1] for m in map(STEP_FILE.match, files) if m})
+    texts = {i: request_text_of(i) for i in items}
+    built = {i for i in items for s in ("04", "05") if f"work/{i}/{STEPS[s]}" in files}
+    if any(texts[i] is not None and parse_request(texts[i])[0] in ("FULL", "FAST") for i in built):
+        return []                                           # gap (g): a built item covers the unit
+    flags = []
+    for i in items:
+        if i in LEGACY:
+            continue
+        if texts[i] is None:
+            flags.append((i, "RESEARCH ONLY check: no request.md at the tip, item 062"))
+        elif parse_request(texts[i])[0] == "RESEARCH ONLY" and not _build_waived(texts[i]):
+            flags.append((i, f"RESEARCH ONLY: changes {' '.join(code)} with no 04-06; needs Scope FULL or "
+                             '"Waived: 04 05 06 (person, <date>: <why>)" on the item\'s single Waived: line '
+                             "(item 062)"))
+    return flags
 
 
 def classify(item_dir, today):
@@ -336,10 +393,11 @@ def open_branches(today=None):
         rules = changed(*RULE_PATHS)
         bases = _git("merge-base", "--all", "HEAD", ref)
         bases = bases[0].split() if bases and bases[1] == 0 else []
-        clashes, skipped = [], []
+        clashes, skipped, requests = [], [], {}
         for item in sorted(touched):
             req = f"work/{item}/request.md"
             theirs = _git("show", f"{ref}:{req}")
+            requests[item] = theirs[0] if theirs and theirs[1] == 0 else None
             mine = Path(req)
             if (bases and theirs and theirs[1] == 0 and mine.exists()
                     and all(_git("cat-file", "-e", f"{b}:{req}")[1] != 0 for b in bases)
@@ -355,6 +413,14 @@ def open_branches(today=None):
                     status, detail = classify(d, today)
                 if status == "SKIPPED":
                     skipped.append((item, detail))
+        # item 062: the branch is one unit; its RESEARCH ONLY items may not change code
+        unit = changed(*RESEARCH_CODE_PATHS) + [f"work/{i}/{f}" for i in sorted(touched) for f in files[i]]
+        for item, detail in _research_code(unit, requests.get):
+            have = [k for k, (i, _) in enumerate(skipped) if i == item]
+            if have:
+                skipped[have[0]] = (item, f"{skipped[have[0]][1]}; {detail}")
+            else:
+                skipped.append((item, detail))
         when = _git("log", "-1", "--format=%cs", ref)
         last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
         found.append({"ref": ref, "items": items, "conflicts": conflicts,
@@ -376,28 +442,42 @@ def _open_at(parent, item):
     return not verdicts or verdicts[-1].upper() == "FAIL"
 
 
-def untracked_changes(cutoff=UNTRACKED_FROM):
-    """Item 053 (RI-007): None without git, else (text after `UNTRACKED CHANGE: `, failed)."""
-    if _git("rev-parse", "HEAD") is None:
-        return None
+def _walk(cutoff):
+    """Items 053/062: HEAD's first-parent commits after `cutoff`, each with the files it changes
+    against its first parent: ([(sha, files or None if diff-tree failed)], None), or
+    (None, (text, failed)) when the cutoff can't be used. Needs git."""
     note = f" (cutoff {cutoff[:7]} from --untracked-from)" if cutoff != UNTRACKED_FROM else ""
     known = _git("rev-parse", "--verify", "-q", f"{cutoff}^{{commit}}")
     if known[1] != 0 or _git("merge-base", "--is-ancestor", cutoff, "HEAD")[1] != 0:
         shallow = _git("rev-parse", "--is-shallow-repository")
         if shallow[1] == 0 and shallow[0].strip() == "true":
-            return (f"not checked (cutoff {cutoff[:7]} not in this shallow clone; run git fetch --unshallow)"
-                    + note, False)
-        return f"cutoff {cutoff[:7]} not in HEAD's history (squash/rebase or wrong SHA)" + note, True
+            return None, (f"not checked (cutoff {cutoff[:7]} not in this shallow clone; run git fetch --unshallow)"
+                          + note, False)
+        return None, (f"cutoff {cutoff[:7]} not in HEAD's history (squash/rebase or wrong SHA)" + note, True)
     walk = _git("rev-list", "--first-parent", "--reverse", f"{cutoff}..HEAD")
     if walk[1] != 0:
-        return f"cutoff {cutoff[:7]}: git rev-list failed" + note, True
-    entries = []
+        return None, (f"cutoff {cutoff[:7]}: git rev-list failed" + note, True)
+    units = []
     for c in walk[0].split():
         diff = _git("diff-tree", "-r", "--name-only", "--no-renames", f"{c}^1", c)
-        if diff[1] != 0:
+        units.append((c, diff[0].split("\n") if diff[1] == 0 else None))
+    return units, None
+
+
+def untracked_changes(cutoff=UNTRACKED_FROM, walked=None):
+    """Item 053 (RI-007): None without git, else (text after `UNTRACKED CHANGE: `, failed).
+    `walked` is _walk(cutoff) when main() already has it."""
+    if _git("rev-parse", "HEAD") is None:
+        return None
+    note = f" (cutoff {cutoff[:7]} from --untracked-from)" if cutoff != UNTRACKED_FROM else ""
+    units, error = walked or _walk(cutoff)
+    if error:
+        return error
+    entries = []
+    for c, files in units:
+        if files is None:
             entries.append(f"{c[:7]} (git diff-tree failed)")
             continue
-        files = diff[0].split("\n")
         code = [f for f in files if f.startswith(CODE_PATHS)]
         if not code:
             continue
@@ -408,6 +488,32 @@ def untracked_changes(cutoff=UNTRACKED_FROM):
         return "none" + note, False
     return ("; ".join(entries) + " (item 053: code, config, tests or rules changed with no step file of an "
             "open work item; a follow-up to a completed item is a new item)" + note, True)
+
+
+def research_code(cutoff=UNTRACKED_FROM, walked=None):
+    """Item 062 (RI-007): None without git, else (text after `RESEARCH CODE: `, {ID: (sha7, detail)})
+    for RESEARCH ONLY items whose HEAD commits after the cutoff change RESEARCH_CODE_PATHS. Scope
+    and waiver are read from work/<ID>/request.md in the working tree. A cutoff problem is
+    UNTRACKED CHANGE's (053) and is not reported twice; a diff-tree failure is 053's entry."""
+    if _git("rev-parse", "HEAD") is None:
+        return None
+    units, error = walked or _walk(cutoff)
+    if error:
+        return "not checked (see UNTRACKED CHANGE)", {}
+
+    def request_text_of(item):
+        req = Path("work") / item / "request.md"
+        return req.read_text(encoding="utf-8") if req.is_file() else None
+
+    flagged = {}
+    for c, files in units:
+        for item, detail in _research_code(files or [], request_text_of):
+            if item in flagged:
+                sha, old = flagged[item]
+                flagged[item] = (sha, f"{old}; {c[:7]} {detail}")
+            else:
+                flagged[item] = (c[:7], detail)
+    return ", ".join(sorted(flagged)) or "none", flagged
 
 
 MAIN = "origin/main"
@@ -453,10 +559,17 @@ def main(argv):
     work = Path("work")
     skipped, stuck, awaiting, in_pr, failed, unfinished = [], [], [], [], [], []
     branches = open_branches(today)
-    for d in sorted(p for p in work.iterdir() if (p / "request.md").exists()):
+    walked = _walk(cutoff) if _git("rev-parse", "HEAD") is not None else None
+    untracked = untracked_changes(cutoff, walked)
+    research = research_code(cutoff, walked)
+    flagged = research[1] if research else {}
+    listed = sorted(p for p in work.iterdir() if (p / "request.md").exists())
+    for d in listed:
         status, detail = classify(d, today)
         if d.name in LEGACY and status in ("SKIPPED", "in progress"):
             status, detail = "LEGACY", LEGACY[d.name]
+        if d.name in flagged:                       # item 062: replaces the classify line
+            status, detail = "SKIPPED", f"{flagged[d.name][0]} {flagged[d.name][1]}"
         if status in ("STUCK", "not started", "in progress"):
             here = {s for s, f in STEPS.items() if (d / f).exists()}
             best = max(((len(items.get(d.name, set()) - here), ref, items.get(d.name, set()))
@@ -476,6 +589,9 @@ def main(argv):
         gaps = incomplete(d)
         if gaps:
             unfinished.append(f"{d.name} ({'; '.join(gaps)})")
+    for item in sorted(set(flagged) - {d.name for d in listed}):   # item 062: no request.md here
+        print(f"{item}: SKIPPED ({flagged[item][0]} {flagged[item][1]})")
+        skipped.append(item)
     print(f"STUCK: {', '.join(stuck) or 'none'}")
     print(f"AWAITING A1: {', '.join(awaiting) or 'none'}")
     print(f"IN PR: {', '.join(in_pr) or 'none'}")
@@ -506,8 +622,8 @@ def main(argv):
                          if (work / i / "request.md").exists())
     excepted = f" (not checked: {excepted})" if excepted and late is not None else ""
     print(f"LOG TIME: {'not checked (no git)' if late is None else (', '.join(late) or 'none') + excepted}")
-    untracked = untracked_changes(cutoff)
     print(f"UNTRACKED CHANGE: {'not checked (no git)' if untracked is None else untracked[0]}")
+    print(f"RESEARCH CODE: {'not checked (no git)' if research is None else research[0]}")
     orphans = orphan_log_lines()
     print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")

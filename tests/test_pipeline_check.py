@@ -140,6 +140,7 @@ def test_repo_pipeline_has_no_skipped_items():
     """The real work/ folder: no item may skip a step (RI-007)."""
     code, out = _run(REPO, "check_pipeline.py")
     assert code == 0, out
+    assert "RESEARCH CODE: none" in out                 # item 062
 
 
 def test_no_tracked_pycache():
@@ -222,9 +223,12 @@ def test_open_branch_conflict_is_reported(tmp_path):
     assert "  origin/fix: items 040; CONFLICTS: logs/recurring-issues.md; edits" in out
 
 
-def _branch_adds(repo, branch, item, files, request_text=None):
-    """Push branch `branch` off main that adds work/<item> with `files` (item 037/038 tests)."""
+def _branch_adds(repo, branch, item, files, request_text=None, extra=()):
+    """Push branch `branch` off main that adds work/<item> with `files` (item 037/038 tests),
+    plus the paths in `extra` (item 062)."""
     _git(repo, "checkout", "-q", "-b", branch, "main")
+    for path in extra:
+        _write(repo, path)
     d = repo / "work" / item
     d.mkdir(parents=True, exist_ok=True)
     (d / "request.md").write_text(request_text or f"# Work item {item}\nScope: FULL\nDate: 2026-10-31\n",
@@ -806,3 +810,163 @@ def test_untracked_from_is_fixed():
         return
     for a, b in (("3ba835e", check_pipeline.UNTRACKED_FROM), (check_pipeline.UNTRACKED_FROM, "HEAD")):
         assert subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=REPO).returncode == 0, (a, b)
+
+
+# Item 062 (RI-007): a RESEARCH ONLY item that changes code without I1-I3.
+RES_160 = "# Work item 160\nScope: RESEARCH ONLY\nDate: 2026-11-13\n"
+RES_STEPS = ["01-research.md", "02-improvements.md", "03-handoff.md", "07-audit-task.md"]
+
+
+def _cp():
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_pipeline
+    return check_pipeline
+
+
+@pytest.mark.parametrize("waived, counts", [
+    ("Waived: 04 05 06 (person, 2026-11-13: ok)", True),
+    ("Waived: 02 04 05 06 (person, 2026-11-13: ok)", True),
+    ("Waived: 04 (person, 2026-11-13: x)", False),
+    ("Waived: 04 05 06 (I2, 2026-11-13: person said ok)", False),
+    ("Waived: 04 05 06 (person: ok)", False),
+    ("Waived: 02 (A1, 2026-10-31: x)\nWaived: 04 05 06 (person, 2026-11-13: ok)", False),
+])
+def test_build_waiver_needs_person_date_and_all_three(waived, counts):
+    assert _cp()._build_waived(RES_160 + waived + "\n") is counts
+
+
+def test_research_code_rules():
+    rc = _cp()._research_code
+    texts = {"160": RES_160, "161": "# Work item 161\nScope: FULL\nDate: 2026-11-13\n",
+             "001": "# Work item 001\nScope: RESEARCH ONLY\nDate: 2026-10-29\n",
+             "162": RES_160 + "Waived: 04 05 06 (person, 2026-11-13: ok)\n"}
+    shape_061 = ["ccbot/x.py", "work/160/01-research.md"]
+    flags = rc(shape_061, texts.get)
+    assert len(flags) == 1 and flags[0][0] == "160"
+    assert flags[0][1].startswith("RESEARCH ONLY: changes ccbot/x.py with no 04-06;")
+    assert rc(shape_061 + ["work/161/05-build-report.md"], texts.get) == []          # gap (g)
+    assert rc(["ccbot/x.py", "work/161/01-research.md"], texts.get) == []           # FULL, no 04/05
+    assert rc(["work/160/01-research.md", "work/160/02-improvements.md"], texts.get) == []
+    assert rc(["ccbot/x.py", "work/001/01-research.md"], texts.get) == []           # LEGACY
+    assert rc(["ccbot/x.py", "work/162/01-research.md"], texts.get) == []           # person's waiver
+    assert rc(shape_061, lambda i: None) == [("160", "RESEARCH ONLY check: no request.md at the tip, item 062")]
+
+
+def _research(repo, cutoff):
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-13", "--untracked-from", cutoff)
+    return code, out, [l for l in out.splitlines() if l.startswith("RESEARCH CODE:")][0]
+
+
+@NO_GIT
+def test_research_only_branch_with_code_is_branch_skipped(tmp_path):
+    """The 061 shape (PR #26): RESEARCH ONLY 01 02 03 07 plus ccbot/ code on an open branch."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "res", "160", RES_STEPS, RES_160, extra=["ccbot/x.py"])
+    code, out, _ = _research(repo, _root(repo))
+    assert code == 0                                   # a branch never fails main's check (038)
+    assert "BRANCH SKIPPED: 160 (origin/res: RESEARCH ONLY: changes ccbot/x.py" in out
+    assert "SKIPPED: none" in out
+
+
+@NO_GIT
+def test_research_only_branch_waiver_needs_the_person(tmp_path):
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "ok", "160", RES_STEPS, RES_160 + "Waived: 04 05 06 (person, 2026-11-13: ok)\n",
+                 extra=["ccbot/x.py"])
+    _branch_adds(repo, "bad", "161", RES_STEPS,
+                 RES_160.replace("160", "161") + "Waived: 04 05 06 (I2, 2026-11-13: person said ok)\n",
+                 extra=["ccbot/y.py"])
+    code, out, _ = _research(repo, _root(repo))
+    assert code == 0
+    assert "BRANCH SKIPPED: 160" not in out
+    line = [l for l in out.splitlines() if l.startswith("BRANCH SKIPPED: 161 ")]
+    assert len(line) == 1
+    assert "can be waived only by the person" in line[0]
+    assert "RESEARCH ONLY: changes ccbot/y.py" in line[0]
+
+
+@NO_GIT
+def test_research_only_head_commit_with_code_is_skipped(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    c = _commit(repo, "160 R1 + code")
+    code, out, line = _research(repo, cutoff)
+    assert code == 1
+    assert f"160: SKIPPED ({c[:7]} RESEARCH ONLY: changes ccbot/x.py" in out
+    assert len([l for l in out.splitlines() if l.startswith("160:")]) == 1
+    assert line == "RESEARCH CODE: 160"
+    assert "UNTRACKED CHANGE: none" in out
+
+
+@NO_GIT
+def test_research_only_work_files_only_not_flagged(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _commit(repo, "160 R1")
+    code, out, line = _research(repo, cutoff)
+    assert line == "RESEARCH CODE: none" and code == 0, out
+
+
+@NO_GIT
+def test_full_item_build_in_same_commit_covers_research_code(tmp_path):
+    """Gap (g) pinned: a FULL item's 05 in the same unit covers the code."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _item(repo, "161", ALL[:5], date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "160 R1 + 161 built + code")
+    code, out, line = _research(repo, cutoff)
+    assert line == "RESEARCH CODE: none"
+    assert "160: SKIPPED" not in out
+
+
+@NO_GIT
+def test_second_waived_line_is_not_read(tmp_path):
+    """Gap (j): the 023 shape, two Waived lines; only the first counts."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11",
+          waived="02 (A1, 2026-10-31: x)\nWaived: 04 05 06 (person, 2026-11-13: ok)")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "160 + code")
+    code, out, line = _research(repo, cutoff)
+    assert code == 1 and line == "RESEARCH CODE: 160"
+
+
+@NO_GIT
+def test_rescoped_to_full_is_not_research_but_still_skipped(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", RES_STEPS, date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "160 FULL + code")
+    code, out, line = _research(repo, cutoff)
+    assert line == "RESEARCH CODE: none"
+    assert "160: SKIPPED (FULL: missing 04 05 06 before 07" in out
+    assert code == 1
+
+
+@NO_GIT
+def test_legacy_research_item_with_code_not_flagged(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "001", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "001 + code")
+    code, out, line = _research(repo, cutoff)
+    assert line == "RESEARCH CODE: none"
+    assert "001: LEGACY" in out
+
+
+def test_research_code_without_git(tmp_path):
+    _item(tmp_path, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-13")
+    _write(tmp_path, "ccbot/x.py")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-13")
+    assert code == 0
+    assert "RESEARCH CODE: not checked (no git)" in out
+
+
+@NO_GIT
+def test_research_code_cutoff_missing_not_checked(tmp_path):
+    repo, _ = _history(tmp_path)
+    code, out, line = _research(repo, "0" * 40)
+    assert code == 1                                   # from UNTRACKED CHANGE (053), not twice
+    assert line == "RESEARCH CODE: not checked (see UNTRACKED CHANGE)"
