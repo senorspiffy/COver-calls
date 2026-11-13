@@ -1,0 +1,382 @@
+{
+ "options.option_chain": [
+  {
+   "Field": "date",
+   "Type": "date",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "act_symbol",
+   "Type": "varchar(64)",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "expiration",
+   "Type": "date",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "strike",
+   "Type": "decimal(7,2)",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "call_put",
+   "Type": "varchar(64)",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "bid",
+   "Type": "decimal(7,2)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "ask",
+   "Type": "decimal(7,2)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "vol",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "delta",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "gamma",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "theta",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "vega",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "rho",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  }
+ ],
+ "options.volatility_history": [
+  {
+   "Field": "date",
+   "Type": "date",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "act_symbol",
+   "Type": "varchar(64)",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "hv_current",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "hv_week_ago",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "hv_month_ago",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "hv_year_high",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "hv_year_high_date",
+   "Type": "date",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "hv_year_low",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "hv_year_low_date",
+   "Type": "date",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "iv_current",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "iv_week_ago",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "iv_month_ago",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "iv_year_high",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "iv_year_high_date",
+   "Type": "date",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "iv_year_low",
+   "Type": "decimal(5,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "iv_year_low_date",
+   "Type": "date",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  }
+ ],
+ "stocks.ohlcv": [
+  {
+   "Field": "date",
+   "Type": "date",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "act_symbol",
+   "Type": "varchar(64)",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "open",
+   "Type": "decimal(14,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "high",
+   "Type": "decimal(14,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "low",
+   "Type": "decimal(14,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "close",
+   "Type": "decimal(14,4)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "volume",
+   "Type": "bigint",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  }
+ ],
+ "stocks.dividend": [
+  {
+   "Field": "act_symbol",
+   "Type": "varchar(64)",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "ex_date",
+   "Type": "date",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "amount",
+   "Type": "decimal(10,5)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  }
+ ],
+ "stocks.split": [
+  {
+   "Field": "act_symbol",
+   "Type": "varchar(64)",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "ex_date",
+   "Type": "date",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "to_factor",
+   "Type": "decimal(10,5)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "for_factor",
+   "Type": "decimal(10,5)",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  }
+ ],
+ "earnings.earnings_calendar": [
+  {
+   "Field": "act_symbol",
+   "Type": "varchar(64)",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "date",
+   "Type": "date",
+   "Null": "NO",
+   "Key": "PRI",
+   "Default": null,
+   "Extra": ""
+  },
+  {
+   "Field": "when",
+   "Type": "text COLLATE utf8mb4_0900_ai_ci",
+   "Null": "YES",
+   "Key": "",
+   "Default": null,
+   "Extra": ""
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+{
+ "fetched": "2026-11-13",
+ "dolthub": "https://www.dolthub.com/repositories/post-no-preference (options, stocks, earnings)",
+ "bxm": "https://cdn.cboe.com/api/global/us_indices/daily_prices/BXM_History.csv",
+ "start": "2019-01-01",
+ "failed": []
+}

@@ -47,9 +47,14 @@ def get(url, tries=6):
     raise RuntimeError(f"failed after {tries} tries: {url[:200]}")
 
 
-def sql(db, q):
+def sql(db, q, tries=4):
     url = API.format(db=db) + "?q=" + urllib.parse.quote(q)
-    d = json.loads(get(url))
+    for i in range(tries):
+        d = json.loads(get(url))
+        if "deadline exceeded" not in str(d.get("query_execution_message")) or i == tries - 1:
+            break
+        print(f"  server timeout, retry {i + 1}/{tries - 1}", flush=True)
+        time.sleep(10 * (i + 1))
     if d.get("query_execution_status") not in ("Success", "RowLimit"):
         raise RuntimeError(f"{db}: {d.get('query_execution_status')} {d.get('query_execution_message')}\n{q}")
     time.sleep(0.4)
@@ -89,39 +94,52 @@ def schemas():
     return out
 
 
-def quarters(start, end):
-    d = date(start.year, 1, 1)
+def date_chunks(start, end, n):
+    """Weekdays from start to end as SQL IN-lists of n dates. DoltHub times out on
+    date range scans (PK is date-first but ranges are not index-optimised); IN-lists are fast."""
+    days, d = [], start
     while d <= end:
-        nxt = date(d.year + (d.month + 2) // 12, (d.month + 2) % 12 + 1, 1)
-        yield d, nxt
-        d = nxt
+        if d.weekday() < 5:
+            days.append(d.isoformat())
+        d += timedelta(days=1)
+    for i in range(0, len(days), n):
+        part = days[i:i + n]
+        yield part[0], "(" + ",".join(f"'{x}'" for x in part) + ")"
+
+
+def chunked(db, q_fmt, order, start, n):
+    rows = []
+    for first, inl in date_chunks(start, date.today(), n):
+        rows += paged(db, q_fmt.format(dates=inl), order)
+    return rows
 
 
 def fetch_ticker(tk, start, force):
     s = tk.replace("'", "")
     jobs = {
-        OUT / "prices" / f"{tk}.csv": ("stocks", f"SELECT * FROM ohlcv WHERE act_symbol='{s}' AND date >= '{start}'", "date"),
+        OUT / "prices" / f"{tk}.csv": ("stocks", f"SELECT * FROM ohlcv WHERE date IN {{dates}} AND act_symbol='{s}'", "date"),
         OUT / "dividends" / f"{tk}.csv": ("stocks", f"SELECT * FROM dividend WHERE act_symbol='{s}'", "ex_date"),
         OUT / "splits" / f"{tk}.csv": ("stocks", f"SELECT * FROM split WHERE act_symbol='{s}'", "ex_date"),
         OUT / "earnings" / f"{tk}.csv": ("earnings", f"SELECT * FROM earnings_calendar WHERE act_symbol='{s}'", "date"),
-        OUT / "volhist" / f"{tk}.csv": ("options", f"SELECT * FROM volatility_history WHERE act_symbol='{s}' AND date >= '{start}'", "date"),
+        OUT / "volhist" / f"{tk}.csv": ("options", f"SELECT * FROM volatility_history WHERE date IN {{dates}} AND act_symbol='{s}'", "date"),
     }
     for path, (db, q, order) in jobs.items():
         if path.exists() and not force:
             continue
         print(f"{tk}: {path.parent.name}", flush=True)
-        write(path, paged(db, q, order))
+        write(path, chunked(db, q, order, start, 120) if "{dates}" in q else paged(db, q, order))
     # Calls only, 5-80 days to expiry: everything a 1-week to 2-month covered call can use.
     opath = OUT / "options" / f"{tk}.csv.gz"
     if opath.exists() and not force:
         return
     rows = []
-    for a, b in quarters(start, date.today()):
-        print(f"{tk}: options {a}", flush=True)
-        q = (f"SELECT * FROM option_chain WHERE act_symbol='{s}' AND date >= '{a}' AND date < '{b}' "
+    for first, inl in date_chunks(start, date.today(), 20):
+        q = (f"SELECT * FROM option_chain WHERE date IN {inl} AND act_symbol='{s}' "
              f"AND call_put = 'Call' AND expiration >= DATE_ADD(date, INTERVAL 5 DAY) "
              f"AND expiration <= DATE_ADD(date, INTERVAL 80 DAY)")
-        rows += paged("options", q, "date, expiration, strike")
+        part = paged("options", q, "date, expiration, strike")
+        rows += part
+        print(f"{tk}: options {first} (+{len(part)}, total {len(rows)})", flush=True)
     write(opath, rows, gz=True)
 
 
