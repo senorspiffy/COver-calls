@@ -1,0 +1,142 @@
+{
+ "tickers": [
+  "AAL",
+  "BAC",
+  "BMY",
+  "CMCSA",
+  "CSX",
+  "F",
+  "HBAN",
+  "KEY",
+  "KMI",
+  "MDLZ",
+  "MO",
+  "OXY",
+  "PFE",
+  "PYPL",
+  "T",
+  "USB",
+  "VZ"
+ ],
+ "skipped": {
+  "ITUB": "option quotes only 2020-01-06 to 2020-12-02 (< 3.0 years)",
+  "KGC": "No columns to parse from file",
+  "PBR": "option quotes only 2020-01-06 to 2020-12-02 (< 3.0 years)",
+  "VALE": "option quotes only 2020-01-06 to 2020-12-02 (< 3.0 years)"
+ },
+ "period": [
+  "2020-01-06",
+  "2026-11-12"
+ ],
+ "monte_carlo_2_stocks_1yr": {
+  "cc_ret": {
+   "5": -0.3381856666720158,
+   "25": -0.10363719247247985,
+   "50": 0.048368177351692965,
+   "75": 0.21151288018632697,
+   "95": 0.4986886816306118
+  },
+  "bh_ret": {
+   "5": -0.3568372318885805,
+   "25": -0.10476656477904556,
+   "50": 0.06704503272184781,
+   "75": 0.26586269196262785,
+   "95": 0.6688256730323004
+  },
+  "cc_dd": {
+   "5": -0.46868667821682874,
+   "25": -0.28015781462625816,
+   "50": -0.19254642702645208,
+   "75": -0.13654886422122223,
+   "95": -0.08698744717342007
+  },
+  "bh_dd": {
+   "5": -0.49653166610458194,
+   "25": -0.31368582390311484,
+   "50": -0.21982587715815638,
+   "75": -0.15930258622735263,
+   "95": -0.10237507460563387
+  }
+ },
+ "bxm_vs_spy": {
+  "start": "2020-01-06",
+  "end": "2026-11-12",
+  "bxm_cagr": 0.07933865513737581,
+  "bxm_maxdd": -0.3025742344122261,
+  "spy_tr_cagr": 0.1480243815131539,
+  "spy_tr_maxdd": -0.3369981346090807
+ },
+ "grid_size": 90,
+ "walkforward_picks": [
+  {
+   "train_from": "2020-01-06",
+   "test_from": "2022-01-06",
+   "test_to": "2022-07-06",
+   "picked": "d0.150_dte14-24_E_hold_bid",
+   "train_excess_logret": -0.031534464978374685
+  },
+  {
+   "train_from": "2020-07-06",
+   "test_from": "2022-07-06",
+   "test_to": "2023-01-06",
+   "picked": "d0.150_dte30-45_E_hold_bid",
+   "train_excess_logret": 0.01381907027678844
+  },
+  {
+   "train_from": "2021-01-06",
+   "test_from": "2023-01-06",
+   "test_to": "2023-07-06",
+   "picked": "d0.150_dte14-24_E_hold_bid",
+   "train_excess_logret": 0.020161152042390426
+  },
+  {
+   "train_from": "2021-07-06",
+   "test_from": "2023-07-06",
+   "test_to": "2024-01-06",
+   "picked": "d0.450_dte30-45_noE_take50_bid",
+   "train_excess_logret": 0.06890632217405547
+  },
+  {
+   "train_from": "2022-01-06",
+   "test_from": "2024-01-06",
+   "test_to": "2024-07-06",
+   "picked": "d0.450_dte30-45_noE_take50_bid",
+   "train_excess_logret": 0.06385357659638793
+  },
+  {
+   "train_from": "2022-07-06",
+   "test_from": "2024-07-06",
+   "test_to": "2025-01-06",
+   "picked": "d0.450_dte14-24_noE_hold_bid",
+   "train_excess_logret": 0.05043319770655412
+  },
+  {
+   "train_from": "2023-01-06",
+   "test_from": "2025-01-06",
+   "test_to": "2025-07-06",
+   "picked": "d0.200_dte14-24_noE_hold_bid",
+   "train_excess_logret": 0.012165956461181023
+  },
+  {
+   "train_from": "2023-07-06",
+   "test_from": "2025-07-06",
+   "test_to": "2026-01-06",
+   "picked": "d0.150_dte14-24_noE_hold_bid",
+   "train_excess_logret": -0.00039778415557164453
+  },
+  {
+   "train_from": "2024-01-06",
+   "test_from": "2026-01-06",
+   "test_to": "2026-07-06",
+   "picked": "d0.150_dte30-45_E_roll_bid",
+   "train_excess_logret": 0.01482981257903853
+  },
+  {
+   "train_from": "2024-07-06",
+   "test_from": "2026-07-06",
+   "test_to": "2026-11-12",
+   "picked": "d0.150_dte30-45_E_roll_bid",
+   "train_excess_logret": -0.01816529766565269
+  }
+ ]
+}

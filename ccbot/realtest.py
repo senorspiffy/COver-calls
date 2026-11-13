@@ -9,7 +9,7 @@ Inputs (scripts/fetch_real_data.py writes them; DoltHub post-no-preference + Cbo
   data/real/options/T.csv.gz  date, expiration, strike, bid, ask, vol (IV), delta (calls only)
   data/real/volhist/T.csv     date, iv_current, hv_current   data/real/BXM_History.csv
 
-Simulation (one ticker, 100 shares, all cash flows at 0% interest for both arms):
+Simulation (one ticker; both arms fully invested with fractional shares, see simulate()):
   * A call is only ever sold on a day that has a real quote for it (a snapshot day), at the bid
     ("bid" fills) or at bid + 25% of the spread ("quarter" fills). Buy-backs pay the ask (or
     ask - 25% of spread). Mid fills are reported only to show what the spread costs.
@@ -181,6 +181,7 @@ def buy_px(row, fill):
 
 
 def opt_fees(px, mult, sell):
+    """Fees for options covering `mult` shares; fractional contracts at the per-contract rate."""
     c = mult / 100.0
     return (COMMISSION + REG_FEE) * c + (SEC_RATE * px * mult if sell else 0.0)
 
@@ -198,6 +199,7 @@ class Trade:
     close_cost: float = 0.0  # per share paid to close (buy-back or intrinsic at assignment)
     outcome: str = ""        # expired | assigned | early_assigned | bought_back | rolled
     rv_life: float = float("nan")   # realized vol from open to close (annualised)
+    qty: float = 100.0       # shares covered
 
     @property
     def pnl(self):
@@ -238,32 +240,36 @@ def _realized_vol(close, a, b):
 
 
 def simulate(td, cfg, start=None, end=None):
-    """Returns (daily DataFrame[cc, bh], trades list). Equity in $ for 100 starting shares."""
+    """Returns (daily DataFrame[cc, bh] starting at 1.0, trades list).
+
+    Both arms stay fully invested with fractional shares, like the BXM index: dividends are
+    reinvested at the ex-date close in both; in the covered-call arm the premium, buy-back costs
+    and assignment proceeds are also turned back into shares at that day's close, and each call
+    covers every share held when it is sold. Real accounts trade 100-share lots (see caveats)."""
     days = [d for d in td.close.index if (start is None or d >= start) and (end is None or d <= end)]
-    snap_days = sorted(td.chain)
+    snap_days = sorted(d for d in td.chain if start is None or d >= start)
     if not snap_days:
         raise ValueError(f"{td.ticker}: no option quotes")
     days = [d for d in days if d >= snap_days[0]]
-    shares = 100.0
-    mult = 100.0                     # deliverable shares per contract (changes on splits)
-    cash_cc = cash_bh = 0.0
-    base = td.close[days[0]] * shares
+    c0 = float(td.close[days[0]])
+    sh_cc = sh_bh = 1.0 / c0          # $1 in each arm
     open_t = None
     last_iv = None
     trades, rows = [], []
     for i, d in enumerate(days):
         c = float(td.close[d])
-        if d in td.splits:                       # OCC-style adjustment keeps the position whole
+        cash = 0.0                       # covered-call cash flows today, reinvested at the close
+        if d in td.splits:               # OCC-style adjustment keeps the position whole
             f = td.splits[d]
-            shares *= f
-            mult *= f
+            sh_cc *= f
+            sh_bh *= f
             if open_t:
                 open_t.strike /= f
                 open_t.premium /= f
+                open_t.qty *= f
         if d in td.divs:
-            if not (open_t and open_t.outcome == "early_assigned"):
-                cash_cc += td.divs[d] * shares
-            cash_bh += td.divs[d] * shares
+            sh_bh += td.divs[d] * sh_bh / c
+            cash += td.divs[d] * sh_cc
         g = td.chain.get(d)
         nxt = days[i + 1] if i + 1 < len(days) else None
 
@@ -280,11 +286,11 @@ def simulate(td, cfg, start=None, end=None):
                     open_t.close_date = d
                     open_t.outcome = "bought_back" if cfg.manage == "take50" else "rolled"
                     open_t.rv_life = _realized_vol(td.close, open_t.open_date, d)
-                    cash_cc -= ask * mult + opt_fees(ask, mult, False)
+                    cash -= ask * open_t.qty + opt_fees(ask, open_t.qty, False)
                     trades.append(open_t)
                     open_t = None
 
-        # early exercise the day before ex-dividend (approximate)
+        # early exercise the day before ex-dividend (approximate): we lose tomorrow's dividend
         if open_t and nxt in td.divs and c > open_t.strike and nxt <= open_t.expiration:
             T = max((open_t.expiration - d).days, 1) / 365
             tv = bs_price(c, open_t.strike, T, R, 0.0, last_iv or open_t.iv, "C") - (c - open_t.strike)
@@ -293,10 +299,9 @@ def simulate(td, cfg, start=None, end=None):
                 open_t.close_date = d
                 open_t.outcome = "early_assigned"
                 open_t.rv_life = _realized_vol(td.close, open_t.open_date, d)
-                cash_cc += open_t.strike * mult - (c + STOCK_SLIP) * mult   # sell at K, buy back at close
+                cash += (open_t.strike - c - STOCK_SLIP) * open_t.qty   # sold at K, re-bought at close
+                cash -= td.divs[nxt] * open_t.qty                       # dividend we no longer get
                 trades.append(open_t)
-                # shares are re-bought at today's close but the dividend tomorrow is lost:
-                cash_cc -= td.divs[nxt] * shares
                 open_t = None
 
         # expiry (or the last trading day on/before it)
@@ -306,7 +311,7 @@ def simulate(td, cfg, start=None, end=None):
             if c > open_t.strike:
                 open_t.close_cost = c - open_t.strike
                 open_t.outcome = "assigned"
-                cash_cc += open_t.strike * mult - (c + STOCK_SLIP) * mult
+                cash += (open_t.strike - c - STOCK_SLIP) * open_t.qty
             else:
                 open_t.outcome = "expired"
             trades.append(open_t)
@@ -318,10 +323,12 @@ def simulate(td, cfg, start=None, end=None):
             if r is not None and not (cfg.skip_earnings and _earnings_between(td, d, r.expiration)):
                 px = sell_px(r, cfg.fill)
                 if px >= 0.03:
-                    open_t = Trade(d, r.expiration, float(r.strike), float(px), float(r.iv), float(r.delta), c)
+                    qty = sh_cc + cash / c
+                    open_t = Trade(d, r.expiration, float(r.strike), float(px), float(r.iv), float(r.delta), c, qty=qty)
                     last_iv = float(r.iv)
-                    cash_cc += px * mult - opt_fees(px, mult, True)
+                    cash += px * qty - opt_fees(px, qty, True)
 
+        sh_cc += cash / c
         # mark to market
         liab = 0.0
         if open_t:
@@ -332,8 +339,9 @@ def simulate(td, cfg, start=None, end=None):
             else:
                 T = max((open_t.expiration - d).days, 0) / 365
                 liab = bs_price(c, open_t.strike, T, R, 0.0, last_iv or open_t.iv, "C")
-        rows.append((d, cash_cc + shares * c - liab * mult, cash_bh + shares * c))
-    df = pd.DataFrame(rows, columns=["date", "cc", "bh"]).set_index("date") / base
+            liab *= open_t.qty
+        rows.append((d, sh_cc * c - liab, sh_bh * c))
+    df = pd.DataFrame(rows, columns=["date", "cc", "bh"]).set_index("date")
     return df, trades
 
 
@@ -477,34 +485,43 @@ def bxm_vs_spy(root, start, end):
 
 # ---------------------------------------------------------------- driver
 
-def run(root, out, tickers, grid=GRID, mc_paths=10000):
+def run(root, out, tickers, grid=GRID, mc_paths=10000, start=None, min_years=3.0):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     data, skipped = {}, {}
     for tk in tickers:
         try:
             data[tk] = load_ticker(root, tk)
-            if not data[tk].chain:
+            ch = [d for d in data[tk].chain if start is None or d >= start]
+            if not ch:
                 raise ValueError("no option quotes")
+            if (max(ch) - min(ch)).days / 365.25 < min_years:
+                raise ValueError(f"option quotes only {min(ch)} to {max(ch)} (< {min_years} years)")
         except Exception as e:
+            data.pop(tk, None)
             skipped[tk] = str(e)
-    data.pop("SPY", None) if "SPY" in data and len(data) > 1 else None
+    spy = data.pop("SPY", None) if len(data) > 1 else None
     # 1) pre-registered bot rule with three fill assumptions
     fixed = []
     for tk, td in data.items():
         for fill in ("bid", "quarter", "mid"):
             cfg = Config(fill=fill)
-            df, tr = simulate(td, cfg)
+            df, tr = simulate(td, cfg, start=start)
             fixed.append(summarize(td, cfg, df, tr))
             if fill == "bid":
                 pd.DataFrame([asdict(t) | {"pnl": t.pnl} for t in tr]).to_csv(out / f"trades_{tk}.csv", index=False)
+    if spy is not None:   # SPY with the same rule: our own check against BXM (not in the pooled tests)
+        for fill in ("bid", "quarter", "mid"):
+            cfg = Config(fill=fill)
+            df, tr = simulate(spy, cfg, start=start)
+            fixed.append(summarize(spy, cfg, df, tr))
     pd.DataFrame(fixed).to_csv(out / "bot_rule_by_ticker.csv", index=False)
     # 2) full grid (bid fills) -> walk-forward
     curves, grid_rows = {}, []
     for cfg in grid:
         curves[cfg.name] = {}
         for tk, td in data.items():
-            df, tr = simulate(td, cfg)
+            df, tr = simulate(td, cfg, start=start)
             curves[cfg.name][tk] = df
             s = summarize(td, cfg, df, tr)
             grid_rows.append({k: s[k] for k in ("ticker", "config", "cc_cagr", "bh_cagr", "excess_cagr",
@@ -520,7 +537,7 @@ def run(root, out, tickers, grid=GRID, mc_paths=10000):
     pd.DataFrame(wf).to_csv(out / "walkforward_by_ticker.csv", index=False)
     pd.DataFrame(picks).to_csv(out / "walkforward_picks.csv", index=False)
     # 3) Monte Carlo on the bot rule (bid fills), random 2-stock portfolios like the $5k account
-    bot = curves.get(BOT_RULE.name) or {tk: simulate(td, BOT_RULE)[0] for tk, td in data.items()}
+    bot = curves.get(BOT_RULE.name) or {tk: simulate(td, BOT_RULE, start=start)[0] for tk, td in data.items()}
     rc = pd.DataFrame({tk: df.cc.pct_change() for tk, df in bot.items()})
     rb = pd.DataFrame({tk: df.bh.pct_change() for tk, df in bot.items()})
     mc = monte_carlo(rc, rb, n_paths=mc_paths)
@@ -540,11 +557,12 @@ def main(argv=None):
     ap.add_argument("--out", default="reports/real")
     ap.add_argument("--tickers", default=None)
     ap.add_argument("--mc-paths", type=int, default=10000)
+    ap.add_argument("--start", default="2020-01-01", help="DoltHub has one 2019 snapshot, then daily/MWF from 2020-01-06")
     a = ap.parse_args(argv)
     tks = a.tickers.split(",") if a.tickers else sorted(p.name.split(".")[0] for p in (Path(a.data) / "options").glob("*.csv.gz"))
     if "SPY" not in tks and (Path(a.data) / "prices" / "SPY.csv").exists():
         tks.append("SPY")
-    s = run(a.data, a.out, tks, mc_paths=a.mc_paths)
+    s = run(a.data, a.out, tks, mc_paths=a.mc_paths, start=date.fromisoformat(a.start))
     print(json.dumps({k: s[k] for k in ("tickers", "skipped", "period", "bxm_vs_spy")}, indent=1, default=str))
 
 

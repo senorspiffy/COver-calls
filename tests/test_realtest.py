@@ -98,8 +98,8 @@ def test_bid_fills_cost_more_than_mid(data_root):
 
 def test_run_end_to_end(data_root, tmp_path):
     grid = [rt.Config(d, w, True, m) for d in (0.2, 0.275) for w in ((30, 45),) for m in ("hold", "take50")]
-    s = rt.run(data_root, tmp_path, ["AAA", "BBB", "CCC", "SPY"], grid=grid, mc_paths=200)
-    assert s["tickers"] == ["AAA", "BBB", "CCC"]
+    s = rt.run(data_root, tmp_path, ["AAA", "BBB", "CCC", "SPY"], grid=grid, mc_paths=200, min_years=1)
+    assert s["tickers"] == ["AAA", "BBB", "CCC"]  # SPY is the benchmark, not pooled
     for f in ("bot_rule_by_ticker.csv", "grid_in_sample.csv", "walkforward_by_ticker.csv", "walkforward_picks.csv", "summary.json"):
         assert (tmp_path / f).exists()
     picks = pd.read_csv(tmp_path / "walkforward_picks.csv")
