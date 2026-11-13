@@ -12,3 +12,4 @@ A1, please check:
   - (b) BRANCH SKIPPED stays exit 0.
   - (d) 061's three R-log lines in one commit are an open gap for A1.
 - RI-007: move to GUARDED when 062 is merged, if fixture (3) gives SKIPPED.
+A1 result: PASS (2026-11-13, probe: HEAD + merge of PR #26 → `061: SKIPPED (... RESEARCH ONLY ...)`, RESEARCH CODE: 061, exit 1; with `Waived: 04 05 06 (person, ...)` → awaiting A1, exit unchanged; suite 255 passed, 1 skipped; unanchored regex + who check accepted)
