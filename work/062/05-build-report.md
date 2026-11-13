@@ -17,7 +17,7 @@ Files, from the commands in 012:
 - tests/test_pipeline_check.py:
   - `_branch_adds(..., extra=())` writes the extra paths with `_write`; the default changes nothing for old callers.
   - `test_repo_pipeline_has_no_skipped_items` now also asserts `RESEARCH CODE: none`.
-  - New tests: `test_build_waiver_needs_person_date_and_all_three` (6 cases), `test_research_code_rules`, fixtures (1) `test_research_only_branch_with_code_is_branch_skipped`, (2a)+(2b) `test_research_only_branch_waiver_needs_the_person`, (3) `test_research_only_head_commit_with_code_is_skipped`, (4) `test_research_only_work_files_only_not_flagged`, (5) `test_full_item_build_in_same_commit_covers_research_code`, (6) `test_second_waived_line_is_not_read`, (7) `test_rescoped_to_full_is_not_research_but_still_skipped`, (8) `test_legacy_research_item_with_code_not_flagged`, (9) `test_research_code_without_git`, (10) `test_research_code_cutoff_missing_not_checked`.
+  - New tests: `test_build_waiver_needs_person_date_and_all_three` (7 cases; the 7th added in round 2), `test_research_code_rules`, fixtures (1) `test_research_only_branch_with_code_is_branch_skipped`, (2a)+(2b) `test_research_only_branch_waiver_needs_the_person`, (3) `test_research_only_head_commit_with_code_is_skipped`, (4) `test_research_only_work_files_only_not_flagged`, (5) `test_full_item_build_in_same_commit_covers_research_code`, (6) `test_second_waived_line_is_not_read`, (7) `test_rescoped_to_full_is_not_research_but_still_skipped`, (8) `test_legacy_research_item_with_code_not_flagged`, (9) `test_research_code_without_git`, (10) `test_research_code_cutoff_missing_not_checked`.
 - .claude/commands/run-item.md L8, .claude/agents/r3-fact-checker.md L22, .claude/agents/i3-verifier.md step 3 (L14): the 03 map step 7 sentences are appended word for word. `grep -c 062` gives 1 in each. The i3 names exist: `ccbot/expiries.py:72 pick_expiry`, `ccbot/pricing.py:53 pick_strike`, and `config/default.json` keys `target_delta`, `tolerance`, `monthly_dte`, `monthly_slack_days`.
 
 ## Connectivity check
@@ -50,7 +50,7 @@ Missing-data grep: `grep -rnE "fillna|nan_to_num|or 0|else 0|pd\.notna\(.*\) and
 Feasibility tests the plan names (real numbers from this run):
 - HEAD flag rule: `RESEARCH CODE: none` on this HEAD (0 flags; plan expected 0).
 - Branch flag rule: 1 flag, `BRANCH SKIPPED: 061 (origin/claude/project-thread-ltyppm: ...)` (plan expected 1).
-- Waiver rule: 2 of 6 strings count (the parametrized test passes with exactly the 2 True cases).
+- Waiver rule: 2 of 7 strings count (6 in round 1, plus the copied-bracket case from round 2; the parametrized test passes with exactly the 2 True cases).
 
 ## Test output (pasted, not summarized)
 Before the change: `python3 -m pytest -q tests/test_pipeline_check.py` → `52 passed in 7.77s`.
@@ -86,10 +86,17 @@ I compared this with HEAD's committed script (`git show HEAD:scripts/check_pipel
 Mutation probes (scratch copy of the repo in the session scratchpad, deleted afterwards; the repo was not touched), running the 062 tests (`-k "research or waiver or rescoped or legacy_research or second_waived or full_item_build"`):
 - M1, drop the Scope test in `_research_code`: `test_research_code_rules` and `test_rescoped_to_full_is_not_research_but_still_skipped` FAIL (2 failed, 16 passed).
 - M2, drop `WAIVE_BUILD <=`: the `Waived: 04 (person, 2026-11-13: x)` case FAILs (1 failed, 17 passed).
-- M3, drop `who == "person"`: **0 failed, 18 passed.** The plan expected (2b) and its unit case to fail, but the date regex `\(\s*person\s*,` already requires `person` as the first word in the bracket, so the who check is redundant with it. Extra probes:
-  - M4, drop the regex only: the `(person: ok)` case FAILs.
-  - M5, drop both who and the regex: 3 FAIL, including `(I2, 2026-11-13: person said ok)` and fixture (2b).
-  - So the "person" rule is guarded, but by the regex and not by the who check. This is noted for I3 and I1; I did not change the plan's code.
+- M3, drop `who == "person"` (corrected after I3 round 1): in round 1 this probe failed 0 tests (0 failed, 18 passed), and I wrongly called the who check redundant. It is not: `WAIVE_BUILD_BY_PERSON.search` scans the whole Waived line, so `Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")` matches the regex, and only the who check stops it. Round 2 adds that string as a False case to `test_build_waiver_needs_person_date_and_all_three`. M3 rerun on a scratch copy: `FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")-False]`, 1 failed, 18 passed.
+- M4, drop the regex only: the `(person: ok)` case FAILs. M5, drop both who and the regex: 3 FAIL.
+- Regex anchoring, probed and not built: with the regex anchored to the first bracket (`^Waived:\s*[0-9 ,]+\(\s*person...`), the 062 tests pass (19 passed). But M3 then fails 0 tests again (19 passed), because the anchored regex alone rejects the copied bracket and the who check becomes untestable. The plan's regex is kept, so each of the two checks is pinned by its own case. This is noted for I1.
+
+Round 2 (after I3 round 1), with the copied-bracket case added:
+```
+$ python3 -m pytest -q tests/test_pipeline_check.py
+70 passed in 8.89s
+$ python3 -m pytest -q
+255 passed, 1 skipped in 24.58s
+```
 
 ## Deviations from plan
 - Fixtures (2a)/(2b) are one test, `test_research_only_branch_waiver_needs_the_person`, with two branches in one repo: `ok` (160, person's waiver) and `bad` (161, I2 waiver, `ccbot/y.py`). The plan had "the same branch" twice. The assertions are the plan's.
@@ -97,7 +104,7 @@ Mutation probes (scratch copy of the repo in the session scratchpad, deleted aft
 - `untracked_changes` and `research_code` take an optional `walked`, so `main()` walks the history once ("both HEAD checks share one walk"). Called alone, each still walks for itself.
 - When several HEAD commits flag the same item, the details are joined with `;` behind the first sha7. The plan's dict holds one entry per ID and did not say what to do with a second flag.
 - `WAIVE_BUILD_BY_PERSON` is a named constant for the plan's regex (no change in meaning).
-- Mutation M3 does not fail any test (see above). This is a finding about the plan's expectation, not a code change.
+- Round 2 (after I3 round 1): one test case added (the copied person bracket), and the 04 mutation line corrected. The regex is not anchored (see M3).
 
 ## Notes for the person (03 map step 8; A1 repeats them in the report)
 - (a) PR #26 (item 061, origin/claude/project-thread-ltyppm) now shows as `BRANCH SKIPPED: 061`. Before it merges after 062, it needs `Waived: 04 05 06 (person, <date>: <why>)` as the single Waived line in work/061/request.md, or a FULL re-run of 061. Otherwise main's check exits 1 after the merge.
@@ -107,7 +114,7 @@ Mutation probes (scratch copy of the repo in the session scratchpad, deleted aft
 
 ## Recurring issues checked (I2)
 Read logs/recurring-issues.md first. I checked the output against each open or ESCALATED entry:
-- RI-001 (ESCALATED): the three feasibility numbers are computed above (HEAD 0, branch 1, waiver 2 of 6).
+- RI-001 (ESCALATED): the three feasibility numbers are computed above (HEAD 0, branch 1, waiver 2 of 7).
 - RI-007 (ESCALATED): this item.
 - RI-011 (OPEN): the branch side uses `changed()` from merge-tree; only the existing fallback uses `HEAD...ref`.
 - RI-012 (OPEN): items come from paths only. The negative waiver test puts "person" inside I2's text.
@@ -118,7 +125,7 @@ Also checked:
 - RI-009: the mutations ran in a scratch copy.
 - RI-010: the log line is written with `--log`.
 
-RI-001: feasibility numbers recorded (HEAD 0 / branch 1 / waiver 2 of 6); no change to status.
+RI-001: feasibility numbers recorded (HEAD 0 / branch 1 / waiver 2 of 7); no change to status.
 RI-007: guardrail built (062); GUARDED when merged and a RESEARCH ONLY fixture with a ccbot/ file gives SKIPPED (`test_research_only_head_commit_with_code_is_skipped`, passing here).
 RI-011: not affected; the branch side uses merge-tree `changed()`.
 RI-012: not affected; items come from paths only, and there is a negative waiver test with "person" in another who's text.

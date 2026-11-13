@@ -830,6 +830,8 @@ def _cp():
     ("Waived: 04 05 06 (I2, 2026-11-13: person said ok)", False),
     ("Waived: 04 05 06 (person: ok)", False),
     ("Waived: 02 (A1, 2026-10-31: x)\nWaived: 04 05 06 (person, 2026-11-13: ok)", False),
+    # I3 round 1: the person's bracket copied into another who's text (RI-012)
+    ('Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")', False),
 ])
 def test_build_waiver_needs_person_date_and_all_three(waived, counts):
     assert _cp()._build_waived(RES_160 + waived + "\n") is counts

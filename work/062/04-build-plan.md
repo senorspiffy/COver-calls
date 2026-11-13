@@ -87,7 +87,7 @@ Regression: the whole of `tests/test_pipeline_check.py` passes, including the 03
 Mutations (I3, in a scratch copy):
 - Drop the Scope test in `_research_code` → (7) and the "FULL item with 01 + code" unit case fail.
 - Drop the `WAIVE_BUILD <=` test → the `04 (person, ...)` case fails.
-- Drop the who check → (2b) and its unit case fail.
+- Drop the who check → the unit case `Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")` fails (the date regex also matches a copied person bracket, so only the who check stops it; (2b) is caught by the regex too). Corrected after I3 round 1.
 
 Run: `python3 scripts/check_pipeline.py` on this HEAD. Expect `RESEARCH CODE: none`, plus `BRANCH SKIPPED: 061 (origin/claude/project-thread-ltyppm: ... RESEARCH ONLY: changes ccbot/realtest.py scripts/fetch_real_data.py tests/test_realtest.py ...)` when that ref is present locally. `python3.11 -m py_compile scripts/check_pipeline.py`.
 
