@@ -1,0 +1,12 @@
+# 07 Audit task - 053
+A1, please check:
+- `python3 scripts/check_handoff.py 053` → PASS. `python3 scripts/check_pipeline.py` → `UNTRACKED CHANGE: none`, exit 0, and 053 complete after your A1 line.
+- The guardrail on real history: in a scratch worktree at de5406c, `python3 <repo>/scripts/check_pipeline.py --untracked-from 96b7f94` → `UNTRACKED CHANGE: de5406c config/tickers.json tests/test_practice.py …`, exit 1. A 3ba835e-shaped scratch commit after the real cutoff (an edit to work/048/05 plus config) → an entry, exit 1.
+- The cutoff `UNTRACKED_FROM = 694bf4d…` is after 3ba835e and in HEAD's history (`merge-base --is-ancestor` both ways, 06). After the PR is merged, re-run on main and confirm that the merge landed as a merge commit (no squash or rebase). If it did not, the check prints `cutoff 694bf4d not in HEAD's history` and exits 1. This is the RI-007 GUARDED condition.
+- Mutations (06 table): the exit term, the rename diff, the FAIL clause, the closed-list clause, and the `< day.date` guard (removed, and changed to `<=`). Each fails at least one test. Re-run at least the exit-term mutation and the guard mutation.
+- PBR in config/tickers.json: values unchanged (`last_earnings` 2026-11-10; `next_earnings`, `ex_div_date`, `dividend` null). The three sources are the Petrobras Agência results and dividend notices and stockanalysis. Spot-check that the Petrobras dividend URL gives ADR record date 2026-12-23 and no ADR ex-date.
+- RI-002: decide whether 3ba835e's 11-09 test expectation, which relied on `enrich` estimating from a future `last_earnings`, is an RI-002 occurrence (05 "For A1").
+- For the person (05): the merge-commit rule; don't open a Jan 2027 PBR call without the ADR ex-date; the IDEA "ADR ex = ADR record date (FINRA 11140)" is offered, not built.
+- Minor (06): `test_untracked_from_is_fixed` passes silently via bare `return` when git is missing or the clone is shallow. Decide whether it should use `pytest.skip`.
+- Known gaps listed in the docstring (a)–(f), e.g. one open item's step file covers unrelated code in the same commit, and `pyproject.toml`/`README.md`/`data/` are not checked. Decide whether any needs an IDEA.
+A1 result: PASS (2026-11-11, A1 re-ran on 95a3f08: pytest 221 passed 1 skipped; check_pipeline exit 0, UNTRACKED CHANGE none; diff of ccbot/tickers.py and config/tickers.json read against 04; PBR facts cite Petrobras's own release; I3's mutation table in 06. Minor: test_untracked_from_is_fixed returns silently without git, noted, not a failure)

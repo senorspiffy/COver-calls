@@ -140,6 +140,7 @@ def test_repo_pipeline_has_no_skipped_items():
     """The real work/ folder: no item may skip a step (RI-007)."""
     code, out = _run(REPO, "check_pipeline.py")
     assert code == 0, out
+    assert "RESEARCH CODE: none" in out                 # item 062
 
 
 def test_no_tracked_pycache():
@@ -171,6 +172,12 @@ def _git(cwd, *args):
     subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
 
 
+def _root(repo):
+    """The fixture's root commit: its own cutoff for the item-053 check (--untracked-from)."""
+    return subprocess.run(["git", "rev-list", "--max-parents=0", "HEAD"], cwd=repo, capture_output=True,
+                          text=True, check=True).stdout.split()[0]
+
+
 def _repo_with_open_branch(tmp_path):
     """origin + clone. main: item 040 request only (and a recurring-issues line). Branch
     `fix`, pushed and not merged: 040 fully built, and its own recurring-issues line."""
@@ -197,7 +204,7 @@ def _repo_with_open_branch(tmp_path):
 def test_item_built_on_open_branch_is_in_pr_not_stuck(tmp_path):
     """Item 034 (RI-009): the 2026-11-01 case, 009-016 done in PR #7 but reported STUCK."""
     repo = _repo_with_open_branch(tmp_path)
-    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-02")
     assert code == 0
     assert "040: IN PR (origin/fix has 01 02 03 04 05 06 07; was STUCK here)" in out
     assert "STUCK: none" in out
@@ -211,14 +218,17 @@ def test_open_branch_conflict_is_reported(tmp_path):
     repo = _repo_with_open_branch(tmp_path)
     (repo / "logs" / "recurring-issues.md").write_text("RI\nfrom main\n", encoding="utf-8")
     _git(repo, "commit", "-q", "-am", "daily audit")
-    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-02")
     assert code == 0
     assert "  origin/fix: items 040; CONFLICTS: logs/recurring-issues.md; edits" in out
 
 
-def _branch_adds(repo, branch, item, files, request_text=None):
-    """Push branch `branch` off main that adds work/<item> with `files` (item 037/038 tests)."""
+def _branch_adds(repo, branch, item, files, request_text=None, extra=()):
+    """Push branch `branch` off main that adds work/<item> with `files` (item 037/038 tests),
+    plus the paths in `extra` (item 062)."""
     _git(repo, "checkout", "-q", "-b", branch, "main")
+    for path in extra:
+        _write(repo, path)
     d = repo / "work" / item
     d.mkdir(parents=True, exist_ok=True)
     (d / "request.md").write_text(request_text or f"# Work item {item}\nScope: FULL\nDate: 2026-10-31\n",
@@ -237,7 +247,7 @@ def test_same_id_on_main_and_open_branch_is_a_clash(tmp_path):
     _branch_adds(repo, "pr5", "050", ["05-build-report.md"], "# Work item 050\nType: IDEA\nScope: FULL\nDate: 2026-10-31\n")
     _item(repo, "050", ALL)                     # main adds its own 050 after the branch left
     _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "main 050")
-    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-03")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-03")
     assert code == 0
     assert "ID CLASH: 050 (origin/pr5)" in out
     # an item both sides share from the merge base (040 on origin/fix) is not a clash
@@ -258,7 +268,7 @@ def test_open_branch_item_that_skips_steps_is_reported(tmp_path):
     """Item 038 (RI-007): PR #5 had request + 05 only and nothing said so."""
     repo = _repo_with_open_branch(tmp_path)
     _branch_adds(repo, "short", "060", ["05-build-report.md"])
-    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-03")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-03")
     assert code == 0                               # a branch never fails main's check
     assert "BRANCH SKIPPED: 060 (origin/short: FULL: missing 01 02 03 04 before 05)" in out
     assert "BRANCH SKIPPED: 040" not in out        # origin/fix has 01-07 for 040
@@ -273,7 +283,7 @@ def test_open_branch_line_shows_last_commit_age(tmp_path):
                           capture_output=True, text=True).stdout.strip()
     import datetime as dt
     today = dt.date.fromisoformat(when) + dt.timedelta(days=3)
-    out = _run(repo, "check_pipeline.py", "--today", today.isoformat())[1]
+    out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", today.isoformat())[1]
     assert f"(item 036); last commit {when} (3 days)" in out
 
 
@@ -414,7 +424,7 @@ def test_log_line_after_its_commit_is_flagged(tmp_path):
     for cmd in (["init", "-q"], ["add", "-A"],
                 ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]):
         subprocess.run(["git", *cmd], cwd=tmp_path, check=True, env=env)
-    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
+    code, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-05")
     line = [l for l in out.splitlines() if l.startswith("LOG TIME:")][0]
     assert code == 1
     assert "150 I2 (2026-11-04 23:10 after commit 2026-11-04 22:24 UTC)" in line
@@ -426,6 +436,7 @@ def test_log_time_not_checked_outside_git(tmp_path):
     _item(tmp_path, "150", ALL)
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
     assert code == 0 and "LOG TIME: not checked (no git)" in out
+    assert "UNTRACKED CHANGE: not checked (no git)" in out
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
@@ -434,7 +445,7 @@ def test_rules_branch_is_reported(tmp_path):
     that changes .claude/, templates/ or the check scripts is named; one that changes only work/
     and logs/ is not."""
     repo = _repo_with_open_branch(tmp_path)
-    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-02")
     assert "RULES BRANCH: none" in out
     _git(repo, "checkout", "-q", "-b", "rules")
     agent = repo / ".claude" / "agents" / "x.md"
@@ -443,7 +454,7 @@ def test_rules_branch_is_reported(tmp_path):
     _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "rules")
     _git(repo, "push", "-q", "origin", "rules")
     _git(repo, "checkout", "-q", "main")
-    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-02")
     line = [l for l in out.splitlines() if l.startswith("RULES BRANCH:")][0]
     assert line == "RULES BRANCH: origin/rules changes .claude/agents/x.md; build new items on top of it (item 049)"
     assert "origin/fix" not in line
@@ -477,7 +488,7 @@ def test_log_time_exception_is_named_and_closed(tmp_path):
         with log.open("a", encoding="utf-8") as fh:
             fh.write("".join(f"20:00 | {a} | {item} | {FIELDS[a]}\n" for a in ("I1", "I2")))
     _commit_all(tmp_path, "2026-11-07T20:20:51+00:00")
-    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-08")
+    code, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-08")
     line = [l for l in out.splitlines() if l.startswith("LOG TIME:")][0]
     assert code == 1
     assert line.startswith("LOG TIME: 150 I3 (2026-11-07 20:40 after commit 2026-11-07 20:20 UTC)")
@@ -494,11 +505,11 @@ def test_recommitted_log_line_is_checked_against_new_commit(tmp_path):
     log.parent.mkdir(parents=True)
     log.write_text("20:40 | I2 | 150 | see 05 | tests 1/1\n", encoding="utf-8")
     _commit_all(tmp_path, "2026-11-07T20:20:00+00:00")
-    _, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-08")
+    _, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-08")
     assert "LOG TIME: 150 I2" in out
     log.write_text("20:40 | I2 | 150 | 1 files changed | tests 1/1\n", encoding="utf-8")
     _commit_all(tmp_path, "2026-11-07T22:00:00+00:00")
-    _, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-08")
+    _, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-08")
     assert "LOG TIME: none" in out
 
 
@@ -526,3 +537,438 @@ def test_malformed_log_line_names_expected_format(tmp_path):
                        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 2
     assert r.stderr.strip() == '--log refused: I2 | 150 | see 05 does not match "<n> files changed | tests <pass>/<total>"'
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_branch_behind_main_says_main_ahead(tmp_path):
+    """Item 051: on PR #15's branch after the 11-08 audit, origin/main and a thread branch
+    sitting on main were listed as open branches with a false item-036 warning."""
+    repo = _repo_with_open_branch(tmp_path)
+    _item(repo, "041", [], date="2026-11-09")              # A1's daily commit on main
+    (repo / "logs" / "recurring-issues.md").write_text("RI\ndaily\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "daily audit")
+    _git(repo, "push", "-q", "origin", "main")
+    _git(repo, "push", "-q", "origin", "main:mirror")      # a thread branch on main's commit
+    _git(repo, "checkout", "-q", "fix")
+    out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-09")[1]
+    assert "MAIN AHEAD: origin/main has 1 commits not in HEAD; merge it before building (item 051)" in out
+    assert "origin/main:" not in out and "origin/mirror:" not in out
+    assert "(item 036)" not in out
+    assert _run(repo, "check_pipeline.py", "--next-id")[1].strip() == "042"   # main's 041 still counts
+    _git(repo, "checkout", "-q", "main")
+    out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-09")[1]
+    assert "MAIN AHEAD" not in out
+    assert "origin/fix: items 040" in out
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+def test_criss_cross_branch_lists_only_its_own_changes(tmp_path, monkeypatch):
+    """Item 052 (RI-011): PR #16 was cut from PR #15's branch and merged main; then main merged
+    PR #15. Two merge bases, so `HEAD...ref` credited PR #16 with PR #15's items and rule files.
+    Commit dates as on 2026-11-07..10: git's `...` then picks main's newer daily commit as the base."""
+    repo = _repo_with_open_branch(tmp_path)               # origin/fix carries item 040
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-07T22:00:00Z")
+    _git(repo, "checkout", "-q", "fix")
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "rule.md").write_text("rule\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "fix: rule change")
+    _git(repo, "push", "-q", "origin", "fix")
+    _git(repo, "checkout", "-q", "-b", "next")            # built on top of the open PR
+    _git(repo, "checkout", "-q", "main")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-09T22:16:00Z")
+    _item(repo, "041", [], date="2026-11-09")             # A1's daily commit on main
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "daily audit")
+    _git(repo, "push", "-q", "origin", "main")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-09T22:19:00Z")
+    _git(repo, "checkout", "-q", "next")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    (repo / "work" / "041" / "01-research.md").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "next: 041")
+    _git(repo, "push", "-q", "origin", "next")
+    _git(repo, "checkout", "-q", "main")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-09T23:34:00Z")
+    _git(repo, "merge", "-q", "--no-ff", "--no-edit", "fix")   # the person merges the open PR
+    _git(repo, "push", "-q", "origin", "main")
+    bases = subprocess.run(["git", "merge-base", "--all", "HEAD", "origin/next"], cwd=repo,
+                           capture_output=True, text=True).stdout.split()
+    assert len(bases) == 2                                # the criss-cross this test is about
+    out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-10")[1]
+    assert "origin/next: items 041;" in out
+    assert "RULES BRANCH: none" in out
+    assert "(item 036)" not in out
+    assert "ID CLASH: none" in out
+
+
+# Item 053 (RI-007): code, config, tests or rules changed outside an open work item.
+NO_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+WHY_053 = (" (item 053: code, config, tests or rules changed with no step file of an open work item;"
+           " a follow-up to a completed item is a new item)")
+
+
+def _write(repo, path, text="x\n"):
+    f = repo / path
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text, encoding="utf-8")
+
+
+def _commit(repo, msg="c"):
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", msg)
+    return _commit_sha(repo)
+
+
+def _history(tmp_path):
+    """A plain repo whose first commit is the cutoff: item 150 complete (A1 PASS) and config/x.json."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _item(repo, "150", ALL)
+    _write(repo, "config/x.json", "{}\n")
+    return repo, _commit(repo, "cutoff")
+
+
+def _untracked(repo, cutoff):
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-11", "--untracked-from", cutoff)
+    return code, [l for l in out.splitlines() if l.startswith("UNTRACKED CHANGE:")][0]
+
+
+@NO_GIT
+def test_completed_item_note_with_config_is_untracked(tmp_path):
+    """The 3ba835e shape: a note in a completed item's 05 plus config and test edits."""
+    repo, cutoff = _history(tmp_path)
+    _write(repo, "work/150/05-build-report.md", "x\n## Follow-up\n")
+    _write(repo, "config/x.json", '{"a": 1}\n')
+    _write(repo, "tests/t.py")
+    c = _commit(repo, "follow-up")
+    code, line = _untracked(repo, cutoff)
+    assert code == 1
+    assert line == (f"UNTRACKED CHANGE: {c[:7]} config/x.json tests/t.py{WHY_053}"
+                    f" (cutoff {cutoff[:7]} from --untracked-from)")
+
+
+@NO_GIT
+def test_new_item_step_file_covers_code(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "151", ["01-research.md"], date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    ok = _commit(repo, "151 R1 + code")
+    code, line = _untracked(repo, cutoff)
+    assert code == 0 and line == f"UNTRACKED CHANGE: none (cutoff {cutoff[:7]} from --untracked-from)"
+    _item(repo, "154", [], date="2026-11-11")                  # request.md alone is not a step file
+    _write(repo, "ccbot/z.py")
+    bad = _commit(repo, "154 request + code")
+    code, line = _untracked(repo, cutoff)
+    assert code == 1 and line.startswith(f"UNTRACKED CHANGE: {bad[:7]} ccbot/z.py (item 053")
+    assert ok[:7] not in line
+
+
+@NO_GIT
+def test_merge_bringing_untracked_commit_is_flagged(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "side")
+    _write(repo, "work/150/05-build-report.md", "x\n## Follow-up\n")
+    _write(repo, "config/x.json", '{"a": 1}\n')
+    _write(repo, "tests/t.py")
+    side = _commit(repo, "follow-up")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--no-ff", "--no-edit", "side")
+    merge = _commit_sha(repo)
+    code, line = _untracked(repo, cutoff)
+    assert code == 1
+    assert line.startswith(f"UNTRACKED CHANGE: {merge[:7]} config/x.json tests/t.py (item 053")
+    assert side[:7] not in line
+
+
+def _commit_sha(repo):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+@NO_GIT
+def test_cutoff_missing_in_shallow_clone_not_checked(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "151", ["01-research.md"], date="2026-11-11")
+    _commit(repo, "151 R1")
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "-q", "--depth", "1", f"file://{repo}", str(clone))
+    shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=clone,
+                             capture_output=True, text=True).stdout.strip()
+    assert shallow == "true"
+    code, line = _untracked(clone, cutoff)
+    assert code == 0
+    assert line == (f"UNTRACKED CHANGE: not checked (cutoff {cutoff[:7]} not in this shallow clone;"
+                    f" run git fetch --unshallow) (cutoff {cutoff[:7]} from --untracked-from)")
+
+
+@NO_GIT
+def test_cutoff_missing_in_full_repo_fails(tmp_path):
+    repo, _ = _history(tmp_path)
+    code, line = _untracked(repo, "0" * 40)
+    assert code == 1
+    assert line.startswith("UNTRACKED CHANGE: cutoff 0000000 not in HEAD's history (squash/rebase or wrong SHA)")
+    _git(repo, "checkout", "-q", "-b", "side")
+    _item(repo, "151", ["01-research.md"], date="2026-11-11")
+    side = _commit(repo, "side")
+    _git(repo, "checkout", "-q", "main")
+    code, line = _untracked(repo, side)                        # exists, but not an ancestor of HEAD
+    assert code == 1
+    assert line.startswith(f"UNTRACKED CHANGE: cutoff {side[:7]} not in HEAD's history")
+
+
+@NO_GIT
+def test_commits_before_cutoff_ignored(tmp_path):
+    repo, _ = _history(tmp_path)
+    _write(repo, "work/150/05-build-report.md", "x\n## Follow-up\n")
+    _write(repo, "config/x.json", '{"a": 1}\n')
+    later = _commit(repo, "follow-up, before the cutoff")
+    code, line = _untracked(repo, later)
+    assert code == 0 and line == f"UNTRACKED CHANGE: none (cutoff {later[:7]} from --untracked-from)"
+
+
+@NO_GIT
+def test_audit_file_never_covers_code(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "151", ALL, date="2026-11-11", a1=None)        # awaiting A1, no code
+    _commit(repo, "151 built")
+    _write(repo, "work/151/07-audit-task.md", "x\nA1 result: PASS (test)\n")
+    _write(repo, "ccbot/x.py")
+    c = _commit(repo, "A1 PASS + code")
+    code, line = _untracked(repo, cutoff)
+    assert code == 1 and line.startswith(f"UNTRACKED CHANGE: {c[:7]} ccbot/x.py (item 053")
+
+
+@NO_GIT
+def test_pr_merge_with_a1_pass_on_branch_is_covered(tmp_path):
+    """The PR #16/#17 shape: the branch's 07 already has A1 PASS; at main (C^1) 152 is absent."""
+    repo, cutoff = _history(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "pr")
+    _item(repo, "152", ALL, date="2026-11-11")
+    _write(repo, "scripts/y.py")
+    _commit(repo, "152 + code")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "merge", "-q", "--no-ff", "--no-edit", "pr")
+    code, line = _untracked(repo, cutoff)
+    assert code == 0 and line == f"UNTRACKED CHANGE: none (cutoff {cutoff[:7]} from --untracked-from)"
+
+
+@NO_GIT
+def test_a1_fail_item_covers_its_rework(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "153", ALL, date="2026-11-11", a1="A1 result: PASS (test)\nA1 result: FAIL (test)")
+    _commit(repo, "153 sent back")
+    _write(repo, "work/153/05-build-report.md", "x\nrework\n")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "153 rework")
+    assert _untracked(repo, cutoff)[1] == f"UNTRACKED CHANGE: none (cutoff {cutoff[:7]} from --untracked-from)"
+    _write(repo, "work/153/07-audit-task.md", "x\nA1 result: FAIL (test)\nA1 result: PASS (test)\n")
+    _commit(repo, "153 passes")
+    _write(repo, "work/153/05-build-report.md", "x\nrework\nmore\n")
+    _write(repo, "ccbot/x.py", "y\n")
+    c = _commit(repo, "after PASS")
+    line = _untracked(repo, cutoff)[1]
+    assert line.startswith(f"UNTRACKED CHANGE: {c[:7]} ccbot/x.py (item 053")
+
+
+@NO_GIT
+def test_legacy_and_pre_a1_items_never_cover(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _write(repo, "work/002/05-build-report.md")                # PRE_A1_LINE
+    _write(repo, "config/x.json", '{"a": 1}\n')
+    pre = _commit(repo, "002 note + config")
+    _write(repo, "work/005/05-build-report.md")                # LEGACY
+    _write(repo, "config/x.json", '{"a": 2}\n')
+    legacy = _commit(repo, "005 note + config")
+    code, line = _untracked(repo, cutoff)
+    assert code == 1
+    assert line.startswith(f"UNTRACKED CHANGE: {pre[:7]} config/x.json; {legacy[:7]} config/x.json (item 053")
+
+
+@NO_GIT
+def test_rename_out_of_code_path_is_flagged(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "151", ["01-research.md"], date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "151 + code")
+    (repo / "attic").mkdir()
+    _git(repo, "mv", "ccbot/x.py", "attic/x.py")       # porcelain diff would show only attic/x.py
+    c = _commit(repo, "move out")
+    code, line = _untracked(repo, cutoff)
+    assert code == 1 and line.startswith(f"UNTRACKED CHANGE: {c[:7]} ccbot/x.py (item 053")
+
+
+def test_untracked_from_is_fixed():
+    """053: the cutoff is a fixed commit after 3ba835e and in HEAD's history; never moved forward."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    import re
+    import check_pipeline
+    assert check_pipeline.CODE_PATHS == ("ccbot/", "config/", "scripts/", "tests/", ".claude/", "templates/")
+    assert re.fullmatch(r"[0-9a-f]{40}", check_pipeline.UNTRACKED_FROM)
+    if shutil.which("git") is None:
+        return
+    shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=REPO,
+                             capture_output=True, text=True).stdout.strip()
+    if shallow != "false":
+        return
+    for a, b in (("3ba835e", check_pipeline.UNTRACKED_FROM), (check_pipeline.UNTRACKED_FROM, "HEAD")):
+        assert subprocess.run(["git", "merge-base", "--is-ancestor", a, b], cwd=REPO).returncode == 0, (a, b)
+
+
+# Item 062 (RI-007): a RESEARCH ONLY item that changes code without I1-I3.
+RES_160 = "# Work item 160\nScope: RESEARCH ONLY\nDate: 2026-11-13\n"
+RES_STEPS = ["01-research.md", "02-improvements.md", "03-handoff.md", "07-audit-task.md"]
+
+
+def _cp():
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_pipeline
+    return check_pipeline
+
+
+@pytest.mark.parametrize("waived, counts", [
+    ("Waived: 04 05 06 (person, 2026-11-13: ok)", True),
+    ("Waived: 02 04 05 06 (person, 2026-11-13: ok)", True),
+    ("Waived: 04 (person, 2026-11-13: x)", False),
+    ("Waived: 04 05 06 (I2, 2026-11-13: person said ok)", False),
+    ("Waived: 04 05 06 (person: ok)", False),
+    ("Waived: 02 (A1, 2026-10-31: x)\nWaived: 04 05 06 (person, 2026-11-13: ok)", False),
+    # I3 round 1: the person's bracket copied into another who's text (RI-012)
+    ('Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")', False),
+])
+def test_build_waiver_needs_person_date_and_all_three(waived, counts):
+    assert _cp()._build_waived(RES_160 + waived + "\n") is counts
+
+
+def test_research_code_rules():
+    rc = _cp()._research_code
+    texts = {"160": RES_160, "161": "# Work item 161\nScope: FULL\nDate: 2026-11-13\n",
+             "001": "# Work item 001\nScope: RESEARCH ONLY\nDate: 2026-10-29\n",
+             "162": RES_160 + "Waived: 04 05 06 (person, 2026-11-13: ok)\n"}
+    shape_061 = ["ccbot/x.py", "work/160/01-research.md"]
+    flags = rc(shape_061, texts.get)
+    assert len(flags) == 1 and flags[0][0] == "160"
+    assert flags[0][1].startswith("RESEARCH ONLY: changes ccbot/x.py with no 04-06;")
+    assert rc(shape_061 + ["work/161/05-build-report.md"], texts.get) == []          # gap (g)
+    assert rc(["ccbot/x.py", "work/161/01-research.md"], texts.get) == []           # FULL, no 04/05
+    assert rc(["work/160/01-research.md", "work/160/02-improvements.md"], texts.get) == []
+    assert rc(["ccbot/x.py", "work/001/01-research.md"], texts.get) == []           # LEGACY
+    assert rc(["ccbot/x.py", "work/162/01-research.md"], texts.get) == []           # person's waiver
+    assert rc(shape_061, lambda i: None) == [("160", "RESEARCH ONLY check: no request.md at the tip, item 062")]
+
+
+def _research(repo, cutoff):
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-13", "--untracked-from", cutoff)
+    return code, out, [l for l in out.splitlines() if l.startswith("RESEARCH CODE:")][0]
+
+
+@NO_GIT
+def test_research_only_branch_with_code_is_branch_skipped(tmp_path):
+    """The 061 shape (PR #26): RESEARCH ONLY 01 02 03 07 plus ccbot/ code on an open branch."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "res", "160", RES_STEPS, RES_160, extra=["ccbot/x.py"])
+    code, out, _ = _research(repo, _root(repo))
+    assert code == 0                                   # a branch never fails main's check (038)
+    assert "BRANCH SKIPPED: 160 (origin/res: RESEARCH ONLY: changes ccbot/x.py" in out
+    assert "SKIPPED: none" in out
+
+
+@NO_GIT
+def test_research_only_branch_waiver_needs_the_person(tmp_path):
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "ok", "160", RES_STEPS, RES_160 + "Waived: 04 05 06 (person, 2026-11-13: ok)\n",
+                 extra=["ccbot/x.py"])
+    _branch_adds(repo, "bad", "161", RES_STEPS,
+                 RES_160.replace("160", "161") + "Waived: 04 05 06 (I2, 2026-11-13: person said ok)\n",
+                 extra=["ccbot/y.py"])
+    code, out, _ = _research(repo, _root(repo))
+    assert code == 0
+    assert "BRANCH SKIPPED: 160" not in out
+    line = [l for l in out.splitlines() if l.startswith("BRANCH SKIPPED: 161 ")]
+    assert len(line) == 1
+    assert "can be waived only by the person" in line[0]
+    assert "RESEARCH ONLY: changes ccbot/y.py" in line[0]
+
+
+@NO_GIT
+def test_research_only_head_commit_with_code_is_skipped(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    c = _commit(repo, "160 R1 + code")
+    code, out, line = _research(repo, cutoff)
+    assert code == 1
+    assert f"160: SKIPPED ({c[:7]} RESEARCH ONLY: changes ccbot/x.py" in out
+    assert len([l for l in out.splitlines() if l.startswith("160:")]) == 1
+    assert line == "RESEARCH CODE: 160"
+    assert "UNTRACKED CHANGE: none" in out
+
+
+@NO_GIT
+def test_research_only_work_files_only_not_flagged(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _commit(repo, "160 R1")
+    code, out, line = _research(repo, cutoff)
+    assert line == "RESEARCH CODE: none" and code == 0, out
+
+
+@NO_GIT
+def test_full_item_build_in_same_commit_covers_research_code(tmp_path):
+    """Gap (g) pinned: a FULL item's 05 in the same unit covers the code."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _item(repo, "161", ALL[:5], date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "160 R1 + 161 built + code")
+    code, out, line = _research(repo, cutoff)
+    assert line == "RESEARCH CODE: none"
+    assert "160: SKIPPED" not in out
+
+
+@NO_GIT
+def test_second_waived_line_is_not_read(tmp_path):
+    """Gap (j): the 023 shape, two Waived lines; only the first counts."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11",
+          waived="02 (A1, 2026-10-31: x)\nWaived: 04 05 06 (person, 2026-11-13: ok)")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "160 + code")
+    code, out, line = _research(repo, cutoff)
+    assert code == 1 and line == "RESEARCH CODE: 160"
+
+
+@NO_GIT
+def test_rescoped_to_full_is_not_research_but_still_skipped(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", RES_STEPS, date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "160 FULL + code")
+    code, out, line = _research(repo, cutoff)
+    assert line == "RESEARCH CODE: none"
+    assert "160: SKIPPED (FULL: missing 04 05 06 before 07" in out
+    assert code == 1
+
+
+@NO_GIT
+def test_legacy_research_item_with_code_not_flagged(tmp_path):
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "001", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _write(repo, "ccbot/x.py")
+    _commit(repo, "001 + code")
+    code, out, line = _research(repo, cutoff)
+    assert line == "RESEARCH CODE: none"
+    assert "001: LEGACY" in out
+
+
+def test_research_code_without_git(tmp_path):
+    _item(tmp_path, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-13")
+    _write(tmp_path, "ccbot/x.py")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-13")
+    assert code == 0
+    assert "RESEARCH CODE: not checked (no git)" in out
+
+
+@NO_GIT
+def test_research_code_cutoff_missing_not_checked(tmp_path):
+    repo, _ = _history(tmp_path)
+    code, out, line = _research(repo, "0" * 40)
+    assert code == 1                                   # from UNTRACKED CHANGE (053), not twice
+    assert line == "RESEARCH CODE: not checked (see UNTRACKED CHANGE)"

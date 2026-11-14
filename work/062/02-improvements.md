@@ -1,0 +1,34 @@
+# 02 Improvements - 062
+## What past logs say
+- RI-007 (logs/recurring-issues.md:83-98), ESCALATED, 6 occurrences. Every guardrail so far (026, 031, 035, 038, 042) compares an item's step files to its Scope. 053 is the only one that reads commits, and it never reads Scope (01 finding 10). Occurrence 1 (023) was also a RESEARCH ONLY item whose result changed other work.
+- 031 and 042: a waiver or `FAST` line counted no matter who wrote it until the check required `person` (and for FAST, a date). A new waiver must be `person` + date from day one.
+- 038: open-branch checks run `classify` on a temp dir that holds only `work/<ID>/`, so the branch's code is invisible (01 finding 5). 052: take branch changes from the merge-tree result (`changed()`), not `HEAD...ref`.
+- 053/02 AGAINST 1, docstring gap (a): "one open item's 01-06 file covers unrelated code in the same unit". Decision (3) below repeats that gap on purpose (AGAINST 1).
+- RI-012 (logs/recurring-issues.md:137-140): don't classify by a substring of free text. Find items from paths (STEP_FILE), never from "Item 061:" in commit messages (01 finding 22).
+- RESEARCH ONLY items after the cutoff on this branch: only 057 (work/057/request.md:3, "with no code or config change"). A grep of work/057 finds no `ccbot|scripts|tests|config/` path. Whether 057's commits touched code is UNVERIFIED (no shell). I2 must run the new check on this HEAD and get `none` for 057 before the PR.
+
+## 3 ways FOR
+1. **Reuse the two walks that already exist.** HEAD: 053's first-parent loop after `UNTRACKED_FROM` (scripts/check_pipeline.py:391-406). Branch: `changed("ccbot/", "scripts/", "tests/", "config/")` plus `touched` (lines 318-325). Pull 053's walk into one helper that yields `(commit, files)` and use it for both 053 and 062. That gives one git walk per run, not two, and 053's fixtures still pin the walk. Reasoning: the only new logic is "unit has code + a RESEARCH ONLY step file + no FULL/FAST 04/05 + no waiver". Items come from paths, not messages (RI-012).
+2. **Decisions settled (A1's five, no concrete reason against found):**
+   (1) BRANCH SKIPPED stays exit 0 (docstring L47-49; test_pipeline_check.py:263-271). A HEAD SKIPPED exits 1. The branch still goes red where it matters: once 062 is in a branch's base, I3 on that branch runs the check with HEAD = the branch.
+   (2) Paths are `ccbot/ scripts/ tests/ config/` (request:8,18). `.claude/` and `templates/` are a listed known gap (see Holes).
+   (3) A unit's code is covered if the same unit has an 04 or 05 of a FULL/FAST item. Otherwise a RESEARCH ONLY step file in that unit flags the item. The HEAD unit is the first-parent commit; the branch unit is the whole branch.
+   (4) HEAD is checked only after `UNTRACKED_FROM`.
+   (5) The waiver is `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)`. It counts only when who == `person`, 04, 05 and 06 are all listed, and a date is present. One more decision for I1: read Scope and Waived from the item's request.md at the tip (HEAD's working tree, or the branch tip's `git show <ref>:`), not at commit `<c>`. Both ways to clear the flag (re-scope to FULL, or the person's waiver) happen after the code has landed, and history can't change. Re-scoping is not a silent bypass, because `classify` then requires 04-06 (SKIPPED or in progress until they exist).
+3. **The fix also targets the cause, not just the gate.** Request guardrails 2-3 (run-item, r3, i3 text) stop the problem at the step that writes the code, and the i3 rule names the bot's single source (`pick_expiry`, `pick_strike`, config keys; ccbot/screen.py:30,34 and rules.py:285-304 use the same ones, 01 findings 15-16). A1's probe shows the numbers move (A2 4 vs 6 of 17, request:13). Add a mutation fixture (drop the Scope test, and the 061-shaped fixtures fail). Per RI-012, test a negative case that contains the pattern: a RESEARCH ONLY item with `Waived: 04 05 06 (I2, 2026-11-13: ...)` must still be flagged.
+
+## 3 ways AGAINST
+1. **Decision (3) can hide a 061.** A daily-fixes branch carrying a research simulator and any FULL fix is one unit, so the simulator passes. That is 053's gap (a) again. Strict mode would avoid it, but strict is worse on HEAD: a flagged HEAD unit is permanent (history is fixed, and only a waiver clears it). A normal daily-fixes merge holding 057-style research next to a FULL fix would turn main red for good. Keep (3), list it as known gap (g) in the docstring, and have A1 read the file list of any unit that has a RESEARCH ONLY step file.
+2. **Main goes red when PR #26 lands, and the whole 061 merge is one unit.** If PR #26 (061 only, no FULL item) merges after 062, main exits 1 until the person adds the waiver or 061 is re-run as FULL. This is intended, but A1 must tell the person before the merge, not after. The 05 report and the A1 daily report should say: "PR #26 needs `Waived: 04 05 06 (person, ...)` or a FULL re-run before merge."
+3. **Only the first `Waived:` line is read** (read_request L154, `re.search`). An item that already has `Waived: 02 (A1, ...)`, like 023 (work/023/request.md:4), would hide a later `Waived: 04 05 06 (person, ...)` line, and the flag would never clear. Switching to `findall` changes `classify` for every item, which is a wider change than this BUG. Decision: keep one line. The flag text says "add 04 05 06 to the item's single `Waived:` line, given by the person". Add a fixture: a second Waived line does not count.
+
+## Findings by language
+Languages: N/A (internal pipeline check). The fix is git path logic, a waiver regex and rules text inside this repo. It adds no outside fact (no fee, market rule or statistic). The bot-rule values it cites are repo files (ccbot/, config/default.json).
+
+## Holes to watch out for (summary)
+- The HEAD flag must come out as `<ID>: SKIPPED (...)` and exit 1 even when `classify` says `awaiting A1` or `complete` for that item. I1 must decide where it overrides the status, so the item is not listed twice.
+- Branch side: `classify` runs on a temp dir, so the code check must run outside it, in `open_branches`, using `changed()` and the branch tip's request.md.
+- Known gaps for the docstring: (g) a FULL/FAST 04/05 in the same unit covers a research item's code; (h) a RESEARCH ONLY item that edits `.claude/` or `templates/` is not flagged by 062 (053 still sees it only when no open item is in the unit). Offer (h) to the person as a separate item if wanted.
+- The waiver date is required but not checked against today, the same as FAST.
+- Before the PR, I2 runs the new check on this HEAD. Expected: no new SKIPPED (057 clean). R3 runs 01's UNVERIFIED git commands on `origin/claude/project-thread-ltyppm` (01 findings 19-21) and confirms the branch-side fixture matches 061's real shape (BRANCH SKIPPED: 061 listing ccbot/realtest.py, scripts/fetch_real_data.py, tests/test_realtest.py).
+- 061's simulator fix stays on PR #26 (request:26). 062 changes no file under work/061.

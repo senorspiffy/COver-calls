@@ -8,7 +8,8 @@ Earnings estimate [house rule, person-visible]: when `next_earnings` is null but
 `last_earnings` is known, the next report is taken as no earlier than last + earnings_gap_days
 (70 by default; US companies report quarterly, about 91 days apart). The Day is flagged
 `earnings_estimated` and the report says so. Once that date has passed with no new date
-entered, earnings are unknown again and the stock is blocked.
+entered, earnings are unknown again and the stock is blocked. A last_earnings on or after the
+scan date is not yet a report on that date: no estimate (053).
 """
 import dataclasses
 import datetime as dt
@@ -47,7 +48,7 @@ def enrich(day, ticker, facts, cfg):
         return day
     asset = f.get("asset_type") or day.asset_type
     nxt, estimated = _d(f.get("next_earnings")), False
-    if nxt is None and f.get("last_earnings"):
+    if nxt is None and f.get("last_earnings") and _d(f["last_earnings"]) < day.date:
         guess = _d(f["last_earnings"]) + dt.timedelta(days=cfg["earnings_gap_days"])
         if guess > day.date:
             nxt, estimated = guess, True

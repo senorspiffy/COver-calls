@@ -8,6 +8,7 @@ import datetime as dt
 import importlib
 import logging
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -57,10 +58,23 @@ class TokenBucket:
         self.next_at = now + self.interval
 
 
-def _rate_limited(text):
-    """True if an SDK error message is Webull's rate-limit reply (HTTP 429)."""
-    low = text.lower()
-    return "429" in low or "too many requests" in low or "too_many_requests" in low
+_HTTP_429 = re.compile(r"http status:\s*429\b")
+
+
+def _rate_limited(exc):
+    """True if an SDK error is Webull's rate-limit reply (HTTP 429). Reads the status the SDK
+    keeps on ServerException (`http_status`) first; text only as the SDK's own
+    "HTTP Status: 429" prefix or the words "too many requests", never a bare "429",
+    which can sit inside a request id or message (items 056, 059)."""
+    for name in ("http_status", "status_code"):
+        status = getattr(exc, name, None)
+        if status is not None:
+            try:
+                return int(status) == 429
+            except (TypeError, ValueError):
+                break
+    low = str(exc).lower()
+    return bool(_HTTP_429.search(low)) or "too many requests" in low or "too_many_requests" in low
 
 
 def to_sdk_payload(order):
@@ -155,7 +169,7 @@ class WebullSandboxBroker(Broker):
             try:
                 resp = fn(*args, **kw)
             except Exception as exc:  # the SDK raises on non-2xx with the status in the text
-                if wait is None or not _rate_limited(str(exc)):
+                if wait is None or not _rate_limited(exc):
                     raise
                 log.warning("Webull rate limit; retrying in %ss", wait)
                 self.retry_sleep(wait)
