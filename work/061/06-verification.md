@@ -1,5 +1,5 @@
 # 06 Verification - 061
-Verdict: FAIL (round 1)
+Verdict: PASS (round 2; earlier rounds: FAIL round 1)
 
 Checked at HEAD 6d7d78f (branch claude/project-thread-ltyppm), 2026-11-14 (I3). The code matches the plan
 and every test and probe holds. The FAIL is about 01, the text the person reads: it does not give the
@@ -186,3 +186,70 @@ Not sent to Audit. Sent back to **I2**. No code change; these are 01/03 text fix
   earlier 03 edit; if the coordinator prefers, R3 does it.
 - Minor, not required: 02-improvements.md still says "Not modelled: the cost-basis floor". It needs a dated note,
   or 01's revision covers it.
+
+## Round 2 (2026-11-14, I3) - PASS
+Checked at HEAD 279a4e0. Round 2 changes only text plus the committed diagnostic:
+`git diff --stat 6d7d78f HEAD -- ccbot tests scripts config reports` is empty, so the round-1 code audit,
+mutation probes and feasibility re-runs still hold.
+
+Fix by fix, against round 1:
+- **F1: done.** 01's Verdict has the table "Floor on vs off, and start-date sensitivity".
+  - Its 8 rows match my round-1 table digit for digit.
+  - It is labelled a scratch diagnostic, not in `reports/`, and gives its command.
+  - It says "the A2/A4 flip comes from the cost-basis floor alone", that the margins are thin, and that A1 fails in
+    all 8 runs.
+  - I re-ran `python3 work/061/diag_keep.py start` from the repo root and got the same 8 lines. (01's A4 margin of
+    "0.002-0.022" is right; my round-1 "0.003" was the imprecise one.)
+- **F2: done.**
+  - Rules 2 and 4 now say "no measurable difference (within the grid's < 0.5 pt spread)".
+  - The 57-of-60 line now says they beat holding mostly by selling few calls.
+  - Rule 4b is unchanged, as agreed.
+  - Cosmetic only: a lowercase "the best" follows the new sentence in the grid paragraph.
+- **F3: done.** The earnings bullet gives the measured impact: 247 calls; A1-A4 unchanged; BAC/USB/OXY/CSX changes.
+  `python3 work/061/diag_keep.py earn` re-run: 247 calls, IV>RV 64.0%, P&L -0.095%, A2 13/17, A3 17/17,
+  A4 0.099 vs 0.094.
+- **F4: done.**
+  - 03's Missing inputs has 8 rows, matching `REALTEST_MISSING` key for key (prices, options, dividends, splits,
+    earnings, volhist, BXM_History.csv, asset_type), with the dated note.
+  - Each "When absent" text matches the code (load_ticker raises, EARNINGS_UNKNOWN, NaN plus atm_na_reason, bxm
+    error, asset_type warning).
+- **02 note: done.** Dated update notes on FOR 2 and AGAINST 3; the original text is kept.
+
+`work/061/diag_keep.py`:
+- It is identical to my scratch script (`diff`: same).
+- It compiles on python3.11, and the suite's `test_every_py_compiles_on_oldest_python` now includes it and passes.
+- pytest does not collect it (`testpaths = ["tests"]`).
+- It is under work/, which is outside CODE_PATHS and RESEARCH_CODE_PATHS, so `check_pipeline.py` neither flags nor
+  checks it. Acceptable as a labelled research diagnostic: it only reads `data/real`, imports `ccbot.realtest`, and
+  writes nothing.
+- Its earnings-lookback lambda has a dead `... or True else True` branch. The effective rule is "known AND a date in
+  [d-120, d]", which is what 01 states. Not a defect in the result. A1 may want work/*.py treated as code in future
+  (a gap of the same kind as 053's (e)).
+
+Tests re-run, `python3 -m pytest -q -p no:cacheprovider`:
+```
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 292 passed, 1 skipped in 57.95s
+```
+This is the same single known failure (UNTRACKED CHANGE for 49680f8/bdd67c9/20b89e7, point 5). The skip is
+`exchange_calendars` not installed.
+
+`python3 scripts/check_handoff.py 061`:
+```
+sources count (unique URLs in 01-research.md): 4
+fact-check rows: 10
+totals line: 10 rows -> 1 as-is, 9 fixed, 0 removed
+PASS
+```
+
+Merge probe re-done at 279a4e0: in a scratch worktree of origin/main (29a2b28), `git merge --no-ff
+claude/project-thread-ltyppm`, then `check_pipeline.py` gives exit 0 with `UNTRACKED CHANGE: none`,
+`RESEARCH CODE: none`, `INCOMPLETE: none` and `SKIPPED: none`. The worktree is removed.
+
+Round 2 recurring issues checked: RI-001 (diagnostic re-run matches 01), RI-002 (earnings-hole impact now in 01;
+code unchanged since round-1 probes), RI-007 (UNTRACKED CHANGE is still branch-only; clears via merge commit),
+RI-008 (diag_keep.py compiles on 3.11), RI-010 (log via `--log`), RI-011 and RI-012 (not touched).
+
+check_pipeline line (round 2): `061: awaiting A1 (FULL)` (after 07 and the `--log` line; `INCOMPLETE: none`, `SKIPPED: none`; before 07: `in progress (FULL: next 07)`).
+
+Sent to Audit: yes. See `work/061/07-audit-task.md`.

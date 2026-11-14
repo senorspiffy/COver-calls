@@ -141,7 +141,7 @@ Every variant now has the cost-basis floor. [Before this revision] in brackets.
 | Hold to expiry / buy back at 50% / roll when delta > 0.70 | +0.4 / +0.3 / +0.2 pts [-1.9 / -2.4 / -3.0] | 0.8 / 0.7 / 0.7 pts [2.4 / 2.4 / 1.6] | 17% / 17% / 13% [28% / 23% / 19%] |
 
 57 of the 60 variants beat holding on the median stock [0 of 60]. They beat it mostly by selling few
-calls: the cost-basis floor kept every variant out of the market while a stock was below its basis. the best (0.15 delta, 30-45 days,
+calls: the cost-basis floor kept every variant out of the market while a stock was below its basis. The best (0.15 delta, 30-45 days,
 hold through earnings, hold) was +0.7 pt/yr [-0.2, 0.15 delta skip earnings], the worst -0.4 [-8.3].
 The spread between choices is now under 0.5 pt, so the grid no longer separates them. Grid-only
 variants (not bot rules): the 14-24 day window, the +/-0.075 tolerance around targets other than
