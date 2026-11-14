@@ -1,6 +1,7 @@
 # Work item 061
 Type: IDEA
-Scope: RESEARCH ONLY
+<!-- Scope changed RESEARCH ONLY -> FULL by the person, 2026-11-14 ("Run the full review" on the 04-06 waiver question, after A1 2026-11-13 flagged code in a RESEARCH ONLY item). -->
+Scope: FULL
 Opened by: person ("Apply this to new thread", 2026-11-13, on the coordinator's rewritten prompt)
 Date: 2026-11-13
 
