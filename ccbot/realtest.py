@@ -36,12 +36,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .pricing import bs_price
+from .expiries import pick_expiry
+from .pricing import bs_price, pick_strike
 
 R = 0.03                    # flat rate for Black-Scholes fills between snapshots (approximate)
 REG_FEE = 0.10 + 0.02       # per contract: regulatory/ORF-style fees + CAT (UNVERIFIED, from config)
 COMMISSION = 0.0            # Webull lists $0 options commission (UNVERIFIED for every account type)
 SEC_RATE = 2.06e-05         # on sale notional
+SLACK_DAYS = 7              # config monthly_slack_days
 STOCK_SLIP = 0.01           # $/share paid when re-buying shares after assignment
 
 
@@ -159,7 +161,10 @@ class Config:
 
 BOT_RULE = Config()
 GRID = [Config(d, w, e, m, "bid") for d, w, e, m in itertools.product(
-    (0.15, 0.20, 0.275, 0.35, 0.45), ((5, 9), (14, 24), (30, 45)), (True, False), ("hold", "take50", "roll"))]
+    (0.15, 0.20, 0.275, 0.35, 0.45), ((14, 24), (30, 45)), (True, False), ("hold", "take50", "roll"))]
+# No 5-9 day window: DoltHub keeps ~3 expiries per snapshot (e.g. 16/30/65 days) and has a 5-9 day
+# expiry on 1 of 1,272 BAC snapshot days, so a weekly variant would never trade and would just
+# copy buy-and-hold (it got picked 3 times in walk-forward before this was removed).
 
 
 @dataclass
@@ -206,25 +211,32 @@ class Trade:
         return self.premium - self.close_cost
 
 
+def _is_monthly(e):
+    """Standard monthly expiry: the third Friday (Thursday when that Friday is a holiday)."""
+    return 15 <= e.day <= 21 and e.weekday() == 4 or 16 <= e.day <= 22 and e.weekday() == 3 \
+        and (e + timedelta(days=1)).day <= 21
+
+
 def _pick(g, spot, today, cfg):
-    lo, hi = cfg.dte
-    dte = g.expiration.map(lambda e: (e - today).days)
-    ok = g[(dte >= lo) & (dte <= hi) & (g.strike > spot) & (g.bid > 0.0)]
-    if ok.empty:   # widen the window by a week each side, like the bot's slack
-        ok = g[(dte >= max(1, lo - 7)) & (dte <= hi + 7) & (g.strike > spot) & (g.bid > 0.0)]
+    """The bot's own pickers (rules.decide): expiries.pick_expiry (first expiry in the DTE window,
+    monthly expiries with the config's 7-day slack; weekly window with no slack), then
+    pricing.pick_strike (nearest target delta among bid > 0, None outside the tolerance band).
+    Tolerance is the bot's [0.20, 0.35] for the 0.275 target, the same +/-0.075 for other targets.
+    Not modelled: the bot's cost-basis floor (needs a basis per lot)."""
+    weekly = cfg.dte[1] <= 9
+    exps = sorted(e for e in g.expiration.unique() if weekly or cfg.dte[0] < 30 or _is_monthly(e))
+    slack = 0 if weekly else SLACK_DAYS
+    picked = pick_expiry(today, exps, cfg.dte, slack)
+    if picked is None:
+        return None
+    ok = g[(g.expiration == picked[0]) & (g.bid > 0.0)]
     if ok.empty:
         return None
-    mid = (ok.bid + ok.ask) / 2
-    ok = ok[(ok.ask - ok.bid) <= 0.5 * mid + 0.05]           # skip very wide quotes
-    if ok.empty:
+    tol = (0.20, 0.35) if abs(cfg.delta - 0.275) < 1e-9 else (cfg.delta - 0.075, cfg.delta + 0.075)
+    s = pick_strike(list(zip(ok.strike, ok.delta)), cfg.delta, tol)
+    if s is None:
         return None
-    exp = sorted(ok.expiration.unique(), key=lambda e: abs((e - today).days - (lo + hi) / 2))[0]
-    ok = ok[ok.expiration == exp]
-    i = (ok.delta - cfg.delta).abs().idxmin()
-    r = ok.loc[i]
-    if abs(r.delta - cfg.delta) > 0.12:
-        return None
-    return r
+    return ok[ok.strike == s[0]].iloc[0]
 
 
 def _earnings_between(td, a, b):

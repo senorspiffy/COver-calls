@@ -30,11 +30,11 @@
  ],
  "monte_carlo_2_stocks_1yr": {
   "cc_ret": {
-   "5": -0.3381856666720158,
-   "25": -0.10363719247247985,
-   "50": 0.048368177351692965,
-   "75": 0.21151288018632697,
-   "95": 0.4986886816306118
+   "5": -0.34296792424551914,
+   "25": -0.10044152717576635,
+   "50": 0.05649496912938734,
+   "75": 0.2245904880387184,
+   "95": 0.5262018437558167
   },
   "bh_ret": {
    "5": -0.3568372318885805,
@@ -44,11 +44,11 @@
    "95": 0.6688256730323004
   },
   "cc_dd": {
-   "5": -0.46868667821682874,
-   "25": -0.28015781462625816,
-   "50": -0.19254642702645208,
-   "75": -0.13654886422122223,
-   "95": -0.08698744717342007
+   "5": -0.4716187509512859,
+   "25": -0.2829642830049711,
+   "50": -0.19340148733390888,
+   "75": -0.13655573129530374,
+   "95": -0.0869631407579837
   },
   "bh_dd": {
    "5": -0.49653166610458194,
@@ -66,77 +66,77 @@
   "spy_tr_cagr": 0.1480243815131539,
   "spy_tr_maxdd": -0.3369981346090807
  },
- "grid_size": 90,
+ "grid_size": 60,
  "walkforward_picks": [
   {
    "train_from": "2020-01-06",
    "test_from": "2022-01-06",
    "test_to": "2022-07-06",
-   "picked": "d0.150_dte14-24_E_hold_bid",
-   "train_excess_logret": -0.031534464978374685
+   "picked": "d0.150_dte30-45_E_hold_bid",
+   "train_excess_logret": -0.025358151240789086
   },
   {
    "train_from": "2020-07-06",
    "test_from": "2022-07-06",
    "test_to": "2023-01-06",
    "picked": "d0.150_dte30-45_E_hold_bid",
-   "train_excess_logret": 0.01381907027678844
+   "train_excess_logret": 0.026438674153702078
   },
   {
    "train_from": "2021-01-06",
    "test_from": "2023-01-06",
    "test_to": "2023-07-06",
-   "picked": "d0.150_dte14-24_E_hold_bid",
-   "train_excess_logret": 0.020161152042390426
+   "picked": "d0.150_dte30-45_E_hold_bid",
+   "train_excess_logret": 0.04176363966776099
   },
   {
    "train_from": "2021-07-06",
    "test_from": "2023-07-06",
    "test_to": "2024-01-06",
-   "picked": "d0.450_dte30-45_noE_take50_bid",
-   "train_excess_logret": 0.06890632217405547
+   "picked": "d0.450_dte30-45_E_take50_bid",
+   "train_excess_logret": 0.10142300511069706
   },
   {
    "train_from": "2022-01-06",
    "test_from": "2024-01-06",
    "test_to": "2024-07-06",
-   "picked": "d0.450_dte30-45_noE_take50_bid",
-   "train_excess_logret": 0.06385357659638793
+   "picked": "d0.450_dte30-45_E_take50_bid",
+   "train_excess_logret": 0.10032572963966754
   },
   {
    "train_from": "2022-07-06",
    "test_from": "2024-07-06",
    "test_to": "2025-01-06",
    "picked": "d0.450_dte14-24_noE_hold_bid",
-   "train_excess_logret": 0.05043319770655412
+   "train_excess_logret": 0.056153610421780235
   },
   {
    "train_from": "2023-01-06",
    "test_from": "2025-01-06",
    "test_to": "2025-07-06",
-   "picked": "d0.200_dte14-24_noE_hold_bid",
-   "train_excess_logret": 0.012165956461181023
+   "picked": "d0.150_dte30-45_noE_hold_bid",
+   "train_excess_logret": 0.00912308697703008
   },
   {
    "train_from": "2023-07-06",
    "test_from": "2025-07-06",
    "test_to": "2026-01-06",
-   "picked": "d0.150_dte14-24_noE_hold_bid",
-   "train_excess_logret": -0.00039778415557164453
+   "picked": "d0.150_dte30-45_noE_hold_bid",
+   "train_excess_logret": -0.004589084634713084
   },
   {
    "train_from": "2024-01-06",
    "test_from": "2026-01-06",
    "test_to": "2026-07-06",
-   "picked": "d0.150_dte30-45_E_roll_bid",
-   "train_excess_logret": 0.01482981257903853
+   "picked": "d0.200_dte30-45_E_take50_bid",
+   "train_excess_logret": 0.009680419979633554
   },
   {
    "train_from": "2024-07-06",
    "test_from": "2026-07-06",
    "test_to": "2026-11-12",
-   "picked": "d0.150_dte30-45_E_roll_bid",
-   "train_excess_logret": -0.01816529766565269
+   "picked": "d0.150_dte30-45_noE_take50_bid",
+   "train_excess_logret": -0.019953596754717612
   }
  ]
 }

@@ -109,3 +109,17 @@ def test_run_end_to_end(data_root, tmp_path):
     assert ((br.called_away_pct >= 0) & (br.called_away_pct <= 1)).all()
     # IV in the fake data is 1.15x true vol, so sold IV should beat realized on average
     assert (br[br.config.str.endswith("bid")].iv_minus_rv > 0).mean() >= 2 / 3
+
+
+def test_pick_uses_the_bots_pickers():
+    """A1 061: first monthly expiry in 30-45 DTE (not the one nearest 37.5), delta band [0.20, 0.35]."""
+    today = date(2024, 1, 2)
+    e1, e2 = date(2024, 2, 16), date(2024, 3, 15)          # 45 and 73 DTE, both third Fridays
+    wk = date(2024, 2, 9)                                   # weekly at 38 DTE: not a monthly
+    g = pd.DataFrame({"expiration": [e1, e1, e1, wk, e2], "strike": [11.0, 12.0, 13.0, 12.0, 12.0],
+                      "bid": [0.5, 0.3, 0.1, 0.3, 0.6], "ask": [0.55, 0.35, 0.15, 0.35, 0.65],
+                      "iv": 0.3, "delta": [0.45, 0.31, 0.12, 0.28, 0.4]})
+    r = rt._pick(g, 10.5, today, rt.BOT_RULE)
+    assert (r.expiration, r.strike) == (e1, 12.0)
+    g.loc[1, "delta"] = 0.36                                 # nearest delta now outside [0.20, 0.35]
+    assert rt._pick(g, 10.5, today, rt.BOT_RULE) is None

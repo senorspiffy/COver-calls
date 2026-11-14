@@ -4,16 +4,17 @@ Status: READY
 Each claim re-computed from `reports/real/*.csv` and `summary.json` (written by `python -m ccbot.realtest`).
 | Claim | Source | Result (VERIFIED/WRONG/UNSUPPORTED) | Fix |
 |---|---|---|---|
-| Bot rule trails holding by a median 1.8 pts/yr | bot_rule_by_ticker.csv, bid rows, excess_cagr median -1.80 | VERIFIED |  |
-| Drawdown cut by a median 1.8 pts | (cc_maxdd - bh_maxdd) median 1.81 | VERIFIED |  |
+| Bot rule trails holding by a median 1.0 pt/yr | bot_rule_by_ticker.csv, bid rows, excess_cagr median -1.02 | VERIFIED |  |
+| Drawdown cut by a median 1.7 pts | (cc_maxdd - bh_maxdd) median 1.69 | VERIFIED |  |
 | BXM trailed SPY TR by 6.9 pts/yr | summary.json 7.93% - 14.80% = -6.87 | VERIFIED |  |
-| Walk-forward median -2.7 pts/yr | walkforward_by_ticker.csv median -2.69 | VERIFIED |  |
-| Walk-forward beat holding on 6 of 17 | excess_cagr > 0 on 5 tickers | WRONG | changed to 5 of 17 |
-| 1,161 calls, IV > RV on 59%, mean P&L -0.31% of price | trades_*.csv (SPY excluded) 1161, 59.3%, -0.308% | VERIFIED |  |
-| 38 early exercises | trades outcome early_assigned = 38 | VERIFIED |  |
-| A2 6 of 17, A3 15 of 17 | bot_rule_by_ticker.csv | VERIFIED |  |
+| Walk-forward median -1.1 pts/yr, beat holding on 8 of 17 | walkforward_by_ticker.csv median -1.13, 8 positive | VERIFIED |  |
+| 942 calls, IV > RV on 59%, mean P&L -0.30% of price | trades_*.csv (SPY excluded) 942, 59.2%, -0.303% | VERIFIED |  |
+| 20 early exercises | trades outcome early_assigned = 20 | VERIFIED |  |
+| A2 8 of 17, A3 17 of 17, A4 0.062 vs 0.094 | bot_rule_by_ticker.csv | VERIFIED |  |
+| Bot rule tested "exactly as configured" (A1 2026-11-13) | realtest._pick took the expiry nearest 37.5 DTE, delta +/-0.12 | WRONG | _pick now calls expiries.pick_expiry and pricing.pick_strike; test_pick_uses_the_bots_pickers |
+| ATM IV beats next-30-day RV by ~1 vol pt | atm_iv_minus_next30d_rv median -0.001 | WRONG | 01 now says the average gap is about zero |
 | "Sold IV" is per strike | DoltHub rows on one expiry share one `vol` | WRONG | relabelled "IV for the expiry" in 01 |
-**Totals:** 9 rows checked → **7 VERIFIED as-is**, **2 fixed**, **0 removed**
+**Totals:** 10 rows checked → **7 VERIFIED as-is**, **3 fixed**, **0 removed**
 (fixed = claim kept with a correction or new source; removed = claim dropped with nothing in its place)
 ## Removed claims
 None.
@@ -30,6 +31,7 @@ None.
 ## Self-check
 | Rule | Check formula | Arithmetic | Result |
 |---|---|---|---|
-| A2 needs half of 17 | ceil(17/2) | 9 > 6 → fail | ✓ |
-| A3 needs 80% of 17 | 0.8 × 17 = 13.6 | 15 ≥ 14 → pass | ✓ |
-| Totals | 7 + 2 + 0 = 9 | 9 | ✓ |
+| A2 needs half of 17 | ceil(17/2) | 9 > 8 → fail | ✓ |
+| A3 needs 80% of 17 | 0.8 × 17 = 13.6 | 17 ≥ 14 → pass | ✓ |
+| A5 limit -1.0 pt | -1.13 < -1.0 | fail | ✓ |
+| Totals | 7 + 3 + 0 = 10 | 10 | ✓ |
