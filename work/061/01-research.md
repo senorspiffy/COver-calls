@@ -24,6 +24,31 @@ BASIS_ABOVE_BAND was the reason on 7,333 entry days and NO_EXPIRY (the bot's mon
 DoltHub that day) on 6,809, against 250 sales. T sold 1 call in almost 7 years, VZ 3, AAL 4. So the
 passes on A2-A5 mostly show that the rule rarely sold calls, not that selling calls paid.
 
+**Floor on vs off, and start-date sensitivity** _(scratch diagnostic, not in `reports/`; added
+2026-11-14 in I2 round 2 after I3's 06). Command: `python3 work/061/diag_keep.py start` (run from the repo root). It is I3's script, committed at work/061/diag_keep.py; formerly kept in the session
+scratchpad, not in the repo. It runs the bot rule at the bid on the 17 stocks with every 04 change in
+place. "Floor off" passes basis 0 to `_pick`; nothing else changes. A5 is not re-run, because it needs
+the full grid._
+
+| Start | Floor | Calls | IV>RV | Mean option P&L | Median gap | A2 (need 9) | A3 | A4 CC vs hold | T/VZ/AAL calls |
+|---|---|---|---|---|---|---|---|---|---|
+| 2020-01-01 | on (as built) | 250 | 63.2% | -0.083% | +0.30 | 13 | 17 | 0.099 vs 0.094 | 1/3/4 |
+| 2020-01-01 | off | 955 | 59.7% | -0.277% | -1.38 | 8 | 16 | 0.068 vs 0.094 | 61/58/63 |
+| 2020-04-01 | on | 342 | 64.6% | -0.301% | +0.24 | 9 | 17 | 0.291 vs 0.284 | 14/6/9 |
+| 2020-04-01 | off | 918 | 61.2% | -0.241% | -1.81 | 8 | 17 | 0.209 vs 0.284 | 59/56/61 |
+| 2021-01-04 | on | 238 | 64.3% | -0.372% | +0.06 | 13 | 17 | 0.177 vs 0.175 | 7/2/5 |
+| 2021-01-04 | off | 801 | 60.7% | -0.208% | -1.39 | 8 | 16 | 0.122 vs 0.175 | 52/49/53 |
+| 2022-01-03 | on | 166 | 66.9% | -0.086% | +0.46 | 15 | 17 | 0.109 vs 0.087 | 11/8/8 |
+| 2022-01-03 | off | 653 | 59.9% | -0.175% | -1.30 | 8 | 15 | 0.083 vs 0.087 | 42/39/43 |
+
+With the floor off, the other 04 changes still leave A2 and A4 failing (8 of 17; 0.068 vs 0.094).
+**So the A2/A4 flip comes from the cost-basis floor alone.** The floor-off result fails A2 and A4 from
+every start date. The floor-on result passes A2 from every start (9 / 13 / 15 from 2020-04-01 /
+2021-01-04 / 2022-01-03) but the margins are thin: 9 is exactly the minimum, and A4 is ahead by only
+0.002-0.022. Its call count swings from 166 to 342 with the start date. **A1 fails in all 8 runs.**
+T's single call from 2020 comes from a basis set on 2020-01-06, before the COVID drop. From 2020-04-01,
+T sells 14.
+
 Against the pass criteria written before any result (`pass-criteria.md`): **A1 fail** (mean option
 P&L -0.08% of the share price per call, needed > 0) [fail], **A2 pass** (13 of 17, needed 9) [fail,
 8], **A3 pass** (17 of 17) [pass], **A4 pass** (0.099 vs 0.094) [fail, 0.062], **A5 pass** (0.0 vs
@@ -115,7 +140,8 @@ Every variant now has the cost-basis floor. [Before this revision] in brackets.
 | Hold through earnings / skip earnings | +0.2 / +0.3 pts [-2.8 / -2.0] | 0.8 / 0.6 pts [2.4 / 1.7] | 17% / 15% [23% / 22%] |
 | Hold to expiry / buy back at 50% / roll when delta > 0.70 | +0.4 / +0.3 / +0.2 pts [-1.9 / -2.4 / -3.0] | 0.8 / 0.7 / 0.7 pts [2.4 / 2.4 / 1.6] | 17% / 17% / 13% [28% / 23% / 19%] |
 
-57 of the 60 variants beat holding on the median stock [0 of 60]; the best (0.15 delta, 30-45 days,
+57 of the 60 variants beat holding on the median stock [0 of 60]. They beat it mostly by selling few
+calls: the cost-basis floor kept every variant out of the market while a stock was below its basis. the best (0.15 delta, 30-45 days,
 hold through earnings, hold) was +0.7 pt/yr [-0.2, 0.15 delta skip earnings], the worst -0.4 [-8.3].
 The spread between choices is now under 0.5 pt, so the grid no longer separates them. Grid-only
 variants (not bot rules): the 14-24 day window, the +/-0.075 tolerance around targets other than
@@ -138,11 +164,12 @@ so rules 1, 2, 4 and 4b below no longer have support from this data. They are ke
 numbers for the person to decide; I3 should check them._
 1. **Strike:** the earlier case for 0.15-0.20 delta (-1.1 to -2.0 vs -2.6 pts/yr) is gone: 0.15 / 0.20 /
    0.275 now give +0.3 / +0.4 / +0.3 pts/yr.
-2. **Rolling:** hold to expiry +0.4, buy back at 50% +0.3, roll +0.2 pts/yr: a weak lean to letting
-   in-the-money calls be assigned.
+2. **Rolling:** hold to expiry +0.4, buy back at 50% +0.3, roll +0.2 pts/yr: no measurable difference
+   (within the grid's < 0.5 pt spread, with most variants rarely selling).
 3. **Assignment:** accept it, then re-buy or move on at the next scan. Expect it on ~18% of calls at
    0.275 delta, ~8% at 0.15 (grid medians; 44 + 3 of the bot rule's 250 calls).
-4. **Earnings:** skipping earnings is now worth ~0.1 pt/yr (+0.3 vs +0.2); keep it because the bot does.
+4. **Earnings:** skip earnings +0.3 vs hold through +0.2 pts/yr: no measurable difference (within the
+   grid's < 0.5 pt spread). Keep skipping because the bot does.
 4b. **Fills:** bid vs mid is now worth ~0.1 pt/yr (+0.3 vs +0.4), because few calls were sold.
 5. **Ex-dividend:** 3 of 250 calls (1.2%) [20 of 942] were exercised early, the day before ex-div,
    losing the dividend. When a call is in the money the day before ex-div and its time value is below
@@ -173,7 +200,14 @@ numbers for the person to decide; I3 should check them._
   dates (counted in `warnings`). BAC, CSX and USB have no date before April 2020, so their January 2020
   quarterly report is missing from the file (its date UNVERIFIED here); each sold a 2020-01-06 call
   expiring 2020-02-21 that may have been held through it. The 120-day check doesn't see a gap before
-  the first date.
+  the first date. **Measured impact** _(scratch diagnostic, I2 round 2: `python3
+  work/061/diag_keep.py earn`)_:
+  the run blocks a stock with EARNINGS_UNKNOWN unless an earnings date also exists in the prior 120
+  days, which covers both the pre-April-2020 hole and the gaps over 120 days. Results:
+  - 247 calls [250]; IV > RV 64.0% [63.2%]; mean P&L -0.095% [-0.083%]; median gap +0.30 [+0.30];
+    A2 13/17, A3 17/17, A4 0.099 vs 0.094 (all unchanged).
+  - Per stock: BAC 24 → 22, USB 11 → 10, OXY 8 → 7, CSX 37 → 38.
+  - **No A row changes.**
 - **Re-entry after assignment happens the same day** at the close + 1 cent; the bot waits for the next
   close (ASSIGNED_TODAY).
 - **Cost basis** = the close the arm last bought shares at (the first close, then each re-buy after

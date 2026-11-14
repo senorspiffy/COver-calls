@@ -23,11 +23,18 @@ None.
 |---|---|---|---|---|---|
 | – | No bot or config change. Rule ideas in 01 (0.15-0.20 delta, no rolling) wait for the person's decision | – | – | – | – |
 ## Missing inputs
+_Replaced (I2, 2026-11-14, after 061/04 build): the 8 rows of `ccbot/realtest.py` `REALTEST_MISSING`,
+each tested by `tests/test_realtest.py::test_drop_input[<input>]`._
 | Input (where it enters) | When absent | Reason code / report text |
 |---|---|---|
-| Option quotes for a ticker (load_ticker) | ticker skipped | summary.json `skipped`: "no option quotes" / "< 3.0 years" |
-| BXM_History.csv (bxm_vs_spy) | benchmark not computed | summary.json bxm_vs_spy.error "BXM_History.csv missing" |
-| volatility_history rows | ATM IV-vs-RV columns blank | column absent in bot_rule_by_ticker.csv |
+| prices/T.csv (load_ticker) | ticker skipped | summary.json `skipped`: "prices: not supplied" |
+| options/T.csv.gz (load_ticker) | ticker skipped (an empty file: "no option quotes"; < 3 years: "option quotes only ... (< 3.0 years)") | summary.json `skipped`: "options: not supplied" |
+| dividends/T.csv (load_ticker) | ticker skipped (a NaN amount also skips) | summary.json `skipped`: "DIVIDEND_UNKNOWN: not supplied" |
+| splits/T.csv (load_ticker) | ticker skipped (a 0-byte file = no splits) | summary.json `skipped`: "splits: not supplied" |
+| earnings/T.csv (load_ticker) | no call sold on a stock; an ETF is unaffected | entry code EARNINGS_UNKNOWN (`rej_EARNINGS_UNKNOWN`); warning "earnings: not supplied" |
+| volhist/T.csv (load_ticker) | ATM IV-vs-RV not computed | `atm_iv_minus_next30d_rv` NaN, `atm_na_reason` "volhist: not supplied" |
+| BXM_History.csv (bxm_vs_spy) | benchmark not computed | summary.json bxm_vs_spy.error "BXM_History.csv: not supplied" |
+| asset_type (config/tickers.json; SPY → etf) | treated as a stock (earnings required) | warning "asset_type: not in config/tickers.json ..." |
 ## Self-check
 | Rule | Check formula | Arithmetic | Result |
 |---|---|---|---|

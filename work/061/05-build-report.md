@@ -237,3 +237,32 @@ RI-009: probes ran in a scratch `git worktree`, now removed. No repo edit was lo
 RI-010: log line written with `scripts/check_pipeline.py --log`.
 RI-011: not touched (no branch-diff code).
 RI-012: not touched. `fetch_real_data.sql`'s substring retry was DROPPED by the plan, and nothing here changes it.
+
+## Round 2 (2026-11-14, after I3's 06 FAIL round 1)
+No code changed: `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'` → **0** and `... | grep -c '^??'` → **0**.
+Changed: `git status --porcelain -uall -- work/061 | grep -c '^ M'` → **4** (01-research.md, 02-improvements.md, 03-handoff.md, this 05).
+
+- **F1** (01 Verdict): new table "Floor on vs off, and start-date sensitivity", labelled a scratch diagnostic that is not in `reports/`.
+  - Command: `python3 work/061/diag_keep.py start`. It is I3's script, now committed at work/061/diag_keep.py (coordinator, round 2).
+  - I re-ran it, and its output matches 06. From 2020-01-01: floor off gives 955 calls, P&L -0.277%, median gap -1.38, A2 8/17, A3 16/17, A4 0.068 vs 0.094. Floor on gives 250 calls, -0.083%, +0.30, A2 13, A3 17, A4 0.099 vs 0.094.
+  - From 2020-04-01 / 2021-01-04 / 2022-01-03: floor on passes A2 with 9 / 13 / 15, and floor off gets A2 8 every time and fails A4 every time. A1 fails in all 8 runs.
+  - 01 says the A2/A4 flip comes from the floor alone.
+- **F2**: rules 2 and 4 now say "no measurable difference (within the grid's < 0.5 pt spread)". The 57-of-60 grid line now says they beat holding mostly by selling few calls (cost-basis floor).
+- **F3** (01 earnings bullet): adds the measured impact from `python3 work/061/diag_keep.py earn`, which re-runs with EARNINGS_UNKNOWN unless a date exists in the prior 120 days.
+  - Output: 247 calls [250], IV>RV 64.0%, P&L -0.095%, median gap +0.30, A2 13/17, A3 17/17, A4 0.099 vs 0.094 (no A row changes).
+  - Per stock: BAC 24→22, USB 11→10, OXY 8→7, CSX 37→38.
+- **F4** (03 Missing inputs): the 3 stale rows are replaced by the 8 `REALTEST_MISSING` rows, with the dated note "(I2, 2026-11-14, after 061/04 build)". `python3 scripts/check_handoff.py 061` → `fact-check rows: 10`, `totals line: 10 rows -> 1 as-is, 9 fixed, 0 removed`, `PASS`.
+- **Minor** (02): dated update notes on "Not modelled: the cost-basis floor" (it is now modelled). I also added one on AGAINST 3's "none beat holding on the median stock" (now 57 of 60, mostly by selling few calls).
+
+Tests re-run (no code change), `python -m pytest -q -p no:cacheprovider`:
+```
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 292 passed, 1 skipped in 57.43s
+```
+Same single failure as round 1. The cause is the UNTRACKED CHANGE line for 49680f8/bdd67c9/20b89e7 (history commits). 06 point 5 shows it clears on main only through a merge commit.
+
+Recurring issues checked: RI-001, RI-002, RI-007, RI-010 (round 2).
+RI-001: round 2 changes text only; the pinned feasibility tests still pass.
+RI-002: the earnings-hole impact is measured in 01 (F3). A1 decides whether it counts as an occurrence.
+RI-007: no change from round 1.
+RI-010: log line written with `--log`.
