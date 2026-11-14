@@ -9,7 +9,7 @@ Python files under `work/` (diagnostic scripts such as `work/061/diag_keep.py`) 
 
 ## Evidence (for BUG/EFFICIENCY: log lines, files, test output)
 - `scripts/check_pipeline.py` L135 `CODE_PATHS` and L140 `RESEARCH_CODE_PATHS` do not include `work/`, so `work/061/diag_keep.py` (committed in 279a4e0) is invisible to UNTRACKED CHANGE and RESEARCH CODE.
-- 061 A1 audit (logs/audit/2026-11-14-061.md): its lookback lambda has a dead `... or True else True` branch. A1 reproduced its output, so no wrong number, but no I-step or test ever looked at it.
+- 061 A1 audit (logs/audit/2026-11-14-061.md): its lookback lambda has a dead `... or True else True` branch. A1 reproduced its output, so no wrong number. I3 reviewed and re-ran it (061/06 L218-227), but no check or test exercises its logic. (Corrected 2026-11-14 by A1 after 064 R1.)
 - The same gap shape as 053 (e): code that produces numbers for the person sits outside the paths the checks read.
 
 ## Root cause and prevention guardrail (BUG only)
