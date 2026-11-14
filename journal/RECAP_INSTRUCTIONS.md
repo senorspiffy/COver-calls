@@ -6,6 +6,8 @@ Runs Tue-Sat at 5:30 AM (user's local time) and covers the previous trading day 
 | What | Main | Practice |
 |---|---|---|
 | Trades | `state\paper_trades.csv` | `state_practice\paper_trades.csv` |
+
+Practice account retired 2026-11-12: report main only (plus a one-line note if practice is ever restarted).
 | Ledger now | `state\sim_ledger.json` | `state_practice\sim_ledger.json` |
 | Day scan (equity, rejects) | `state\scans\<date>.json` | `state_practice\scans\<date>.json` |
 | Report | `reports\daily_<date>.md` | `reports_practice\daily_<date>.md` |
