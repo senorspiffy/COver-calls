@@ -31,3 +31,4 @@ A1, please check:
   empty.
 - **Mutation spot-check.** Optional. The suggested probe is Monte Carlo `.fillna(0)` →
   `test_monte_carlo_no_fill` fails, or basis floor off → `test_basis_floor` and `test_real_counts_bac` fail.
+A1 result: PASS (2026-11-14, logs/audit/2026-11-14-061.md: A1 re-ran on 3fd5db8: pytest 292 passed, 1 failed (known UNTRACKED CHANGE line for 49680f8/bdd67c9/20b89e7), 1 skipped; check_handoff 061 PASS; every 01 headline recomputed from reports/real; diag_keep.py start and earn reproduce 01 exactly; 3 mutations each fail a test; scratch merge --no-ff onto origin/main 29a2b28 -> check_pipeline exit 0, UNTRACKED CHANGE none; land PR #26 as a merge commit only)
