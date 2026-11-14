@@ -226,3 +226,45 @@ def test_other_errors_are_not_retried(tmp_path, cfg):
     with pytest.raises(RuntimeError, match="UNAUTHORIZED"):
         b._call(lambda: (_ for _ in ()).throw(RuntimeError("HTTP Status: 401, Code: UNAUTHORIZED")))
     assert waits == []
+
+
+class _ServerError(Exception):
+    """Shaped like webull.core.exception.exceptions.ServerException (SDK 3.0.4)."""
+    def __init__(self, code, msg, http_status, request_id):
+        super().__init__()
+        self.error_code, self.error_msg, self.http_status, self.request_id = code, msg, http_status, request_id
+
+    def __str__(self):
+        return "HTTP Status: %s, Code: %s, Msg: %s, RequestID: %s" % (
+            self.http_status, self.error_code, self.error_msg, self.request_id)
+
+
+def test_429_inside_other_text_is_not_retried(tmp_path, cfg):
+    """Item 059: a 500 whose message and request id contain "429" raises on the first try."""
+    b = _broker(tmp_path, cfg)
+    waits = []
+    b.retry_sleep = waits.append
+    err = _ServerError("INTERNAL", "order 7a4291c failed", 500, "req-04291")
+    with pytest.raises(_ServerError):
+        b._call(lambda: (_ for _ in ()).throw(err))
+    assert waits == []
+    with pytest.raises(RuntimeError):
+        b._call(lambda: (_ for _ in ()).throw(RuntimeError("Msg: order 7a4291c failed")))
+    assert waits == []
+
+
+def test_rate_limit_status_attribute_is_retried(tmp_path, cfg):
+    """Item 059: the SDK's http_status == 429 is enough, whatever the text says."""
+    b = _broker(tmp_path, cfg)
+    waits = []
+    b.retry_sleep = waits.append
+    replies = [_ServerError("RATE", "slow down", 429, "req-1"), Resp({"ok": 1})]
+
+    def fn():
+        r = replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+    assert b._call(fn) == {"ok": 1}
+    assert waits == [2]
+

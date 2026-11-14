@@ -1,5 +1,5 @@
 {
-  "_about": "Budget test B, reserve part (work/058, from 057 B5): $4k (20% of $20k), one position at a time, opened only when a stock closes 5%+ below its 20-scan high (needs 5 recorded scans); then V0 calls until called away, then waits for the next dip. Run with --state-dir state_dip_reserve --out reports_dip_reserve.",
+  "_about": "Budget test B, reserve part (work/058, from 057 B5): $4k (20% of $20k), one position at a time, opened only when a stock closes 5%+ below its 20-trading-day high (needs 5 recorded closes in that window; work/060); then V0 calls until called away, then waits for the next dip. Run with --state-dir state_dip_reserve --out reports_dip_reserve.",
   "broker": "webull-paper",
   "tickers_file": "config/tickers.json",
   "earnings_gap_days": 70,

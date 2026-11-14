@@ -32,14 +32,23 @@ def test_every_universe_ticker_has_sourced_facts():
         assert t in facts and facts[t]["sources"], t
 
 
-def test_earnings_known_for_dec_18_on_2026_11_09():
-    """Monday's first run: every name clears the Dec 18 expiry."""
+def _blocked_for_dec_18(day_date):
     cfg = _cfg("practice.json")
     facts = load_facts(cfg)
-    day = Day(dt.date(2026, 11, 9), 20.0, q=0.0)
+    day = Day(day_date, 20.0, q=0.0)
     clear = {t for t in cfg["universe"]
              if (d := enrich(day, t, facts, cfg)).earnings_known and d.next_earnings > dt.date(2026, 12, 18)}
-    assert set(cfg["universe"]) - clear == set()   # PBR: last report Nov 10 (2026-11-11 follow-up)
+    return set(cfg["universe"]) - clear
+
+
+def test_earnings_known_for_dec_18_on_2026_11_09():
+    """PBR reports 2026-11-10, after this day (053): 12 of 13 clear the Dec 18 expiry."""
+    assert _blocked_for_dec_18(dt.date(2026, 11, 9)) == {"PBR"}
+
+
+def test_earnings_known_for_dec_18_on_2026_11_11():
+    """053: after PBR's 2026-11-10 report every name clears Dec 18 (PBR estimate 2027-01-19)."""
+    assert _blocked_for_dec_18(dt.date(2026, 11, 11)) == set()
 
 
 def test_weekly_account_gives_each_stock_8000_and_has_facts():

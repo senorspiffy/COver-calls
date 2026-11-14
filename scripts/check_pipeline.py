@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check that every work item's step files match its Scope (items 026, 029, 034; RI-007, RI-009).
 
-Usage: python3 scripts/check_pipeline.py [--today YYYY-MM-DD]   (run from the repo root)
+Usage: python3 scripts/check_pipeline.py [--today YYYY-MM-DD] [--untracked-from SHA]   (run from the repo root;
+       --untracked-from is for tests only; the daily run uses the item-053 constant UNTRACKED_FROM)
        python3 scripts/check_pipeline.py --log <agent> <ID> "<fields>"   (item 045)
        python3 scripts/check_pipeline.py --next-id   (the ID to give a new work item, item 037)
 
@@ -36,7 +37,9 @@ INCOMPLETE (item 043, exit 1): for items from CHECKLIST_FROM on, a 06 with no
 `| <agent> | <ID> |` line in logs/research or logs/implementation.
 
 When run inside a git repo, it also prints OPEN BRANCHES: every remote branch not merged into
-HEAD, the work items it carries, whether it merges cleanly into HEAD (`git merge-tree`), and
+HEAD, the work items it carries (what merging it into HEAD would change, from the
+`git merge-tree` result, so a branch with two merge bases is not credited with work already in
+HEAD; item 052), whether it merges cleanly into HEAD (`git merge-tree`), and
 whether it edits logs/recurring-issues.md, which only A1's daily commit on main should (036),
 and its last commit date and age (039). Two more lines come from the branches:
   ID CLASH        HEAD and an open branch each added work/<ID>/request.md since their merge
@@ -59,6 +62,39 @@ writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMP
   ORPHAN LOG      a log line whose item has no work/<ID>/ folder (exit 1; item 047). --log
                   refuses an ID without work/<ID>/request.md (exit 2), so a typo'd ID is caught
                   when it is written.
+  MAIN AHEAD      HEAD is behind origin/main: merge main first. origin/main and branches whose
+                  tip is already in it are then left out of OPEN BRANCHES (item 051); --next-id
+                  still counts them.
+  UNTRACKED CHANGE  (item 053, exit 1; RI-007) a commit on HEAD's first-parent chain after the
+                  cutoff UNTRACKED_FROM that changes CODE_PATHS (ccbot/, config/, scripts/, tests/,
+                  .claude/, templates/) and changes no step file 01-06 of a work item that is open at
+                  the commit's first parent (07 absent, no `A1 result:` line, or last line FAIL;
+                  PRE_A1_LINE and LEGACY items are closed). Each commit is judged against its first
+                  parent (`git diff-tree --no-renames`), so a merge is one unit. 07 never covers code.
+                  A follow-up to a completed item is a new item. "not checked (no git)" without git;
+                  "not checked (... shallow clone ...)" when the cutoff is missing from a shallow
+                  clone (exit unchanged); a cutoff missing from a full clone is an error (exit 1).
+                  Known gaps: (a) one open item's 01-06 file covers unrelated code in the same unit;
+                  (b) on a branch each direct commit is its own unit, so commit code together with
+                  your 05; (c) PRs must land as merge commits (squash or rebase drops the cutoff ->
+                  exit 1); (d) a merge's conflict edits are judged together with the whole merge
+                  against its first parent; (e) paths outside CODE_PATHS (pyproject.toml, README.md,
+                  data/) are not checked; (f) non-ASCII paths are quoted (no -z).
+  RESEARCH CODE   (item 062, RI-007) a RESEARCH ONLY item whose unit changes RESEARCH_CODE_PATHS
+                  (ccbot/, config/, scripts/, tests/) with no I1-I3. A unit is one HEAD commit after
+                  the cutoff (as 053, against its first parent) or one open branch as a whole. On
+                  HEAD the item's line becomes `<ID>: SKIPPED (<sha7> RESEARCH ONLY: changes <files>
+                  ...)` (exit 1) and the line lists the IDs, or none, "not checked (no git)", or
+                  "not checked (see UNTRACKED CHANGE)" when the cutoff can't be used. On a branch it
+                  is `BRANCH SKIPPED: <ID> (<ref>: RESEARCH ONLY: changes <files> ...)`, joined to the
+                  item's classify detail when that is SKIPPED too (exit unchanged). Scope and waiver
+                  are read from request.md at the tip; a missing request.md is flagged, never passed.
+                  Only `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)` excuses it. Known gaps:
+                  (g) a FULL/FAST item's 04 or 05 in the same unit covers the research item's code;
+                  (h) .claude/ and templates/ edits are 053's only; (i) on a branch, code committed
+                  without the research item's step file is caught by 053 on HEAD, not by 062;
+                  (j) only the first `Waived:` line is read, so 04 05 06 go on the item's single
+                  Waived line.
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 """
@@ -95,6 +131,17 @@ LOG_CHECK_FROM = 45
 LOG_TIME_EXCEPT = {"048": "built before 045's --log rule reached main; times typed by hand, not recoverable (item 049)"}
 # Item 049: an open branch changing any of these changes the rules new items are built under.
 RULE_PATHS = (".claude/", "templates/", "scripts/check_pipeline.py", "scripts/check_handoff.py")
+# Item 053: a commit changing any of these must change a step file 01-06 of an open work item.
+CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/", ".claude/", "templates/")
+# item 053: HEAD of daily-fixes/2026-11-11 just before I2's first code commit; never move it forward
+UNTRACKED_FROM = "694bf4d0038e25bb82bd111018fbd67a94bbc74d"
+# Item 062: a RESEARCH ONLY item may not change these unless I1-I3 ran or the person waived them.
+# .claude/ and templates/ are left to 053 (gap h).
+RESEARCH_CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/")
+WAIVE_BUILD = {"04", "05", "06"}
+WAIVE_BUILD_BY_PERSON = re.compile(r"\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*:")
+STEP_FILE = re.compile(r"^work/(\d{3})/(01-research|02-improvements|03-handoff|04-build-plan|"
+                       r"05-build-report|06-verification)\.md$")
 LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*.md)
     "R1": r"brief written \| \d+",
     "R2": r"3 for / 3 against \| languages: \S.*",
@@ -121,7 +168,11 @@ LEGACY = {"001": "RESEARCH ONLY before 07-audit-task existed (item 021)",
 
 
 def read_request(path):
-    text = path.read_text(encoding="utf-8")
+    return parse_request(path.read_text(encoding="utf-8"))
+
+
+def parse_request(text):
+    """(scope, date, (waived steps, first Waived: line, who)) from request.md text."""
     scope = re.search(r"^Scope:\s*(FULL|RESEARCH ONLY|FAST)\b", text, re.M)
     date = re.search(r"^Date:\s*(\d{4}-\d{2}-\d{2})", text, re.M)
     waived = re.search(r"^Waived:\s*([0-9 ,]+)(.*)$", text, re.M)
@@ -130,6 +181,39 @@ def read_request(path):
             dt.date.fromisoformat(date.group(1)) if date else None,
             (re.findall(r"\d\d", waived.group(1)), waived.group(0).strip(),
              who.group(1).strip().lower() if who else "") if waived else ([], "", ""))
+
+
+def _build_waived(text):
+    """Item 062: the item's first `Waived:` line excuses 04 05 06 and was written by the person
+    with a date: `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)`."""
+    _, _, (steps, waived_line, who) = parse_request(text)
+    return WAIVE_BUILD <= set(steps) and who == "person" and bool(WAIVE_BUILD_BY_PERSON.search(waived_line))
+
+
+def _research_code(files, request_text_of):
+    """Item 062 (RI-007): [(ID, detail)] for the RESEARCH ONLY items in one unit (a HEAD commit
+    or an open branch) whose `files` change RESEARCH_CODE_PATHS with no I1-I3 and no person's
+    waiver. `request_text_of(ID)` is the item's request.md text at the tip, or None. Items come
+    from the paths only, never from commit messages (RI-012)."""
+    code = [f for f in files if f.startswith(RESEARCH_CODE_PATHS)]
+    if not code:
+        return []
+    items = sorted({m[1] for m in map(STEP_FILE.match, files) if m})
+    texts = {i: request_text_of(i) for i in items}
+    built = {i for i in items for s in ("04", "05") if f"work/{i}/{STEPS[s]}" in files}
+    if any(texts[i] is not None and parse_request(texts[i])[0] in ("FULL", "FAST") for i in built):
+        return []                                           # gap (g): a built item covers the unit
+    flags = []
+    for i in items:
+        if i in LEGACY:
+            continue
+        if texts[i] is None:
+            flags.append((i, "RESEARCH ONLY check: no request.md at the tip, item 062"))
+        elif parse_request(texts[i])[0] == "RESEARCH ONLY" and not _build_waived(texts[i]):
+            flags.append((i, f"RESEARCH ONLY: changes {' '.join(code)} with no 04-06; needs Scope FULL or "
+                             '"Waived: 04 05 06 (person, <date>: <why>)" on the item\'s single Waived: line '
+                             "(item 062)"))
+    return flags
 
 
 def classify(item_dir, today):
@@ -272,13 +356,30 @@ def open_branches(today=None):
     if out is None or out[1] != 0:
         return []
     today = today or dt.datetime.now(dt.timezone.utc).date()
+    behind = main_ahead() > 0
     found = []
     for ref in out[0].split():
         if ref.endswith("/HEAD") or "/" not in ref:
             continue
-        # items the branch changes (since it left HEAD), with every step file it has for them
-        changed = _git("diff", "--name-only", f"HEAD...{ref}", "--", "work/")
-        touched = {n.split("/")[1] for n in (changed[0].splitlines() if changed else []) if n.count("/") == 2}
+        # HEAD is behind main: main and refs already in main are not open work (item 051)
+        if behind and (ref == MAIN or _git("merge-base", "--is-ancestor", ref, MAIN)[1] == 0):
+            continue
+        merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
+        conflicts = None
+        if merge is not None and merge[1] in (0, 1):
+            conflicts = merge[0].splitlines()[1:] if merge[1] == 1 else []
+        # what merging the branch would change: HEAD vs the merge result. `HEAD...ref` uses one
+        # merge base, so with two (criss-cross) a PR already merged looks like this branch's (052)
+        tree = merge[0].split()[0] if conflicts is not None and merge[0].strip() else None
+
+        def changed(*paths):
+            out = _git("diff", "--name-only", "HEAD", tree, "--", *paths) if tree else None
+            if out is None or out[1] != 0:
+                out = _git("diff", "--name-only", f"HEAD...{ref}", "--", *paths)
+            return out[0].split() if out and out[1] == 0 else []
+
+        # items the branch changes, with every step file it has for them
+        touched = {n.split("/")[1] for n in changed("work/") if n.count("/") == 2}
         items = {i: set() for i in touched}
         files = {i: [] for i in touched}
         listing = _git("ls-tree", "-r", "--name-only", ref, "--", "work/")
@@ -288,22 +389,18 @@ def open_branches(today=None):
                 files[parts[1]].append(parts[2])
                 if parts[2] in STEPS.values():
                     items[parts[1]].add(parts[2][:2])
-        merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
-        conflicts = None
-        if merge is not None and merge[1] in (0, 1):
-            conflicts = merge[0].splitlines()[1:] if merge[1] == 1 else []
-        diff = _git("diff", "--name-only", f"HEAD...{ref}", "--", RECURRING)
-        ruled = _git("diff", "--name-only", f"HEAD...{ref}", "--", *RULE_PATHS)
-        rules = ruled[0].split() if ruled and ruled[1] == 0 else []
-        base = _git("merge-base", "HEAD", ref)
-        base = base[0].strip() if base and base[1] == 0 else None
-        clashes, skipped = [], []
+        recurring = bool(changed(RECURRING))
+        rules = changed(*RULE_PATHS)
+        bases = _git("merge-base", "--all", "HEAD", ref)
+        bases = bases[0].split() if bases and bases[1] == 0 else []
+        clashes, skipped, requests = [], [], {}
         for item in sorted(touched):
             req = f"work/{item}/request.md"
             theirs = _git("show", f"{ref}:{req}")
+            requests[item] = theirs[0] if theirs and theirs[1] == 0 else None
             mine = Path(req)
-            if (base and theirs and theirs[1] == 0 and mine.exists()
-                    and _git("cat-file", "-e", f"{base}:{req}")[1] != 0
+            if (bases and theirs and theirs[1] == 0 and mine.exists()
+                    and all(_git("cat-file", "-e", f"{b}:{req}")[1] != 0 for b in bases)
                     and theirs[0] != mine.read_text(encoding="utf-8")):
                 clashes.append(item)
             if theirs and theirs[1] == 0 and item not in LEGACY:
@@ -316,12 +413,119 @@ def open_branches(today=None):
                     status, detail = classify(d, today)
                 if status == "SKIPPED":
                     skipped.append((item, detail))
+        # item 062: the branch is one unit; its RESEARCH ONLY items may not change code
+        unit = changed(*RESEARCH_CODE_PATHS) + [f"work/{i}/{f}" for i in sorted(touched) for f in files[i]]
+        for item, detail in _research_code(unit, requests.get):
+            have = [k for k, (i, _) in enumerate(skipped) if i == item]
+            if have:
+                skipped[have[0]] = (item, f"{skipped[have[0]][1]}; {detail}")
+            else:
+                skipped.append((item, detail))
         when = _git("log", "-1", "--format=%cs", ref)
         last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
         found.append({"ref": ref, "items": items, "conflicts": conflicts,
-                      "recurring": bool(diff and diff[0].strip()), "clashes": clashes,
+                      "recurring": recurring, "clashes": clashes,
                       "skipped": skipped, "last": last, "rules": rules})
     return found
+
+
+def _open_at(parent, item):
+    """Item 053: is work item `item` still going through the pipeline at commit `parent`?
+    PRE_A1_LINE and LEGACY items are closed; otherwise open when its 07 is absent there, has no
+    `A1 result:` line, or its last one is FAIL (as classify)."""
+    if item in PRE_A1_LINE or item in LEGACY:
+        return False
+    audit = _git("show", f"{parent}:work/{item}/07-audit-task.md")
+    if audit is None or audit[1] != 0:
+        return True
+    verdicts = re.findall(r"^A1 result:\s*(\w+)", audit[0], re.M)
+    return not verdicts or verdicts[-1].upper() == "FAIL"
+
+
+def _walk(cutoff):
+    """Items 053/062: HEAD's first-parent commits after `cutoff`, each with the files it changes
+    against its first parent: ([(sha, files or None if diff-tree failed)], None), or
+    (None, (text, failed)) when the cutoff can't be used. Needs git."""
+    note = f" (cutoff {cutoff[:7]} from --untracked-from)" if cutoff != UNTRACKED_FROM else ""
+    known = _git("rev-parse", "--verify", "-q", f"{cutoff}^{{commit}}")
+    if known[1] != 0 or _git("merge-base", "--is-ancestor", cutoff, "HEAD")[1] != 0:
+        shallow = _git("rev-parse", "--is-shallow-repository")
+        if shallow[1] == 0 and shallow[0].strip() == "true":
+            return None, (f"not checked (cutoff {cutoff[:7]} not in this shallow clone; run git fetch --unshallow)"
+                          + note, False)
+        return None, (f"cutoff {cutoff[:7]} not in HEAD's history (squash/rebase or wrong SHA)" + note, True)
+    walk = _git("rev-list", "--first-parent", "--reverse", f"{cutoff}..HEAD")
+    if walk[1] != 0:
+        return None, (f"cutoff {cutoff[:7]}: git rev-list failed" + note, True)
+    units = []
+    for c in walk[0].split():
+        diff = _git("diff-tree", "-r", "--name-only", "--no-renames", f"{c}^1", c)
+        units.append((c, diff[0].split("\n") if diff[1] == 0 else None))
+    return units, None
+
+
+def untracked_changes(cutoff=UNTRACKED_FROM, walked=None):
+    """Item 053 (RI-007): None without git, else (text after `UNTRACKED CHANGE: `, failed).
+    `walked` is _walk(cutoff) when main() already has it."""
+    if _git("rev-parse", "HEAD") is None:
+        return None
+    note = f" (cutoff {cutoff[:7]} from --untracked-from)" if cutoff != UNTRACKED_FROM else ""
+    units, error = walked or _walk(cutoff)
+    if error:
+        return error
+    entries = []
+    for c, files in units:
+        if files is None:
+            entries.append(f"{c[:7]} (git diff-tree failed)")
+            continue
+        code = [f for f in files if f.startswith(CODE_PATHS)]
+        if not code:
+            continue
+        items = sorted({m[1] for m in map(STEP_FILE.match, files) if m})
+        if not any(_open_at(f"{c}^1", i) for i in items):
+            entries.append(f"{c[:7]} {' '.join(code)}")
+    if not entries:
+        return "none" + note, False
+    return ("; ".join(entries) + " (item 053: code, config, tests or rules changed with no step file of an "
+            "open work item; a follow-up to a completed item is a new item)" + note, True)
+
+
+def research_code(cutoff=UNTRACKED_FROM, walked=None):
+    """Item 062 (RI-007): None without git, else (text after `RESEARCH CODE: `, {ID: (sha7, detail)})
+    for RESEARCH ONLY items whose HEAD commits after the cutoff change RESEARCH_CODE_PATHS. Scope
+    and waiver are read from work/<ID>/request.md in the working tree. A cutoff problem is
+    UNTRACKED CHANGE's (053) and is not reported twice; a diff-tree failure is 053's entry."""
+    if _git("rev-parse", "HEAD") is None:
+        return None
+    units, error = walked or _walk(cutoff)
+    if error:
+        return "not checked (see UNTRACKED CHANGE)", {}
+
+    def request_text_of(item):
+        req = Path("work") / item / "request.md"
+        return req.read_text(encoding="utf-8") if req.is_file() else None
+
+    flagged = {}
+    for c, files in units:
+        for item, detail in _research_code(files or [], request_text_of):
+            if item in flagged:
+                sha, old = flagged[item]
+                flagged[item] = (sha, f"{old}; {c[:7]} {detail}")
+            else:
+                flagged[item] = (c[:7], detail)
+    return ", ".join(sorted(flagged)) or "none", flagged
+
+
+MAIN = "origin/main"
+
+
+def main_ahead():
+    """Commits on origin/main that HEAD lacks (item 051); 0 when there is no origin/main."""
+    ref = _git("rev-parse", "--verify", "-q", MAIN)
+    if ref is None or ref[1] != 0:
+        return 0
+    n = _git("rev-list", "--count", f"HEAD..{MAIN}")
+    return int(n[0].strip()) if n and n[1] == 0 and n[0].strip().isdigit() else 0
 
 
 def next_id():
@@ -343,17 +547,29 @@ def main(argv):
         if len(argv) != 4:
             sys.exit(__doc__)
         return write_log(*argv[1:])
-    if argv[:1] == ["--today"]:
-        today = dt.date.fromisoformat(argv[1])
-    elif argv:
-        sys.exit(__doc__)
+    cutoff, rest = UNTRACKED_FROM, list(argv)
+    while rest:
+        if len(rest) < 2 or rest[0] not in ("--today", "--untracked-from"):
+            sys.exit(__doc__)
+        if rest[0] == "--today":
+            today = dt.date.fromisoformat(rest[1])
+        else:
+            cutoff = rest[1]
+        rest = rest[2:]
     work = Path("work")
     skipped, stuck, awaiting, in_pr, failed, unfinished = [], [], [], [], [], []
     branches = open_branches(today)
-    for d in sorted(p for p in work.iterdir() if (p / "request.md").exists()):
+    walked = _walk(cutoff) if _git("rev-parse", "HEAD") is not None else None
+    untracked = untracked_changes(cutoff, walked)
+    research = research_code(cutoff, walked)
+    flagged = research[1] if research else {}
+    listed = sorted(p for p in work.iterdir() if (p / "request.md").exists())
+    for d in listed:
         status, detail = classify(d, today)
         if d.name in LEGACY and status in ("SKIPPED", "in progress"):
             status, detail = "LEGACY", LEGACY[d.name]
+        if d.name in flagged:                       # item 062: replaces the classify line
+            status, detail = "SKIPPED", f"{flagged[d.name][0]} {flagged[d.name][1]}"
         if status in ("STUCK", "not started", "in progress"):
             here = {s for s, f in STEPS.items() if (d / f).exists()}
             best = max(((len(items.get(d.name, set()) - here), ref, items.get(d.name, set()))
@@ -373,9 +589,15 @@ def main(argv):
         gaps = incomplete(d)
         if gaps:
             unfinished.append(f"{d.name} ({'; '.join(gaps)})")
+    for item in sorted(set(flagged) - {d.name for d in listed}):   # item 062: no request.md here
+        print(f"{item}: SKIPPED ({flagged[item][0]} {flagged[item][1]})")
+        skipped.append(item)
     print(f"STUCK: {', '.join(stuck) or 'none'}")
     print(f"AWAITING A1: {', '.join(awaiting) or 'none'}")
     print(f"IN PR: {', '.join(in_pr) or 'none'}")
+    ahead = main_ahead()
+    if ahead:
+        print(f"MAIN AHEAD: {MAIN} has {ahead} commits not in HEAD; merge it before building (item 051)")
     if branches:
         print("OPEN BRANCHES (not merged into HEAD):")
         for b in branches:
@@ -400,10 +622,12 @@ def main(argv):
                          if (work / i / "request.md").exists())
     excepted = f" (not checked: {excepted})" if excepted and late is not None else ""
     print(f"LOG TIME: {'not checked (no git)' if late is None else (', '.join(late) or 'none') + excepted}")
+    print(f"UNTRACKED CHANGE: {'not checked (no git)' if untracked is None else untracked[0]}")
+    print(f"RESEARCH CODE: {'not checked (no git)' if research is None else research[0]}")
     orphans = orphan_log_lines()
     print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
-    return 1 if skipped or failed or unfinished or late or orphans else 0
+    return 1 if skipped or failed or unfinished or late or orphans or (untracked and untracked[1]) else 0
 
 
 if __name__ == "__main__":

@@ -83,6 +83,21 @@ def test_lookback_drops_old_highs(tmp_path, cfg):
     assert [d["reason"] for d in scan["decisions"] if d["ticker"] == "SYNTH_A"] == ["NO_DIP"]
 
 
+def test_missed_scans_do_not_stretch_the_window(tmp_path, cfg):
+    """Item 060: a 30.00 close 25 trading days back is outside a 20-day window even when
+    only 6 scans were recorded (the old 20-scan count would see it and open)."""
+    days = pd.bdate_range(end=DATE - dt.timedelta(days=1), periods=25)
+    picked = [(days[0], 30.0)] + [(d, 24.3) for d in days[-5:]]
+    rows = [dict.fromkeys(SNAPSHOT_COLUMNS) | {"ts": d.date().isoformat(), "underlying": "SYNTH_A",
+                                                "underlying_price": c, "asset_type": "etf"}
+            for d, c in picked]
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows, columns=SNAPSHOT_COLUMNS).to_csv(tmp_path / "state" / "paper_snapshots.csv", index=False)
+    scan, broker = _run(tmp_path, {**cfg, "dip_entry": {"drop": 0.05, "lookback": 20, "min_days": 5}})
+    assert [d["reason"] for d in scan["decisions"] if d["ticker"] == "SYNTH_A"] == ["NO_DIP"]
+    assert broker.n_orders == 0
+
+
 def test_budget_accounts_match_the_057_versions():
     st = load_config(REPO / "config" / "stagger.json")
     base = load_config(REPO / "config" / "dip_base.json")

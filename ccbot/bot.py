@@ -155,11 +155,18 @@ def _capital(portfolio, days, markets, cfg):
     return total
 
 
+def _trading_window_start(date, lookback):
+    """First of the last `lookback` NYSE trading days ending on `date` (item 060)."""
+    holidays = [dt.date.fromisoformat(h) for h in expiries.load_holidays()["holidays"]]
+    return expiries.business_days(date - dt.timedelta(days=2 * lookback + 10), date, holidays)[-lookback]
+
+
 def _dip(ticker, date, close, state_dir, cfg):
     """None when a new position may open; else why not (item 058). With cfg["dip_entry"] set,
     a new entry needs close <= (1 - drop) x the highest close over the last `lookback`
-    scans (today included), read from this account's own paper_snapshots.csv, and at least
-    `min_days` recorded closes. Positions already held are never gated."""
+    NYSE trading days (today included; item 060: missed scans don't widen it), read from this
+    account's own paper_snapshots.csv, and at least `min_days` recorded closes in that window.
+    Positions already held are never gated."""
     rule = cfg.get("dip_entry")
     if not rule:
         return None
@@ -167,7 +174,9 @@ def _dip(ticker, date, close, state_dir, cfg):
     past = pd.Series(dtype=float)
     if path.exists():
         snaps = pd.read_csv(path, usecols=["ts", "underlying", "underlying_price", "symbol"])
-        rows = snaps[(snaps["underlying"] == ticker) & snaps["symbol"].isna() & (snaps["ts"] < date.isoformat())]
+        start = _trading_window_start(date, rule["lookback"])   # item 060: trading days, not scans
+        rows = snaps[(snaps["underlying"] == ticker) & snaps["symbol"].isna()
+                     & (snaps["ts"] >= start.isoformat()) & (snaps["ts"] < date.isoformat())]
         past = rows.drop_duplicates("ts", keep="last").sort_values("ts")["underlying_price"].astype(float)
     closes = list(past.tail(rule["lookback"] - 1)) + [close]
     if len(closes) < rule["min_days"]:
@@ -175,7 +184,7 @@ def _dip(ticker, date, close, state_dir, cfg):
     high = max(closes)
     if close <= (1 - rule["drop"]) * high + 1e-9:
         return None
-    return f"close {close:.2f} is {100 * (1 - close / high):.1f}% below the {len(closes)}-scan high {high:.2f}; needs {100 * rule['drop']:g}%"
+    return f"close {close:.2f} is {100 * (1 - close / high):.1f}% below the {rule['lookback']}-trading-day high {high:.2f} ({len(closes)} closes); needs {100 * rule['drop']:g}%"
 
 
 def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", reports_dir="reports"):

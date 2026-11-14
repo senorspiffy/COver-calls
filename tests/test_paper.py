@@ -48,6 +48,17 @@ def test_enrich_past_ex_div_is_unknown(tmp_path):
     assert math.isnan(after.dividend) and math.isnan(after.div_next)
 
 
+def test_enrich_future_last_earnings_is_unknown(tmp_path):
+    """053 (RI-002): a last_earnings on or after the scan date is not yet a report: no estimate."""
+    cfg = _cfg(tmp_path, {})
+    pbr = {"asset_type": "stock", "next_earnings": None, "last_earnings": "2026-11-10"}
+    for before in (dt.date(2026, 11, 9), dt.date(2026, 11, 10)):     # 11-10: reported after the close
+        d = enrich(Day(before, 15.0), "PBR", {"PBR": pbr}, cfg)
+        assert d.earnings_known is False and d.next_earnings is None, before
+    after = enrich(Day(dt.date(2026, 11, 11), 15.0), "PBR", {"PBR": pbr}, cfg)
+    assert after.next_earnings == dt.date(2027, 1, 19) and after.earnings_estimated and after.earnings_known
+
+
 def test_enrich_estimate_expires_and_blocks(tmp_path):
     cfg = _cfg(tmp_path, {})
     late = enrich(Day(dt.date(2027, 1, 7), 12.0), "F", {"F": FORD}, cfg)
