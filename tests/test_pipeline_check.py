@@ -141,6 +141,7 @@ def test_repo_pipeline_has_no_skipped_items():
     code, out = _run(REPO, "check_pipeline.py")
     assert code == 0, out
     assert "RESEARCH CODE: none" in out                 # item 062
+    assert "061: complete" in out                      # item 064: 061 stays complete with work/ .py as code
 
 
 def test_no_tracked_pycache():
@@ -852,6 +853,14 @@ def test_research_code_rules():
     assert rc(["ccbot/x.py", "work/001/01-research.md"], texts.get) == []           # LEGACY
     assert rc(["ccbot/x.py", "work/162/01-research.md"], texts.get) == []           # person's waiver
     assert rc(shape_061, lambda i: None) == [("160", "RESEARCH ONLY check: no request.md at the tip, item 062")]
+    # item 064: a .py under work/<ID>/ is code; look-alike paths are not (RI-012)
+    flags = rc(["work/160/diag.py", "work/160/01-research.md"], texts.get)
+    assert len(flags) == 1 and flags[0][0] == "160"
+    assert flags[0][1].startswith("RESEARCH ONLY: changes work/160/diag.py with no 04-06;")
+    assert rc(["work/160/diag.py.md", "work/160/notes.md", "work/160/01-research.md"], texts.get) == []
+    assert rc(["work/tmp/x.py", "work/.gitkeep", "work/160/01-research.md"], texts.get) == []
+    assert rc(["work/160/diag.py", "work/160/01-research.md"], lambda i: None) == [
+        ("160", "RESEARCH ONLY check: no request.md at the tip, item 062")]
 
 
 def _research(repo, cutoff):
@@ -972,3 +981,150 @@ def test_research_code_cutoff_missing_not_checked(tmp_path):
     code, out, line = _research(repo, "0" * 40)
     assert code == 1                                   # from UNTRACKED CHANGE (053), not twice
     assert line == "RESEARCH CODE: not checked (see UNTRACKED CHANGE)"
+
+
+# Item 064 (RI-007): a .py file under work/<ID>/ is code for 053 and 062.
+@pytest.mark.parametrize("path, hit", [
+    ("work/061/diag_keep.py", True),
+    ("work/160/sub/x.py", True),
+    ("work/160/diag.py.md", False),
+    ("work/.gitkeep", False),
+    ("work/tmp/x.py", False),
+    ("work/160/01-research.md", False),
+    ("work/1600/x.py", False),
+    ("work/160/x.pyc", False),
+])
+def test_work_code_pattern(path, hit):
+    cp = _cp()
+    assert (cp.WORK_CODE.fullmatch(path) is not None) is hit
+    assert cp._is_code(path, cp.CODE_PATHS) is hit
+    assert cp._is_code("work/160/diag.py", cp.RESEARCH_CODE_PATHS) is True
+    assert cp._is_code("ccbot/x.py", cp.RESEARCH_CODE_PATHS) is True
+    assert cp._is_code("work/160/notes.md", cp.CODE_PATHS) is False
+
+
+def test_work_code_counts_repo_diagnostics():
+    """Feasibility pin (RI-001): the real work/ folder holds at least 061's diagnostic (1 of 484
+    paths on 2026-11-14, item 064 03). No exact count, so a new diagnostic doesn't break it."""
+    cp = _cp()
+    paths = [f.relative_to(REPO).as_posix() for f in (REPO / "work").rglob("*") if f.is_file()]
+    hits = [p for p in paths if cp.WORK_CODE.fullmatch(p)]
+    assert "work/061/diag_keep.py" in hits
+    assert not [p for p in hits if p.endswith(".md")]
+
+
+@NO_GIT
+def test_research_only_work_py_is_research_code(tmp_path):
+    """Fixture (a): the 061 shape with the code under work/<ID>/ instead of ccbot/."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "160", ["01-research.md"], scope="RESEARCH ONLY", date="2026-11-11")
+    _write(repo, "work/160/diag.py")
+    c = _commit(repo, "160 R1 + diagnostic")
+    code, out, line = _research(repo, cutoff)
+    assert code == 1
+    assert f"160: SKIPPED ({c[:7]} RESEARCH ONLY: changes work/160/diag.py" in out
+    assert len([l for l in out.splitlines() if l.startswith("160:")]) == 1
+    assert "written before" not in out                 # the 062 detail replaces classify's (C3)
+    assert line == "RESEARCH CODE: 160"
+    assert "UNTRACKED CHANGE: none" in out
+
+
+@NO_GIT
+def test_py_added_to_completed_item_is_untracked(tmp_path):
+    """Fixture (b): a diagnostic added to a completed item's folder is a follow-up with no item."""
+    repo, cutoff = _history(tmp_path)
+    _write(repo, "work/150/x.py")
+    c = _commit(repo, "150 diagnostic")
+    code, line = _untracked(repo, cutoff)
+    assert code == 1
+    assert line == f"UNTRACKED CHANGE: {c[:7]} work/150/x.py{WHY_053} (cutoff {cutoff[:7]} from --untracked-from)"
+
+
+@NO_GIT
+def test_open_full_item_covers_its_work_py(tmp_path):
+    """Fixture (c): an open FULL item's step files cover its own diagnostic."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "170", ALL[:5], date="2026-11-11")
+    _write(repo, "work/170/diag.py")
+    _commit(repo, "170 built + diagnostic")
+    code, out, line = _research(repo, cutoff)
+    assert code == 0, out
+    assert f"UNTRACKED CHANGE: none (cutoff {cutoff[:7]} from --untracked-from)" in out
+    assert line == "RESEARCH CODE: none"
+    assert "170: SKIPPED" not in out
+
+
+@NO_GIT
+def test_failed_diff_tree_is_an_entry_not_none(tmp_path, monkeypatch):
+    """A failed diff-tree is 053's entry, never "none"; 062 does not report it twice."""
+    cp = _cp()
+    repo, cutoff = _history(tmp_path)
+    monkeypatch.chdir(repo)
+    walked = ([("ab" * 20, None)], None)
+    text, failed = cp.untracked_changes(cutoff, walked)
+    assert text.startswith("abababa (git diff-tree failed) (item 053:")
+    assert failed is True
+    assert cp.research_code(cutoff, walked)[0] == "none"
+
+
+def test_work_code_without_git(tmp_path):
+    _item(tmp_path, "160", ["01-research.md", "02-improvements.md", "03-handoff.md"], scope="RESEARCH ONLY",
+          date="2026-11-13")
+    _write(tmp_path, "work/160/diag.py")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-13")
+    assert code == 0, out
+    assert "RESEARCH CODE: not checked (no git)" in out
+    assert "UNTRACKED CHANGE: not checked (no git)" in out
+
+
+@NO_GIT
+def test_research_only_branch_work_py_is_branch_skipped(tmp_path):
+    """Fixture (d): an open branch's RESEARCH ONLY item adds a diagnostic."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "res", "160", RES_STEPS, RES_160, extra=["work/160/diag.py"])
+    code, out, _ = _research(repo, _root(repo))
+    assert code == 0
+    assert "BRANCH SKIPPED: 160 (origin/res: RESEARCH ONLY: changes work/160/diag.py" in out
+    assert "SKIPPED: none" in out
+
+
+@NO_GIT
+def test_research_only_branch_nested_py_is_seen(tmp_path):
+    """Fixture (e): a .py one folder deeper under work/<ID>/ is code too."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "res", "160", RES_STEPS, RES_160, extra=["work/160/sub/x.py"])
+    code, out, _ = _research(repo, _root(repo))
+    assert code == 0
+    assert "BRANCH SKIPPED: 160 (origin/res: RESEARCH ONLY: changes work/160/sub/x.py" in out
+
+
+@NO_GIT
+def test_branch_unchanged_tip_py_not_counted(tmp_path):
+    """Fixture (f, plan C2): a .py already on main and unchanged by the branch is not the branch's code."""
+    repo = _repo_with_open_branch(tmp_path)
+    _item(repo, "160", ["01-research.md", "02-improvements.md", "03-handoff.md"], scope="RESEARCH ONLY",
+          date="2026-11-11", waived="04 05 06 (person, 2026-11-13: test)")
+    _write(repo, "work/160/diag.py")
+    _commit(repo, "160 R1-R3 + diagnostic, waived by the person")
+    _branch_adds(repo, "res", "160", ["07-audit-task.md"], RES_160)
+    code, out, line = _research(repo, _root(repo))
+    assert code == 0, out
+    assert "BRANCH SKIPPED: 160" not in out
+    assert line == "RESEARCH CODE: none"
+
+
+@NO_GIT
+def test_branch_diff_failure_hides_code_gap_l(tmp_path, monkeypatch):
+    """Gap (l) pinned: a failed branch `git diff` gives an empty change list, so the branch's
+    code is not seen (information only). Making it loud must change this test on purpose."""
+    import datetime as dt
+    cp = _cp()
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "res", "160", RES_STEPS, RES_160, extra=["work/160/diag.py"])
+    monkeypatch.chdir(repo)
+    real = cp._git
+    monkeypatch.setattr(cp, "_git", lambda *args: ("", 1) if args[0] == "diff" else real(*args))
+    found = cp.open_branches(dt.date(2026, 11, 13))
+    res = [b for b in found if b["ref"] == "origin/res"]
+    assert res
+    assert not any("changes work/160/diag.py" in d for b in res for _, d in b["skipped"])
