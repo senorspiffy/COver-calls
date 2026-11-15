@@ -40,10 +40,26 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
                 fh.write(f"12:00 | {agent} | {item} | {FIELDS[agent]}\n")
 
 
+NO_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
+
+
 def _run(root, script, *args):
     r = subprocess.run([sys.executable, str(REPO / "scripts" / script), *args], cwd=root,
                        capture_output=True, text=True, encoding="utf-8")
     return r.returncode, r.stdout
+
+
+def _run_head(root, tmp, script, *args):
+    """`_run` on a detached worktree of `root`'s HEAD, so only committed work/ and logs/ are seen
+    (item 066). The script itself is still `REPO/scripts` (the working-tree copy)."""
+    wt = tmp / "head"
+    add = subprocess.run(["git", "worktree", "add", "--detach", "-q", str(wt), "HEAD"], cwd=root,
+                         capture_output=True, text=True, encoding="utf-8")
+    assert add.returncode == 0, add.stderr
+    try:
+        return _run(wt, script, *args)
+    finally:
+        subprocess.run(["git", "worktree", "remove", "--force", str(wt)], cwd=root, capture_output=True)
 
 
 ALL = ["01-research.md", "02-improvements.md", "03-handoff.md", "04-build-plan.md",
@@ -136,9 +152,12 @@ def test_check_handoff_all_legacy_and_fail(tmp_path):
     assert "FAIL on 031" in out
 
 
-def test_repo_pipeline_has_no_skipped_items():
-    """The real work/ folder: no item may skip a step (RI-007)."""
-    code, out = _run(REPO, "check_pipeline.py")
+@NO_GIT
+def test_repo_pipeline_has_no_skipped_items(tmp_path):
+    """The committed work/ folder: no item may skip a step (RI-007). Runs on a detached worktree of
+    HEAD, so another item's uncommitted step files in this tree don't fail it (item 066); run
+    check_pipeline.py in the tree for uncommitted files (run-item.md)."""
+    code, out = _run_head(REPO, tmp_path, "check_pipeline.py")
     assert code == 0, out
     assert "RESEARCH CODE: none" in out                 # item 062
     assert "061: complete" in out                      # item 064: 061 stays complete with work/ .py as code
@@ -601,7 +620,6 @@ def test_criss_cross_branch_lists_only_its_own_changes(tmp_path, monkeypatch):
 
 
 # Item 053 (RI-007): code, config, tests or rules changed outside an open work item.
-NO_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
 WHY_053 = (" (item 053: code, config, tests or rules changed with no step file of an open work item;"
            " a follow-up to a completed item is a new item)")
 
@@ -625,6 +643,22 @@ def _history(tmp_path):
     _item(repo, "150", ALL)
     _write(repo, "config/x.json", "{}\n")
     return repo, _commit(repo, "cutoff")
+
+
+@NO_GIT
+def test_head_run_ignores_uncommitted_item(tmp_path):
+    """Item 066: `_run_head` sees committed state only. An uncommitted step file with no log line
+    (063's shape) fails the in-tree run but not the HEAD-worktree run; no worktree is left."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "151", ["01-research.md"], date="2026-11-11", logged=False)
+    args = ("--today", "2026-11-11", "--untracked-from", cutoff)
+    code, out = _run(repo, "check_pipeline.py", *args)
+    assert code == 1 and "INCOMPLETE: 151" in out, out          # control: the tree run sees it
+    code, out = _run_head(repo, tmp_path, "check_pipeline.py", *args)
+    assert "INCOMPLETE: none" in out, out
+    assert code == 0, out
+    wl = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout
+    assert str(tmp_path / "head") not in wl
 
 
 def _untracked(repo, cutoff):
@@ -998,6 +1032,11 @@ def test_work_code_pattern(path, hit):
     cp = _cp()
     assert (cp.WORK_CODE.fullmatch(path) is not None) is hit
     assert cp._is_code(path, cp.CODE_PATHS) is hit
+
+
+def test_is_code_examples():
+    """Item 066: fixed `_is_code` examples, checked once instead of in every pattern case."""
+    cp = _cp()
     assert cp._is_code("work/160/diag.py", cp.RESEARCH_CODE_PATHS) is True
     assert cp._is_code("ccbot/x.py", cp.RESEARCH_CODE_PATHS) is True
     assert cp._is_code("work/160/notes.md", cp.CODE_PATHS) is False
