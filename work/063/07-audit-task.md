@@ -22,3 +22,4 @@ A1, please check:
   - (c) The interior-gap follow-up.
 - 05 Deviation 1 is a misreading with no effect: 04's "step 1b and 4." is list item 4 (the i3 file), not r3 step 4.
 - RI-012: no new text classification. The "no dates" warning is keyed on `er is not None and not earnings and asset != "etf"`.
+A1 result: PASS (2026-11-15, logs/audit/2026-11-15-063.md: A1 re-ran on eee257e (addf948 code): tests/test_realtest.py 43 passed, full suite 316 passed 1 skipped; check_handoff 063 PASS 49 rows; check_pipeline 063 awaiting A1, INCOMPLETE/SKIPPED/UNTRACKED/LOG TIME/ORPHAN/ID CLASH none; M1 in scratch worktree 6 failed 37 passed; data/real spot check BAC 24->22, CSX 37->38, USB 11->10, OXY 8->7, BMY 13->13, leads 100/107/100/52/31)
