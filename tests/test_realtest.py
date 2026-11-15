@@ -2,6 +2,7 @@
 import dataclasses
 import gzip
 import inspect
+import json
 import math
 import re
 import shutil
@@ -120,6 +121,8 @@ def test_run_end_to_end(data_root, tmp_path):
     assert s["monte_carlo_2_stocks_1yr"]["paths_used"] == 200
     assert set(s["counts_bot_rule_bid"]) == {"AAA", "BBB", "CCC"}
     assert s["counts_bot_rule_bid"]["AAA"]["rej_OK"] > 0
+    assert s["counts_bot_rule_bid"]["AAA"]["earnings_lead_days"] == 23          # 2019-01-02 -> 01-25 (063)
+    assert "first listed date 2019-01-25" in s["counts_bot_rule_bid"]["AAA"]["warnings"]
     br = pd.read_csv(tmp_path / "bot_rule_by_ticker.csv")
     assert ((br.called_away_pct >= 0) & (br.called_away_pct <= 1)).all()
     # IV in the fake data is 1.15x true vol, so sold IV should beat realized on average
@@ -213,15 +216,17 @@ def _tiny(earnings=(), asset_type="stock", chain_days=(date(2024, 1, 2),), quote
 def test_earnings_today_blocks():
     df, tr = rt.simulate(_tiny(earnings=[date(2024, 1, 2)]), rt.BOT_RULE, CFG)
     assert tr == [] and df.attrs["counts"]["rej_EARNINGS_BLACKOUT"] == 1     # a <= e, like screen._reject
-    df, tr = rt.simulate(_tiny(earnings=[date(2024, 6, 1)]), rt.BOT_RULE, CFG)
+    df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 25), date(2024, 6, 1)]), rt.BOT_RULE, CFG)
     assert len(tr) == 1 and tr[0].strike == 11.0                               # control: no earnings in the life
 
 
 def test_stock_without_earnings_sells_nothing():
     df, tr = rt.simulate(_tiny(earnings=[]), rt.BOT_RULE, CFG)
     assert tr == [] and df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] == 1 and df.attrs["counts"]["rej_OK"] == 0
+    assert math.isnan(df.attrs["counts"]["earnings_lead_days"])                 # no dates: unknown, never 0
     df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 1)]), rt.BOT_RULE, CFG)   # only a past date
     assert tr == [] and df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] == 1
+    assert df.attrs["counts"]["earnings_lead_days"] == 0                        # first date before day 1
 
 
 def test_etf_without_earnings_sells():
@@ -229,12 +234,44 @@ def test_etf_without_earnings_sells():
     assert (asset, warn) == ("etf", None)
     df, tr = rt.simulate(_tiny(earnings=[], asset_type=asset), rt.BOT_RULE, CFG)
     assert len(tr) == 1 and df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] == 0
+    assert math.isnan(df.attrs["counts"]["earnings_lead_days"]) and df.attrs["warnings"] == []
+
+
+# ---------------------------------------------------------------- leading edge of the earnings file (item 063)
+
+def _edge(lead, rule=rt.BOT_RULE):
+    """_tiny's only sale day is 2024-01-02; its first listed earnings date is `lead` days later."""
+    return rt.simulate(_tiny(earnings=[date(2024, 1, 2) + timedelta(days=lead)]), rule, CFG)
+
+
+def test_leading_edge_100_days_blocks():
+    df, tr = _edge(100)                                                         # 2024-04-11, after the period end
+    c = df.attrs["counts"]
+    assert tr == [] and c["rej_EARNINGS_UNKNOWN"] == 1 and c["rej_OK"] == 0 and c["earnings_lead_days"] == 100
+    assert "100 days" in df.attrs["warnings"][0] and "EARNINGS_UNKNOWN" in df.attrs["warnings"][0]
+
+
+def test_leading_edge_151_days_blocks():
+    df, tr = _edge(151)                                                         # 2024-06-01 (> EARNINGS_GAP_WARN)
+    c = df.attrs["counts"]
+    assert tr == [] and c["rej_EARNINGS_UNKNOWN"] == 1 and c["rej_OK"] == 0 and c["earnings_lead_days"] == 151
+    assert "151 days" in df.attrs["warnings"][0] and "EARNINGS_UNKNOWN" in df.attrs["warnings"][0]
+
+
+def test_leading_edge_rule_without_earnings_check_still_sells():
+    df, tr = _edge(100, dataclasses.replace(rt.BOT_RULE, skip_earnings=False))
+    assert len(tr) == 1 and df.attrs["counts"]["earnings_lead_days"] == 100
+    assert "no call sold" not in df.attrs["warnings"][0] and "not checked" in df.attrs["warnings"][0]
+
+
+def _no_nan(tok):
+    raise ValueError(f"non-JSON token {tok} in summary.json")
 
 
 @pytest.mark.parametrize("day,outcome", [(date(2024, 1, 8), "bought_back"),   # 6 days of 45: first third
                                          (date(2024, 2, 1), "expired")])      # 30 days of 45: hold
 def test_take50_only_in_first_third(day, outcome):
-    td = _tiny(earnings=[date(2024, 6, 1)], chain_days=(date(2024, 1, 2), day), quotes_at={day: (0.10, 0.14)})
+    td = _tiny(earnings=[date(2023, 10, 25), date(2024, 6, 1)], chain_days=(date(2024, 1, 2), day), quotes_at={day: (0.10, 0.14)})
     df, tr = rt.simulate(td, dataclasses.replace(rt.BOT_RULE, manage="take50"), CFG)
     assert tr[0].premium == 0.3 and tr[0].outcome == outcome
     if outcome == "bought_back":
@@ -248,7 +285,7 @@ def test_fees_match_costs_fees(px):
 
 
 def test_sales_under_3_cents_are_counted_not_blocked():
-    td = _tiny(earnings=[date(2024, 6, 1)])
+    td = _tiny(earnings=[date(2023, 10, 25), date(2024, 6, 1)])
     td.chain[date(2024, 1, 2)].loc[1, ["bid", "ask"]] = (0.02, 0.04)
     df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
     assert len(tr) == 1 and tr[0].premium == 0.02 and df.attrs["counts"]["sub_3c_sales"] == 1
@@ -256,7 +293,8 @@ def test_sales_under_3_cents_are_counted_not_blocked():
 
 # ---------------------------------------------------------------- missing data (061/04 change 1.8, RI-002)
 
-DROP_CASES = ["prices", "options", "dividends", "splits", "earnings", "volhist", "BXM_History.csv", "asset_type"]
+DROP_CASES = ["prices", "options", "dividends", "splits", "earnings", "volhist", "BXM_History.csv", "asset_type",
+              "earnings_before_first"]
 
 
 def _copy(data_root, dst, tk="AAA"):
@@ -268,6 +306,19 @@ def _copy(data_root, dst, tk="AAA"):
     for kind, ext in (("prices", ".csv"), ("dividends", ".csv"), ("splits", ".csv"), ("options", ".csv.gz")):
         shutil.copy(data_root / kind / f"SPY{ext}", dst / kind / f"SPY{ext}")
     return dst
+
+
+def test_empty_earnings_file_warns_and_lead_is_null(data_root, tmp_path):
+    root = _copy(data_root, tmp_path)
+    pd.DataFrame(columns=["act_symbol", "date", "when"]).to_csv(root / "earnings" / "AAA.csv", index=False)
+    td = rt.load_ticker(root, "AAA", FACTS)
+    assert td.earnings == [] and "earnings: no dates (EARNINGS_UNKNOWN for a stock)" in td.warnings
+    df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
+    assert tr == [] and math.isnan(df.attrs["counts"]["earnings_lead_days"])
+    out = tmp_path / "out"
+    rt.run(root, out, ["AAA", "SPY"], CFG, grid=[rt.BOT_RULE], mc_paths=10, min_years=1, facts=FACTS)
+    s = json.loads((out / "summary.json").read_text(), parse_constant=_no_nan)
+    assert s["counts_bot_rule_bid"]["AAA"]["earnings_lead_days"] is None
 
 
 @pytest.mark.parametrize("kind", DROP_CASES)
@@ -289,6 +340,19 @@ def test_drop_input(kind, data_root, tmp_path):
         assert td.earnings == [] and "earnings: not supplied" in "; ".join(td.warnings)
         df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
         assert tr == [] and df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] > 0 and df.attrs["counts"]["rej_OK"] == 0
+        assert math.isnan(df.attrs["counts"]["earnings_lead_days"])
+    elif kind == "earnings_before_first":
+        er = pd.read_csv(root / "earnings" / "AAA.csv")
+        er[pd.to_datetime(er.date).dt.date >= date(2019, 7, 1)].to_csv(root / "earnings" / "AAA.csv", index=False)
+        td = rt.load_ticker(root, "AAA", FACTS)
+        assert td.earnings[0] == date(2019, 7, 25)
+        df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
+        assert not any(t.open_date < date(2019, 7, 25) for t in tr)
+        assert any(t.open_date >= date(2019, 7, 25) for t in tr)               # the edge does not over-block
+        assert df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] > 0
+        assert df.attrs["counts"]["earnings_lead_days"] == 204                 # 2019-01-02 -> 07-25
+        assert "first listed date 2019-07-25" in "; ".join(td.warnings + df.attrs["warnings"])
+        assert "EARNINGS_UNKNOWN" in reason
     elif kind == "volhist":
         (root / "volhist" / "AAA.csv").unlink()
         td = rt.load_ticker(root, "AAA", FACTS)
@@ -309,7 +373,7 @@ def test_realtest_missing_lists_every_input():
     src = inspect.getsource(rt.load_ticker) + inspect.getsource(rt.bxm_vs_spy)
     files = set(re.findall(r'root\)? / "([^"]+)"', src))
     assert files == {"prices", "dividends", "splits", "earnings", "options", "volhist", "BXM_History.csv"}
-    assert files | {"asset_type"} == set(rt.REALTEST_MISSING) == set(DROP_CASES)
+    assert files | {"asset_type", "earnings_before_first"} == set(rt.REALTEST_MISSING) == set(DROP_CASES)
 
 
 def test_nan_iv_rows_dropped_and_counted(data_root, tmp_path):
@@ -384,20 +448,23 @@ def test_premium_yield_na_zero_years():
 
 
 # ---------------------------------------------------------------- feasibility on committed data (061/04 guardrail tests)
-# Measured by I2 on 2026-11-14 from data/real (fetched 2026-11-13), period from 2020-01-01.
+# Measured by I2 on 2026-11-14 from data/real (fetched 2026-11-13), period from 2020-01-01;
+# re-measured by I2 for 063 on 2026-11-14 (first listed BAC earnings date 2020-04-15: 40 more
+# EARNINGS_UNKNOWN days before it; counts from 2020-04-15 on are unchanged).
 
 REAL_BAC = {   # 0.15/14-24 and the +/-0.075 tolerance are grid-only variants, not bot rules
-    rt.BOT_RULE: dict(calls_sold=24, rej_OK=24, rej_NO_EXPIRY=369, rej_EARNINGS_UNKNOWN=20,
-                      rej_EARNINGS_BLACKOUT=104, rej_NO_STRIKE_IN_TOLERANCE=11, rej_BASIS_ABOVE_BAND=296,
-                      open_at_end=0, in_window=11, slack=13, sub_3c_sales=1, snap_days=1271, snap_days_no_close=55),
-    rt.Config(0.15, (14, 24)): dict(calls_sold=70, rej_OK=70, rej_NO_EXPIRY=0, rej_EARNINGS_UNKNOWN=20,
-                                    rej_EARNINGS_BLACKOUT=52, rej_NO_STRIKE_IN_TOLERANCE=4, rej_BASIS_ABOVE_BAND=529,
-                                    open_at_end=0, in_window=61, slack=9, sub_3c_sales=7, snap_days=1271,
-                                    snap_days_no_close=55),
-    rt.Config(0.45, (30, 45)): dict(calls_sold=19, rej_OK=19, rej_NO_EXPIRY=397, rej_EARNINGS_UNKNOWN=20,
-                                    rej_EARNINGS_BLACKOUT=57, rej_NO_STRIKE_IN_TOLERANCE=37, rej_BASIS_ABOVE_BAND=367,
-                                    open_at_end=0, in_window=10, slack=9, sub_3c_sales=0, snap_days=1271,
-                                    snap_days_no_close=55),
+    rt.BOT_RULE: dict(calls_sold=22, rej_OK=22, rej_NO_EXPIRY=365, rej_EARNINGS_UNKNOWN=60,
+                      rej_EARNINGS_BLACKOUT=104, rej_NO_STRIKE_IN_TOLERANCE=11, rej_BASIS_ABOVE_BAND=290,
+                      open_at_end=0, in_window=11, slack=11, sub_3c_sales=1, snap_days=1271, snap_days_no_close=55,
+                      earnings_lead_days=100),
+    rt.Config(0.15, (14, 24)): dict(calls_sold=68, rej_OK=68, rej_NO_EXPIRY=0, rej_EARNINGS_UNKNOWN=60,
+                                    rej_EARNINGS_BLACKOUT=52, rej_NO_STRIKE_IN_TOLERANCE=0, rej_BASIS_ABOVE_BAND=513,
+                                    open_at_end=0, in_window=61, slack=7, sub_3c_sales=7, snap_days=1271,
+                                    snap_days_no_close=55, earnings_lead_days=100),
+    rt.Config(0.45, (30, 45)): dict(calls_sold=18, rej_OK=18, rej_NO_EXPIRY=388, rej_EARNINGS_UNKNOWN=60,
+                                    rej_EARNINGS_BLACKOUT=57, rej_NO_STRIKE_IN_TOLERANCE=36, rej_BASIS_ABOVE_BAND=355,
+                                    open_at_end=0, in_window=10, slack=8, sub_3c_sales=0, snap_days=1271,
+                                    snap_days_no_close=55, earnings_lead_days=100),
 }
 INFO = {"open_at_end", "sub_3c_sales", "snap_days_no_close"}
 

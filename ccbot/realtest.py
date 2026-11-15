@@ -15,8 +15,9 @@ Simulation (one ticker; both arms fully invested with fractional shares, see sim
   * Entry follows the bot (rules._option_entry, 061/04): expiry from expiries.third_fridays on
     the trading calendar + pick_expiry (30-45 DTE, config slack), which must be quoted that day
     (NO_EXPIRY); strike from pricing.pick_strike with the config tolerance; the cost-basis floor;
-    EARNINGS_UNKNOWN for a stock with no known next earnings date; no call held through an
-    earnings date (a <= e <= expiry, like screen._reject).
+    EARNINGS_UNKNOWN for a stock with no known next earnings date, or on a day before its first
+    listed date (history not in the file, item 063); no call held through an earnings date
+    (a <= e <= expiry, like screen._reject).
   * A call is only ever sold on a day that has a real quote for it (a snapshot day), at the bid
     ("bid" fills) or at bid + 25% of the spread ("quarter" fills). Buy-backs pay the ask (or
     ask - 25% of spread). Mid fills are reported only to show what the spread costs.
@@ -73,6 +74,7 @@ REALTEST_MISSING = {
     "volhist": "atm_iv_minus_next30d_rv NaN, atm_na_reason 'volhist: not supplied'",
     "BXM_History.csv": "bxm_vs_spy.error 'BXM_History.csv: not supplied'",
     "asset_type": "not in config/tickers.json (SPY: etf) -> treated as a stock (earnings required), warning",
+    "earnings_before_first": "EARNINGS_UNKNOWN before a stock's first listed earnings date; warning with the lead in days",
 }
 
 
@@ -221,6 +223,8 @@ def load_ticker(root, tk, facts=None):
     asset, aw = _asset_type(tk, facts)
     if aw:
         warnings.append(aw)
+    if er is not None and not earnings and asset != "etf":
+        warnings.append("earnings: no dates (EARNINGS_UNKNOWN for a stock)")
     td = TickerData(tk, close, divs, splits, earnings, chain, vh, asset_type=asset, volhist_na=vh_na,
                     quote_rows_dropped=dropped, earnings_gaps=gaps, warnings=warnings, quotes=quotes)
     _check_units(td)
@@ -370,8 +374,9 @@ def _earnings_between(td, a, b):
 
 
 def _earnings_known(td, d):
-    """A next earnings date on or after d exists (the bot's earnings_known for a stock)."""
-    return bool(td.earnings) and td.earnings[-1] >= d
+    """The bot's earnings_known for a stock: a listed date on or before d (no unlisted history)
+    and one on or after d (item 063: before the first listed date the next report is unknown)."""
+    return bool(td.earnings) and td.earnings[0] <= d and td.earnings[-1] >= d
 
 
 def _realized_vol(close, a, b):
@@ -400,6 +405,15 @@ def simulate(td, rule, cfg, start=None, end=None):
     days = [d for d in days if d >= snaps[0]]
     if not days:
         raise ValueError(f"{td.ticker}: no closes on or after the first quote day {snaps[0]}")
+    # leading edge (item 063): days from the first day a sale can be tried to the first listed
+    # earnings date; NaN (unknown, never 0) for an ETF or a stock with no dates
+    lead = (td.earnings[0] - days[0]).days if td.asset_type != "etf" and td.earnings else None
+    earnings_lead_days = float("nan") if lead is None else max(lead, 0)
+    edge_warn = []
+    if lead is not None and lead > 0:
+        edge_warn.append(f"earnings: first listed date {td.earnings[0]} is {lead} days after the first quote day "
+                         f"{days[0]}" + ("; no call sold before it (EARNINGS_UNKNOWN)" if rule.skip_earnings
+                                         else "; earnings not checked by this rule"))
     calendar = expiries.extend(td.close.index, td.close.index[-1] + timedelta(days=90))
     monthly = expiries.third_fridays(calendar)
     c0 = float(td.close[days[0]])
@@ -520,7 +534,9 @@ def simulate(td, rule, cfg, start=None, end=None):
         "sub_3c_sales": int(sub3c),
         "snap_days": len(snaps),
         "snap_days_no_close": sum(d not in closes for d in snaps),
+        "earnings_lead_days": earnings_lead_days,
     }
+    df.attrs["warnings"] = edge_warn
     return df, trades
 
 
@@ -592,7 +608,7 @@ def summarize(td, rule, df, trades, cfg):
         "quote_rows_dropped": td.quote_rows_dropped, "earnings_gaps_gt120": td.earnings_gaps,
         "lot_cost_first": 100 * first, "lot_cost_last": 100 * last,
         "fits_3k": fits_account(td, last, cfg), "asset_type": td.asset_type,
-        "warnings": "; ".join(td.warnings),
+        "warnings": "; ".join(td.warnings + df.attrs.get("warnings", [])),
     }
 
 
@@ -745,6 +761,9 @@ def run(root, out, tickers, cfg, grid=GRID, mc_paths=10000, start=None, min_year
                 counts[tk] = {k: s[k] for k in (*df.attrs["counts"], "calls_sold", "quote_rows_dropped",
                                                 "earnings_gaps_gt120", "lot_cost_first", "lot_cost_last",
                                                 "fits_3k", "atm_na_reason", "warnings")}
+                lead = counts[tk]["earnings_lead_days"]
+                if isinstance(lead, float) and math.isnan(lead):
+                    counts[tk]["earnings_lead_days"] = None   # unknown -> JSON null (NaN is not valid JSON), never 0
     if spy is not None:   # SPY with the same rule: our own check against BXM (not in the pooled tests)
         for fill in ("bid", "quarter", "mid"):
             rule = Config(bot.delta, bot.dte, bot.skip_earnings, bot.manage, fill)
