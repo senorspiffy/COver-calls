@@ -122,6 +122,7 @@ def test_run_end_to_end(data_root, tmp_path):
     assert set(s["counts_bot_rule_bid"]) == {"AAA", "BBB", "CCC"}
     assert s["counts_bot_rule_bid"]["AAA"]["rej_OK"] > 0
     assert s["counts_bot_rule_bid"]["AAA"]["earnings_lead_days"] == 23          # 2019-01-02 -> 01-25 (063)
+    assert s["counts_bot_rule_bid"]["AAA"]["earnings_gap_days"] == 0            # no interior gap (065)
     assert "first listed date 2019-01-25" in s["counts_bot_rule_bid"]["AAA"]["warnings"]
     br = pd.read_csv(tmp_path / "bot_rule_by_ticker.csv")
     assert ((br.called_away_pct >= 0) & (br.called_away_pct <= 1)).all()
@@ -216,7 +217,7 @@ def _tiny(earnings=(), asset_type="stock", chain_days=(date(2024, 1, 2),), quote
 def test_earnings_today_blocks():
     df, tr = rt.simulate(_tiny(earnings=[date(2024, 1, 2)]), rt.BOT_RULE, CFG)
     assert tr == [] and df.attrs["counts"]["rej_EARNINGS_BLACKOUT"] == 1     # a <= e, like screen._reject
-    df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 25), date(2024, 6, 1)]), rt.BOT_RULE, CFG)
+    df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 25), date(2024, 2, 20)]), rt.BOT_RULE, CFG)
     assert len(tr) == 1 and tr[0].strike == 11.0                               # control: no earnings in the life
 
 
@@ -224,6 +225,7 @@ def test_stock_without_earnings_sells_nothing():
     df, tr = rt.simulate(_tiny(earnings=[]), rt.BOT_RULE, CFG)
     assert tr == [] and df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] == 1 and df.attrs["counts"]["rej_OK"] == 0
     assert math.isnan(df.attrs["counts"]["earnings_lead_days"])                 # no dates: unknown, never 0
+    assert math.isnan(df.attrs["counts"]["earnings_gap_days"])                  # same for the gap count (065)
     df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 1)]), rt.BOT_RULE, CFG)   # only a past date
     assert tr == [] and df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] == 1
     assert df.attrs["counts"]["earnings_lead_days"] == 0                        # first date before day 1
@@ -235,6 +237,7 @@ def test_etf_without_earnings_sells():
     df, tr = rt.simulate(_tiny(earnings=[], asset_type=asset), rt.BOT_RULE, CFG)
     assert len(tr) == 1 and df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] == 0
     assert math.isnan(df.attrs["counts"]["earnings_lead_days"]) and df.attrs["warnings"] == []
+    assert math.isnan(df.attrs["counts"]["earnings_gap_days"])                  # ETF: not checked, unknown (065)
 
 
 # ---------------------------------------------------------------- leading edge of the earnings file (item 063)
@@ -264,6 +267,38 @@ def test_leading_edge_rule_without_earnings_check_still_sells():
     assert "no call sold" not in df.attrs["warnings"][0] and "not checked" in df.attrs["warnings"][0]
 
 
+# ---------------------------------------------------------------- interior gaps in the earnings file (item 065)
+# _tiny's only sale day 2024-01-02 lies between the two listed dates; 2023-10-25 -> 2024-02-22 is 120 days.
+
+def test_interior_gap_180_blocks():
+    df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 25), date(2024, 4, 22)]), rt.BOT_RULE, CFG)   # 180 d
+    c = df.attrs["counts"]
+    assert tr == [] and c["rej_EARNINGS_UNKNOWN"] == 1 and c["rej_EARNINGS_BLACKOUT"] == 0 and c["rej_OK"] == 0
+    assert c["earnings_gap_days"] == 1
+    w = [x for x in df.attrs["warnings"] if "2023-10-25→2024-04-22" in x]
+    assert len(w) == 1 and "EARNINGS_UNKNOWN" in w[0]
+
+
+def test_interior_gap_120_sells():
+    df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 25), date(2024, 2, 22)]), rt.BOT_RULE, CFG)   # 120 d
+    assert len(tr) == 1 and tr[0].strike == 11.0 and df.attrs["counts"]["earnings_gap_days"] == 0
+    assert not any("gap(s)" in x for x in df.attrs["warnings"])
+
+
+def test_interior_gap_121_blocks():
+    df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 25), date(2024, 2, 23)]), rt.BOT_RULE, CFG)   # 121 d
+    c = df.attrs["counts"]
+    assert tr == [] and c["rej_EARNINGS_UNKNOWN"] == 1 and c["earnings_gap_days"] == 1
+
+
+def test_interior_gap_not_checked_rule():
+    rule = dataclasses.replace(rt.BOT_RULE, skip_earnings=False)
+    df, tr = rt.simulate(_tiny(earnings=[date(2023, 10, 25), date(2024, 4, 22)]), rule, CFG)
+    c = df.attrs["counts"]
+    assert len(tr) == 1 and c["rej_EARNINGS_UNKNOWN"] == 0 and c["earnings_gap_days"] == 0
+    assert any("2023-10-25→2024-04-22" in x and "earnings not checked by this rule" in x for x in df.attrs["warnings"])
+
+
 def _no_nan(tok):
     raise ValueError(f"non-JSON token {tok} in summary.json")
 
@@ -271,7 +306,7 @@ def _no_nan(tok):
 @pytest.mark.parametrize("day,outcome", [(date(2024, 1, 8), "bought_back"),   # 6 days of 45: first third
                                          (date(2024, 2, 1), "expired")])      # 30 days of 45: hold
 def test_take50_only_in_first_third(day, outcome):
-    td = _tiny(earnings=[date(2023, 10, 25), date(2024, 6, 1)], chain_days=(date(2024, 1, 2), day), quotes_at={day: (0.10, 0.14)})
+    td = _tiny(earnings=[date(2023, 10, 25), date(2024, 2, 20)], chain_days=(date(2024, 1, 2), day), quotes_at={day: (0.10, 0.14)})
     df, tr = rt.simulate(td, dataclasses.replace(rt.BOT_RULE, manage="take50"), CFG)
     assert tr[0].premium == 0.3 and tr[0].outcome == outcome
     if outcome == "bought_back":
@@ -285,7 +320,7 @@ def test_fees_match_costs_fees(px):
 
 
 def test_sales_under_3_cents_are_counted_not_blocked():
-    td = _tiny(earnings=[date(2023, 10, 25), date(2024, 6, 1)])
+    td = _tiny(earnings=[date(2023, 10, 25), date(2024, 2, 20)])
     td.chain[date(2024, 1, 2)].loc[1, ["bid", "ask"]] = (0.02, 0.04)
     df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
     assert len(tr) == 1 and tr[0].premium == 0.02 and df.attrs["counts"]["sub_3c_sales"] == 1
@@ -294,7 +329,7 @@ def test_sales_under_3_cents_are_counted_not_blocked():
 # ---------------------------------------------------------------- missing data (061/04 change 1.8, RI-002)
 
 DROP_CASES = ["prices", "options", "dividends", "splits", "earnings", "volhist", "BXM_History.csv", "asset_type",
-              "earnings_before_first"]
+              "earnings_before_first", "earnings_interior_gap"]
 
 
 def _copy(data_root, dst, tk="AAA"):
@@ -315,10 +350,12 @@ def test_empty_earnings_file_warns_and_lead_is_null(data_root, tmp_path):
     assert td.earnings == [] and "earnings: no dates (EARNINGS_UNKNOWN for a stock)" in td.warnings
     df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
     assert tr == [] and math.isnan(df.attrs["counts"]["earnings_lead_days"])
+    assert math.isnan(df.attrs["counts"]["earnings_gap_days"])
     out = tmp_path / "out"
     rt.run(root, out, ["AAA", "SPY"], CFG, grid=[rt.BOT_RULE], mc_paths=10, min_years=1, facts=FACTS)
     s = json.loads((out / "summary.json").read_text(), parse_constant=_no_nan)
     assert s["counts_bot_rule_bid"]["AAA"]["earnings_lead_days"] is None
+    assert s["counts_bot_rule_bid"]["AAA"]["earnings_gap_days"] is None         # NaN -> null, never 0 (065)
 
 
 @pytest.mark.parametrize("kind", DROP_CASES)
@@ -341,6 +378,7 @@ def test_drop_input(kind, data_root, tmp_path):
         df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
         assert tr == [] and df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] > 0 and df.attrs["counts"]["rej_OK"] == 0
         assert math.isnan(df.attrs["counts"]["earnings_lead_days"])
+        assert math.isnan(df.attrs["counts"]["earnings_gap_days"])
     elif kind == "earnings_before_first":
         er = pd.read_csv(root / "earnings" / "AAA.csv")
         er[pd.to_datetime(er.date).dt.date >= date(2019, 7, 1)].to_csv(root / "earnings" / "AAA.csv", index=False)
@@ -351,7 +389,22 @@ def test_drop_input(kind, data_root, tmp_path):
         assert any(t.open_date >= date(2019, 7, 25) for t in tr)               # the edge does not over-block
         assert df.attrs["counts"]["rej_EARNINGS_UNKNOWN"] > 0
         assert df.attrs["counts"]["earnings_lead_days"] == 204                 # 2019-01-02 -> 07-25
+        assert df.attrs["counts"]["earnings_gap_days"] == 0
         assert "first listed date 2019-07-25" in "; ".join(td.warnings + df.attrs["warnings"])
+        assert "EARNINGS_UNKNOWN" in reason
+    elif kind == "earnings_interior_gap":                                      # drop the Apr and Jul 2020 rows
+        er = pd.read_csv(root / "earnings" / "AAA.csv")
+        ed = pd.to_datetime(er.date).dt.date
+        er[~ed.map(lambda x: x.year == 2020 and x.month in (4, 7))].to_csv(root / "earnings" / "AAA.csv", index=False)
+        td = rt.load_ticker(root, "AAA", FACTS)
+        assert td.earnings_gaps == 1
+        (a, b), = rt._gap_pairs(td.earnings)
+        assert (a.year, a.month, b.year, b.month) == (2020, 1, 2020, 10)
+        df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
+        assert not any(a < t.open_date < b for t in tr)
+        assert any(t.open_date >= b for t in tr)                               # the gap does not over-block
+        assert df.attrs["counts"]["earnings_gap_days"] > 0
+        assert f"{a}→{b}" in "; ".join(td.warnings + df.attrs["warnings"])
         assert "EARNINGS_UNKNOWN" in reason
     elif kind == "volhist":
         (root / "volhist" / "AAA.csv").unlink()
@@ -373,7 +426,8 @@ def test_realtest_missing_lists_every_input():
     src = inspect.getsource(rt.load_ticker) + inspect.getsource(rt.bxm_vs_spy)
     files = set(re.findall(r'root\)? / "([^"]+)"', src))
     assert files == {"prices", "dividends", "splits", "earnings", "options", "volhist", "BXM_History.csv"}
-    assert files | {"asset_type", "earnings_before_first"} == set(rt.REALTEST_MISSING) == set(DROP_CASES)
+    assert files | {"asset_type", "earnings_before_first", "earnings_interior_gap"} == set(rt.REALTEST_MISSING) \
+        == set(DROP_CASES)
 
 
 def test_nan_iv_rows_dropped_and_counted(data_root, tmp_path):
@@ -456,17 +510,18 @@ REAL_BAC = {   # 0.15/14-24 and the +/-0.075 tolerance are grid-only variants, n
     rt.BOT_RULE: dict(calls_sold=22, rej_OK=22, rej_NO_EXPIRY=365, rej_EARNINGS_UNKNOWN=60,
                       rej_EARNINGS_BLACKOUT=104, rej_NO_STRIKE_IN_TOLERANCE=11, rej_BASIS_ABOVE_BAND=290,
                       open_at_end=0, in_window=11, slack=11, sub_3c_sales=1, snap_days=1271, snap_days_no_close=55,
-                      earnings_lead_days=100),
+                      earnings_lead_days=100, earnings_gap_days=0),
     rt.Config(0.15, (14, 24)): dict(calls_sold=68, rej_OK=68, rej_NO_EXPIRY=0, rej_EARNINGS_UNKNOWN=60,
                                     rej_EARNINGS_BLACKOUT=52, rej_NO_STRIKE_IN_TOLERANCE=0, rej_BASIS_ABOVE_BAND=513,
                                     open_at_end=0, in_window=61, slack=7, sub_3c_sales=7, snap_days=1271,
-                                    snap_days_no_close=55, earnings_lead_days=100),
+                                    snap_days_no_close=55, earnings_lead_days=100, earnings_gap_days=0),
     rt.Config(0.45, (30, 45)): dict(calls_sold=18, rej_OK=18, rej_NO_EXPIRY=388, rej_EARNINGS_UNKNOWN=60,
                                     rej_EARNINGS_BLACKOUT=57, rej_NO_STRIKE_IN_TOLERANCE=36, rej_BASIS_ABOVE_BAND=355,
                                     open_at_end=0, in_window=10, slack=8, sub_3c_sales=0, snap_days=1271,
-                                    snap_days_no_close=55, earnings_lead_days=100),
+                                    snap_days_no_close=55, earnings_lead_days=100, earnings_gap_days=0),
 }
-INFO = {"open_at_end", "sub_3c_sales", "snap_days_no_close"}
+# earnings_gap_days is a data-hole count (065), not a window rule: BAC has no interior gap, so it is 0
+INFO = {"open_at_end", "sub_3c_sales", "snap_days_no_close", "earnings_gap_days"}
 
 
 @pytest.fixture(scope="module")
@@ -483,6 +538,15 @@ def test_real_counts_bac(bac, rule):
     assert bac.asset_type == "stock" and bac.quote_rows_dropped == 10
     if rule == rt.BOT_RULE:                                      # every window rule has candidates (RI-001)
         assert all(v > 0 for k, v in got.items() if k not in INFO)
+
+
+def test_real_interior_gap_mo():
+    # Measured by I1 and I2 on 2026-11-15 from data/real: MO's listed dates jump 2021-10-28 -> 2022-04-28
+    # (182 d); before 065 the bot rule sold on 2022-01-19 and 2022-02-23 inside it (23 calls).
+    td = rt.load_ticker(DATA, "MO")
+    df, tr = rt.simulate(td, rt.BOT_RULE, CFG, start=date(2020, 1, 1))
+    assert len(tr) == 21 and df.attrs["counts"]["earnings_gap_days"] == 71
+    assert not any(date(2021, 10, 28) < t.open_date < date(2022, 4, 28) for t in tr)
 
 
 def test_real_min_years_filter():
