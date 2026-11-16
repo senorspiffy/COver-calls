@@ -1,0 +1,32 @@
+# 07 Audit task - 067
+A1, please check:
+- **Pipeline checks**
+  - `python3 scripts/check_handoff.py 067` gives PASS (44 rows -> 28 as-is, 16 fixed, 0 removed).
+  - `python3 scripts/check_pipeline.py` should show `067: awaiting A1`, `INCOMPLETE: none`, `UNTRACKED CHANGE: none`, `RESEARCH CODE: none`, exit 0.
+  - RULES BRANCH shows `none` today only because daily-fixes/2026-11-16 is not pushed. Both templates are in RULE_PATHS, so once the branch is pushed it should list as a RULES BRANCH. The template edits need the person's OK in PR review.
+- **Build, tests and mutations**
+  - The build is scripts/diff_reports.py and tests/test_diff_reports.py (17 tests), plus the `Real-data effect (diff_reports output, pasted)` section in templates/build-report.md and templates/verification.md.
+  - Suite at HEAD dbcec96 (clean worktree): 341 passed, 1 skipped (exchange_calendars not installed). The base was 324.
+  - Mutations (I3, scratch):
+    - 1 (top-level only) failed 5 tests, 1b (nested dicts skipped) failed 1, 2 (key to index for by_ticker) failed 4, and 3 (NaN), 4 (EMPTY DIR) and 5 (type check) failed 1 each.
+    - Every target test failed.
+    - For RI-013 GUARDED, re-run 1b on main after merge: drop dict recursion below the root, and `test_a_nested_key_and_list_in_dict` must fail.
+- **065's full effect (the person's input)**
+  - `diff_reports.py scratchpad/065-before scratchpad/065-after` gives TOTAL `files 22, ... json changes 67, csv rows changed 219 added 3 removed 8, columns changed 2`. My output is byte-identical to 05's paste and to scratchpad/067-diff.txt.
+  - Runs: before = 5883ba4 (e129253^), after = c659560. Same data/real hash fa29a0e8…, python 3.13.18, pandas 3.0.5.
+  - Items 2/10 picks, 11/17 real excess_cagr changes (16 with exact compare; 5 are about 1e-16 float noise), MC median 0.0689 -> 0.0686, MO 23->21 and MDLZ 34->31 all match A1's 065 audit.
+  - New for the person: train_excess_logret in 4/10 windows, wf_cc_cagr in 16 tickers, wf_cc_maxdd in 7, grid 150 of 1,020 rows changed, and trades MDLZ 3 added and 6 removed, MO 2 removed, 17 qty changes each. Check that the PR text carries this list. Whether to regenerate and commit reports/real/ is still the person's call (065/07).
+- **Design calls to judge**
+  - Exact compare reports float noise. 05 keeps it on purpose (RI-013: nothing hidden), so a raw count can exceed the "meaningful" count (16 vs 11).
+  - A stray non-report file (e.g. run.log) is printed as `NOT COMPARED` and counted, but by itself still gives `no change` and exit 0 (04 change 5).
+  - JSON lists are index-aligned, which is a documented limit. The CSV view of walkforward_picks is key-matched.
+- **Container restart (05 Deviations)**
+  - I checked this and it is accurate: the machine booted at 23:44:40 UTC, after 067-diff.txt (23:42:20) and I2's partial 05 (05-head.md, 23:44:10). 05-head.md equals the first 189 lines of the committed 05.
+  - The orchestrator appended only the diff paste (identical to 067-diff.txt), the comparison table, Deviations and the RI line, and committed at 23:45:41.
+  - Its "17 passed in 0.67s" has no saved output. I re-ran the tests and got the same result.
+- **Follow-ups**
+  - RI-010 pattern: nothing checks that the new template field is filled when the trigger files change (04 Expected result). This is a candidate check_pipeline item.
+  - 068 will reuse diff_reports.py: its formats and exit codes are pinned by these tests.
+- **Recurring issues**
+  - No new occurrence. RI-001 and RI-002 stay ESCALATED (no change from 067).
+  - RI-013 stays OPEN until 067 is merged and mutation 1b fails on main.
