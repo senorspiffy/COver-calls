@@ -30,3 +30,4 @@ A1, please check:
 - **Recurring issues**
   - No new occurrence. RI-001 and RI-002 stay ESCALATED (no change from 067).
   - RI-013 stays OPEN until 067 is merged and mutation 1b fails on main.
+A1 result: PASS (2026-11-16, logs/audit/2026-11-16-067.md: A1 re-ran at 745b44a in a clean scratch worktree: suite 341 passed 1 skipped, test_diff_reports 17 passed; mutation 1b fails test_a; check_handoff 067 PASS; check_pipeline exit 0; diff_reports 065-before vs 065-after byte-identical to 05 paste and 067-diff.txt (TOTAL json 67, csv rows 219/+3/-8, columns 2), confirmed by an independent cross-check; note: PR text with 065 effect list to be checked at PR time)
