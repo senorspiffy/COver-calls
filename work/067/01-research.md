@@ -1,0 +1,34 @@
+# 01 Research brief - 067
+## Question
+What does `ccbot/realtest.py` publish to reports/real/? How can a stdlib-only `scripts/diff_reports.py <before> <after>` compare every published value, including nested keys and every CSV, without missing any change or reporting false ones? Which template fields should require its output? (Internal tooling BUG, RI-013, related to RI-006. Nothing here connects to a brokerage.)
+
+## Findings (one claim per line, each with [source URL] or UNVERIFIED)
+1. `run()` writes these outputs to `--out` (default `reports/real`): `trades_<tk>.csv` per ticker (bid fill), `bot_rule_by_ticker.csv`, `grid_in_sample.csv`, `walkforward_by_ticker.csv`, `walkforward_picks.csv`, `summary.json` [repo: ccbot/realtest.py L805, L818, L830, L838, L839, L852, L859].
+2. The top-level keys of summary.json are tickers, skipped, period, monte_carlo_2_stocks_1yr, bxm_vs_spy, grid_size, counts_bot_rule_bid, fits_3k and walkforward_picks [repo: ccbot/realtest.py L848-851].
+3. summary.json nests at least 3 levels deep: `monte_carlo_2_stocks_1yr.cc_ret."50"` and `counts_bot_rule_bid.<tk>.<count>`. It also contains lists (tickers, period, fits_3k, walkforward_picks) [repo: reports/real/summary.json L1-40; ccbot/realtest.py L806-808]. A diff that checks only top-level keys reports a section as changed but not the value inside it, so the recursion has to cover dicts and lists.
+4. `walkforward_by_ticker` is published only as a CSV, not as a summary.json key (grep: 0 hits in summary.json) [repo: reports/real/summary.json; ccbot/realtest.py L838]. Three of 065's missed effects (by-ticker excess_cagr) are therefore visible only if the CSVs are diffed too.
+5. The set of `trades_<tk>.csv` files depends on which tickers load [repo: ccbot/realtest.py L798, L805]. The script must list files present on only one side (added/removed), not only compare the shared ones.
+6. summary.json is written with `json.dumps(..., indent=1, default=str)` and the default allow_nan=True, so a NaN float would be written as bare `NaN` [repo: ccbot/realtest.py L852; https://docs.python.org/3/library/json.html]. Today the file has 0 NaN/Infinity tokens (grep), and the earnings lead/gap days are mapped to null on purpose [repo: ccbot/realtest.py L809-812].
+7. `json.loads` accepts `NaN`/`Infinity` unless `parse_constant` is set to raise. It can be used that way to reject non-standard numbers [https://docs.python.org/3/library/json.html]. NaN != NaN in Python, so a naive `a != b` reports an unchanged NaN as a change. The diff should treat NaN on both sides as equal and print it (UNVERIFIED as a doc quote; it is standard IEEE-754 float behaviour).
+8. JSON object keys are always strings, and `loads` keeps int vs float by syntax [https://docs.python.org/3/library/json.html]. So the Monte Carlo percentile keys "5"/"50" compare as strings, and 1 vs 1.0 differ only if the writer changed.
+9. The csv reader returns every field as a string, with no type conversion unless QUOTE_NONNUMERIC is set. DictReader takes field names from the first row [https://docs.python.org/3/library/csv.html]. QUOTE_STRINGS/QUOTE_NOTNULL are 3.12+ only [https://docs.python.org/3/library/csv.html], so they must not be used (project minimum is 3.10, RI-008).
+10. pandas `to_csv` writes NaN as an empty string by default (`na_rep=''`, `float_format=None`) [https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.to_csv.html]. Comparing CSV cells as strings is therefore exact and NaN-safe, because both runs use the same writer.
+11. CSV rows have no guaranteed key column. walkforward_picks has train_from/test_from/...; walkforward_by_ticker and the bot_rule/grid files have a ticker column (grid also has config) [repo: reports/real/walkforward_picks.csv L1; ccbot/realtest.py L827, L835]. Row-index alignment is the simplest option and fits because the order is deterministic (sorted tickers, fixed grid). A row-count change must be printed as such.
+12. Neither the build-report template nor the verification template has a field for a whole-output effect [repo: templates/build-report.md, templates/verification.md]. The request asks for "Real-data effect (diff_reports output, pasted)" in both [repo: work/067/request.md L20].
+13. 065's missed changes, which the script must reproduce on 065's before/after outputs: walkforward_picks changed in 2 of 10 windows, walkforward_by_ticker excess_cagr changed for 11 of 17 tickers (positive 6 -> 5), and the MC cc_ret median went 0.0689 -> 0.0686 [repo: logs/audit/2026-11-15-065.md L85-91].
+14. A1's own run parsed summary.json with a strict `parse_constant` [repo: logs/audit/2026-11-15-065.md L54-55]. This is a working precedent for item 7.
+15. RI-006 guardrail precedent: a script (`check_handoff.py`) replaced a hand count. Same pattern here [repo: logs/recurring-issues.md L77-82, L143-149].
+
+## Numbers used (show the math)
+- Published outputs today: 17 `trades_*.csv` (one per loaded ticker; 17 tickers in summary.json) + 4 aggregate CSVs + 1 JSON = 22 files. This matches the 22 files in reports/real/ (glob).
+- One realtest run takes about 11 min, and 065 ran it 6 times, about 66 min [repo: logs/audit/2026-11-15-065.md L102-103]. The diff script reads two existing output folders and does not run realtest. Its cost is file I/O only.
+
+## Fit for a ~$3k account
+- No trading effect. The script is reporting tooling for the research backtest. It changes no rule in ccbot/rules.py, screen.py or missing.py, and it does not touch 001. It lets the person see the whole effect (walk-forward picks, by-ticker excess, Monte Carlo) before deciding on reports/real/. Research, not financial advice.
+
+## Open questions
+- Float tolerance: should exact string/float equality be the rule? Tolerance-free is safest for "did anything move" (proposed: exact, no tolerance). A tolerance could hide a real small change, such as the MC median 0.0689 -> 0.0686.
+- Output size: a decision-path change can touch thousands of rows in trades_*.csv and grid_in_sample.csv. Should the script print every cell, or per-file counts plus the first N changes? The request says "prints each changed value". R2/R3 should decide whether the pasted field can be capped (for example, all of summary.json, plus counts and the first N rows per CSV).
+- Row alignment: row-index or key columns (ticker/config, train_from)? If a ticker is added, index alignment shifts every later row in the aggregate CSVs.
+- 065's effect list for the PR needs both before (5883ba4) and after (e129253) outputs. The I2 scratch folders /tmp/claude-0/065-before and /tmp/claude-0/065-after may still exist [repo: logs/audit/2026-11-15-065.md L99-101]. If they are gone, two ~11 min runs are needed.
+- Trigger wording: who decides that "ccbot/realtest.py's decision path changes"? The simplest rule is any diff to ccbot/realtest.py.
