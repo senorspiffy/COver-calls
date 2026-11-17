@@ -187,8 +187,6 @@ def load_ticker(root, tk, facts=None):
     else:
         earnings = sorted(set(pd.to_datetime(er[_col(er, "date")]).dt.date)) if not er.empty else []
     gaps = len(_gap_pairs(earnings))
-    if gaps:
-        warnings.append(f"earnings: {gaps} gap(s) > {EARNINGS_GAP_WARN} days between dates")
 
     oc = _read(root / "options" / f"{tk}.csv.gz")
     if oc is None:
@@ -385,7 +383,8 @@ def _is_gap(a, b):
 
 def _gap_pairs(earnings):
     """(a, b) for each pair of consecutive dates in a sorted list that _is_gap; load_ticker counts
-    them and simulate names them in its warning, so warned <=> blocked."""
+    them and simulate names them in its warning (one warning line, from simulate; item 068),
+    so warned <=> blocked."""
     return [(a, b) for a, b in zip(earnings, earnings[1:]) if _is_gap(a, b)]
 
 
@@ -452,7 +451,7 @@ def simulate(td, rule, cfg, start=None, end=None):
     earnings_gap_days = float("nan") if td.asset_type == "etf" or not td.earnings else 0
     gap_pairs = _gap_pairs(td.earnings) if td.asset_type != "etf" else []
     if gap_pairs:
-        edge_warn.append(f"earnings: gap(s) > {EARNINGS_GAP_WARN} days between listed dates ("
+        edge_warn.append(f"earnings: {len(gap_pairs)} gap(s) > {EARNINGS_GAP_WARN} days between listed dates ("
                          + ", ".join(f"{a}→{b}" for a, b in gap_pairs) + ")"
                          + ("; no call sold inside them (EARNINGS_UNKNOWN)" if rule.skip_earnings
                             else "; earnings not checked by this rule"))

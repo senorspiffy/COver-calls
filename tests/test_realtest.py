@@ -277,6 +277,7 @@ def test_interior_gap_180_blocks():
     assert c["earnings_gap_days"] == 1
     w = [x for x in df.attrs["warnings"] if "2023-10-25→2024-04-22" in x]
     assert len(w) == 1 and "EARNINGS_UNKNOWN" in w[0]
+    assert w[0].startswith(f"earnings: 1 gap(s) > {rt.EARNINGS_GAP_WARN} days between listed dates (")
 
 
 def test_interior_gap_120_sells():
@@ -420,6 +421,22 @@ def test_drop_input(kind, data_root, tmp_path):
     elif kind == "asset_type":
         td = rt.load_ticker(root, "AAA", {})
         assert td.asset_type == "stock" and any(w.startswith("asset_type: ") for w in td.warnings)
+
+
+def test_one_gap_warning_with_count_and_dates(data_root, tmp_path):
+    """item 068: one warning per gap, with count and dates"""
+    root = _copy(data_root, tmp_path)
+    er = pd.read_csv(root / "earnings" / "AAA.csv")
+    ed = pd.to_datetime(er.date).dt.date
+    er[~ed.map(lambda x: x.year == 2020 and x.month in (4, 7))].to_csv(root / "earnings" / "AAA.csv", index=False)
+    td = rt.load_ticker(root, "AAA", FACTS)
+    df, tr = rt.simulate(td, rt.BOT_RULE, CFG)
+    s = rt.summarize(td, rt.BOT_RULE, df, tr, CFG)
+    (a, b), = rt._gap_pairs(td.earnings)
+    assert s["warnings"].count("gap(s)") == 1
+    assert f"earnings: 1 gap(s) > {rt.EARNINGS_GAP_WARN} days between listed dates ({a}→{b})" in s["warnings"]
+    assert s["earnings_gaps_gt120"] == 1 == td.earnings_gaps
+    assert not any("gap(s)" in w for w in td.warnings)                          # load_ticker adds none
 
 
 def test_realtest_missing_lists_every_input():
