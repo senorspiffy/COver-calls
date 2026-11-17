@@ -1,5 +1,5 @@
 # 06 Verification - 069
-Verdict: FAIL (round 1; earlier rounds: none)
+Verdict: PASS (round 2; earlier rounds: FAIL round 1)
 
 All checks were run in a scratch worktree of the build commit 8dc2c2d, because /home/claude/df17 is being edited at the same time by item 070 (uncommitted changes to scripts/check_pipeline.py, templates/build-report.md, templates/verification.md and tests/test_real_data_field.py). The scratch paths were `/tmp/claude-0/-home-claude/4cc69c4f-899b-56b8-af6f-c0c8dcf01a44/scratchpad/i3-069`, mutation copies in `.../scratchpad/i3m069/<m>/` and a probe root in `.../scratchpad/i3probe`. The repo tree was never mutated. Nothing connects to a brokerage.
 
@@ -92,3 +92,68 @@ Sent back to I2 (not sent to Audit; no 07 is written until a PASS):
 1. **RI-012 / item 059 rule: no negative test with the pattern inside other text.** Removing the `^` anchors from INBOX_PI and INBOX_HUB (m8) or from INBOX_HEAD (m9) leaves all 11 inbox tests green. With m8, the probe above passes as `INBOX: none`. Fix: add a test whose `## Inbox` section has `project-inbox: nothing new` and `hub: 116c68c` only mid-line (e.g. inside an FYI bullet), expecting `INBOX: <file> (no project-inbox: line; no hub: SHA or UNREAD line)` and exit 1. Add a test with `## Inbox` only mid-line (e.g. "see ## Inbox below") expecting `(no ## Inbox)`. Show that m8 and m9 each fail ≥ 1 test.
 2. **An unfilled template line passes the project-inbox half.** The template line copied as-is, `project-inbox: nothing new (<n> seen before) | <n> new | UNREAD: not reachable (<error>)`, matches INBOX_PI. Probe with `hub: 116c68c, nothing new` gives `INBOX: none`. The hub half fails only because `<origin/main sha>` is not hex. Fix (I2's choice, within map step 3/4): either move the allowed forms into the template comment and leave placeholder lines that cannot match (e.g. `project-inbox: <fill in>`), or have the check reject a line still holding `<n>` / `|`. Add a test that the unfilled template's Inbox section fails.
 Nothing in I1's plan needs to change. Both points are test/template gaps in the build, and the shipped code behaves correctly on the probe.
+
+# Round 2 (re-verification of I2 round 2, commit dc162cf)
+Verdict: PASS (round 2; earlier rounds: FAIL round 1)
+
+All runs were made in the scratch worktree `/tmp/claude-0/-home-claude/4cc69c4f-899b-56b8-af6f-c0c8dcf01a44/scratchpad/i3-069r2` at dc162cf. Mutation copies (git archive of dc162cf) were in `/tmp/claude-0/-home-claude/4cc69c4f-899b-56b8-af6f-c0c8dcf01a44/scratchpad/i3m069r2/<m>/`. Both were removed afterwards. The real tree was not mutated: `git diff --stat dc162cf -- scripts tests templates .claude ccbot` is empty. Nothing connects to a brokerage.
+
+## I1 audit (plan vs research)
+Unchanged from round 1. Round 2 changes no plan step. Both fixes are the ones round 1 sent back to I2, and 04 needed no change.
+
+## I2 audit (build vs plan)
+`git diff --stat 875158e dc162cf` lists 4 files: templates/daily-audit.md (+6/-3), tests/test_pipeline_check.py (+31), work/069/05-build-report.md, and logs/implementation/2026-11-17.md (+1). This matches 05 Round 2, which reports 2 non-work/log files changed.
+- Problem 1 (RI-012): tests xi `test_inbox_code_words_mid_line_fail` and xii `test_inbox_heading_mid_line_fails` were added. xi is my round-1 probe fixture, with the code words only inside an FYI bullet. xii has `## Inbox` only mid-line. Both expect the exact INBOX line and exit 1.
+- Problem 2 (template): the two lines are now `project-inbox: <fill in>` and `hub: <fill in>`, and the allowed forms are in the HTML comment. Inside the comment, the indented `  project-inbox line:` / `  hub line:` lines cannot match `^project-inbox:` / `^hub:`. The forms agree with a1-auditor.md 2a/2b. Test xiii reads the shipped template, so the template and the check are tied together. It also asserts `<fill in>` is present, so it cannot pass vacuously.
+- Positive probe (filled template still passes): I put `nothing new (2 seen before)` and `116c68c, nothing new` in place of the two `<fill in>` lines, and `inbox_section` returned `('none', False)`. On the unfilled template it returned `('2026-11-18.md (no project-inbox: line; no hub: SHA or UNREAD line)', True)`.
+- 070's REAL-DATA FIELD code is untouched: `git diff --stat 875158e dc162cf -- scripts/check_pipeline.py tests/test_real_data_field.py ccbot` is empty. test_real_data_field.py passes (in the 30 passed below).
+- Connectivity: no code change. The new tests are collected (`-k inbox` 14 cases, was 11). The missing-data grep is unchanged, because no ccbot/ or scripts/ change was made.
+
+## Tests re-run (output)
+```
+$ python3 -m pytest -q -p no:cacheprovider                       (scratch @ dc162cf)
+377 passed, 1 skipped in 58.61s
+$ python3 -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py
+104 passed in 15.04s
+$ ... -k inbox
+14 passed, 90 deselected in 0.78s
+$ python3 -m pytest -q -rs -p no:cacheprovider tests/test_safety.py tests/test_real_data_field.py
+30 passed in 4.46s      (test_every_py_compiles_on_oldest_python ran on /usr/bin/python3.11; python3.10 not installed; no skip)
+$ python3 scripts/check_handoff.py 069
+PASS
+```
+These match 05 Round 2: 377/1, 104, and 14.
+
+Mutations (each run in its own copy, `tests/test_pipeline_check.py -k inbox`):
+```
+m8  `^` removed from INBOX_PI and INBOX_HUB      1 failed, 13 passed
+    FAILED tests/test_pipeline_check.py::test_inbox_code_words_mid_line_fail
+m9  `^` removed from INBOX_HEAD                  1 failed, 13 passed
+    FAILED tests/test_pipeline_check.py::test_inbox_heading_mid_line_fails
+mt  round-1 template (git show 875158e:templates/daily-audit.md)   1 failed, 13 passed
+    FAILED tests/test_pipeline_check.py::test_inbox_unfilled_template_fails
+    with the `<fill in>` assert removed, so the INBOX line itself is compared:
+    - INBOX: 2026-11-18.md (no project-inbox: line; no hub: SHA or UNREAD line)
+    + INBOX: 2026-11-18.md (no hub: SHA or UNREAD line)
+```
+m8, m9 and the old template each fail a test. This closes round-1 problems 1 and 2.
+
+## Real-data effect (diff_reports output, pasted)
+not required (`templates/daily-audit.md`, `tests/test_pipeline_check.py`; neither is ccbot/realtest.py or a file it reads)
+
+## Recurring issues checked (step 0)
+Recurring issues checked: RI-001, RI-002, RI-007, RI-008, RI-009, RI-010, RI-012, RI-013 (one line each below)
+- RI-001 (ESCALATED): no new filter. The fixture counts were re-run: in xi, 0 of 2 mid-line code words match, and in xii, 0 of 1 mid-line headings match. The filled-template probe gives `none`.
+- RI-002 (ESCALATED): an unfilled placeholder is no longer read as a filled line (mt). No value is defaulted, and there is no code change.
+- RI-007: round 2 has its own I2 log line and 05 section. This 06 follows them.
+- RI-008: the compile test ran on 3.11 (3.10 is absent).
+- RI-009: all runs were in scratch, and work/070 and 070's files were untouched.
+- RI-010: the INBOX check now also fails an unfilled template (xiii, mt).
+- RI-012 (GUARDED): the `^` anchors are pinned by negative tests that put the pattern inside other text (xi, xii). m8 and m9 each fail. This item now meets the rule.
+- RI-013 (OPEN): n/a, no realtest change.
+
+## Pipeline line (step 2)
+check_pipeline line: `069: awaiting A1 (FULL)` (real tree, after this file, 07 and the I3 log line; exit 0, `INCOMPLETE: none`, `SKIPPED: none`, `LOG TIME: none`, `REAL-DATA FIELD: none`, `INBOX: not checked (no daily report from 2026-11-18)`)
+
+## Sent back / sent to Audit
+Sent to Audit: `work/069/07-audit-task.md`. Nothing is sent back.

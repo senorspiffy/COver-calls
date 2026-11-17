@@ -1,0 +1,21 @@
+# 07 Audit task - 069
+A1, please check:
+- **Pipeline checks**
+  - `python3 scripts/check_handoff.py 069` should give PASS (57 rows -> 50 as-is, 6 fixed, 1 removed).
+  - `python3 scripts/check_pipeline.py` should show `069: awaiting A1`, `INCOMPLETE: none`, `UNTRACKED CHANGE: none`, `RESEARCH CODE: none`, `LOG TIME: none`, `INBOX: not checked (no daily report from 2026-11-18)`, exit 0.
+  - `.claude/agents/a1-auditor.md` and `.claude/commands/daily-audit.md` change. This is a RULES BRANCH and needs the person's OK in PR review.
+- **Build, tests and mutations**
+  - Round 1 build 8dc2c2d: a1-auditor.md (Inbox step 2a-2d), daily-audit.md, templates/daily-audit.md, scripts/check_pipeline.py (`inbox_section`, INBOX line, exit 1), tests (11 inbox cases).
+  - Round 2 fix dc162cf: the template placeholders are now `<fill in>`, so an unfilled template fails INBOX. Tests xi, xii and xiii were added.
+  - Suite (I3, scratch at dc162cf): 377 passed, 1 skipped (exchange_calendars), test_pipeline_check 104, `-k inbox` 14. The compile test ran on python3.11.
+  - Mutations (I3): round 1 m1-m7 fail (06 round 1). In round 2, m8 (no `^` on INBOX_PI/HUB) fails 1 (xi), m9 (no `^` on INBOX_HEAD) fails 1 (xii), and the round-1 template fails 1 (xiii).
+  - Re-run on main after merge: m8 and m9 should fail. This is RI-012's pattern-inside-other-text rule applied to INBOX.
+- **Interaction with 070 (same branch)**
+  - 070's REAL-DATA FIELD code (scripts/check_pipeline.py, tests/test_real_data_field.py) is unchanged by 069 round 2: `git diff --stat 875158e dc162cf -- scripts tests/test_real_data_field.py ccbot` is empty. Check that the INBOX and REAL-DATA FIELD blocks both still feed the exit code once 070 is done.
+- **Live behaviour to watch**
+  - The first daily report under the new template is due 2026-11-18. After it, the INBOX line should say `none` (or a file name with a reason), not `not checked`. Check that A1 filled both `<fill in>` lines with one of the listed forms and wrote no "nothing new" for an unreadable channel.
+  - The status writes to /mnt/project-files/project-inbox (step 2d) happen outside the repo. Check that the 11-18 report lists each write and each failed write.
+- **Design calls to judge**
+  - The check fails only on unfilled placeholders and missing lines. It does not check that the hub SHA is the actual origin/main, or that the "N seen before" count is right. Judge whether that is enough.
+- **Recurring issues**
+  - No new occurrence. RI-012 is applied (xi, xii). RI-010 is extended (INBOX check, unfilled template). RI-001 and RI-002 stay ESCALATED, and RI-013 stays OPEN (n/a).
