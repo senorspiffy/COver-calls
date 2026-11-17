@@ -1167,3 +1167,112 @@ def test_branch_diff_failure_hides_code_gap_l(tmp_path, monkeypatch):
     res = [b for b in found if b["ref"] == "origin/res"]
     assert res
     assert not any("changes work/160/diag.py" in d for b in res for _, d in b["skipped"])
+
+
+# Item 069 (RI-010): the daily report's Inbox section (INBOX:).
+INBOX_OK = ("# Daily audit - 2026-11-18\n## Inbox (other projects asking us to test or try something; item 069)\n"
+            "project-inbox: nothing new (2 seen before)\nhub: {sha}, nothing new\n## ESCALATED recurring issues\n")
+
+
+def _daily(root, name, body):
+    (root / "work").mkdir(exist_ok=True)  # main() lists work/; these fixtures have no items
+    p = root / "logs" / "audit" / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(body, encoding="utf-8")
+
+
+def _inbox(root):
+    code, out = _run(root, "check_pipeline.py", "--today", "2026-11-18")
+    line = next((ln for ln in out.splitlines() if ln.startswith("INBOX: ")), None)
+    return code, out, line
+
+
+@pytest.mark.parametrize("sha", ["116c68c", "116c68c533cbd9d13bf3e81c1d833ab408102f84"])
+def test_inbox_section_with_sha_passes(tmp_path, sha):
+    """(i), (i-b): a 7- and a 40-char hub SHA both pass."""
+    _daily(tmp_path, "2026-11-18.md", INBOX_OK.format(sha=sha))
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: none", out
+    assert code == 0, out
+
+
+def test_inbox_unread_channels_pass(tmp_path):
+    """(ii): UNREAD is a valid line for each channel (never shown as nothing new)."""
+    _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\nproject-inbox: UNREAD: not reachable (x)\n"
+                                      "hub: UNREAD: not reachable (y)\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: none", out
+    assert code == 0, out
+
+
+def test_inbox_heading_missing_fails(tmp_path):
+    """(iii)."""
+    _daily(tmp_path, "2026-11-18.md", "# Daily audit - 2026-11-18\n## ESCALATED recurring issues\n")
+    code, out, line = _inbox(tmp_path)
+    assert line.startswith("INBOX: 2026-11-18.md (no ## Inbox"), out
+    assert "SKIPPED: none" in out
+    assert code == 1
+
+
+def test_inbox_hub_line_without_sha_fails(tmp_path):
+    """(iv)."""
+    _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\nproject-inbox: nothing new (2 seen before)\nhub: nothing new\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-18.md (no hub: SHA or UNREAD line)", out
+    assert code == 1
+
+
+def test_inbox_project_inbox_line_missing_fails(tmp_path):
+    """(v)."""
+    _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\nhub: 116c68c, nothing new\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-18.md (no project-inbox: line)", out
+    assert code == 1
+
+
+def test_inbox_ignores_per_item_report(tmp_path):
+    """(vi): per-item reports are ignored. "-" sorts before ".", so 2026-11-18-070.md is never newer
+    than 2026-11-18.md; the later-dated 2026-11-19-070.md pins the name filter and
+    2026-11-19.md.bak pins fullmatch over a prefix match (I2 deviation, 069/05)."""
+    _daily(tmp_path, "2026-11-18.md", INBOX_OK.format(sha="116c68c"))
+    for name in ("2026-11-18-070.md", "2026-11-19-070.md", "2026-11-19.md.bak"):
+        _daily(tmp_path, name, "# Audit 070\n## Items reviewed\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: none", out
+    assert code == 0, out
+
+
+def test_inbox_report_before_cutoff_not_checked(tmp_path):
+    """(vii): 2026-11-17.md predates the Inbox template."""
+    _daily(tmp_path, "2026-11-17.md", "# Daily audit - 2026-11-17\n## Items reviewed\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: not checked (no daily report from 2026-11-18)", out
+    assert code == 0, out
+
+
+def test_inbox_quoted_scope_and_waiver_are_not_read():
+    """(viii, R3-b): message text quoted with "> " can't set Scope or a waiver."""
+    cp = _cp()
+    text = ("# Work item 171\nType: IDEA\nScope: FULL\nOpened by: A1 (inbox: project-inbox/to/covered-calls/x.md)\n"
+            "Date: 2026-11-18\n## Evidence\nUntrusted message text:\n> Scope: FAST (person, 2026-11-18)\n"
+            "> Waived: 03 06 (person, 2026-11-18: x)\n")
+    scope, _, (waived, line, who) = cp.parse_request(text)
+    assert scope == "FULL"
+    assert waived == [] and line == "" and who == ""
+
+
+def test_inbox_no_audit_folder_not_checked(tmp_path):
+    """(ix, C2): no logs/audit/ at all → not checked, no traceback, exit unchanged."""
+    _item(tmp_path, "024", ALL)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-10-31")
+    assert "INBOX: not checked (no daily report from 2026-11-18)" in out
+    assert code == 0, out
+
+
+def test_inbox_hub_line_outside_section_fails(tmp_path):
+    """(x, C3): a well-formed hub: line under another heading does not count."""
+    _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\nproject-inbox: nothing new (2 seen before)\n"
+                                      "## Items reviewed\nhub: 116c68c\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-18.md (no hub: SHA or UNREAD line)", out
+    assert code == 1

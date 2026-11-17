@@ -110,6 +110,14 @@ writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMP
                   BRANCH SKIPPED).
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
+INBOX (item 069, RI-010): the daily audit's Inbox step (a1-auditor job B) is a text duty, so the
+newest daily report logs/audit/<YYYY-MM-DD>.md dated on or after INBOX_FROM (the first report
+under the Inbox template) must have a `## Inbox` section holding a `project-inbox:` line
+(`nothing new`, `<n> new` or `UNREAD:`) and a `hub:` line (a 7-40 hex SHA or `UNREAD:`). Only lines
+between `## Inbox` and the next `## ` heading count. Per-item reports (<date>-<ID>.md) are ignored.
+A report missing any part prints `INBOX: <file> (<what is missing>)` and gives exit 1; no daily
+report from the cutoff prints `INBOX: not checked (...)`. Known gap: this proves the lines exist,
+not that A1 read the channels; I3 and A1 spot-check that.
 """
 import datetime as dt
 import re
@@ -180,6 +188,11 @@ FAST_BY_PERSON = re.compile(r"^Scope:\s*FAST\s*\(\s*person\s*,\s*\d{4}-\d{2}-\d{
 # Older than the Scope/07 rules. Never add a new item here.
 LEGACY = {"001": "RESEARCH ONLY before 07-audit-task existed (item 021)",
           **{i: "07 is combined in work/003/07-audit-task.md" for i in ("004", "005", "006", "007", "008")}}
+INBOX_FROM = "2026-11-18"  # item 069: first daily report under the Inbox template
+DAILY_REPORT = re.compile(r"\d{4}-\d{2}-\d{2}\.md")
+INBOX_HEAD = re.compile(r"^## Inbox\b", re.M)
+INBOX_PI = re.compile(r"^project-inbox:\s*(nothing new|\d+ new|UNREAD:)", re.M)
+INBOX_HUB = re.compile(r"^hub:\s*([0-9a-f]{7,40}\b|UNREAD:)", re.M)
 
 
 def read_request(path):
@@ -562,6 +575,26 @@ def next_id():
     return f"{max(ids, default=0) + 1:03d}"
 
 
+def inbox_section(audit=Path("logs/audit")) -> tuple[str, bool]:
+    """Item 069 (RI-010): (text after `INBOX: `, failed) for the newest daily report dated on or
+    after INBOX_FROM. A missing folder or no such report is `not checked`, never `none`."""
+    reports = sorted(p for p in audit.iterdir() if p.is_file() and DAILY_REPORT.fullmatch(p.name)
+                     and p.stem >= INBOX_FROM) if audit.is_dir() else []
+    if not reports:
+        return f"not checked (no daily report from {INBOX_FROM})", False
+    newest = reports[-1]
+    text = newest.read_text(encoding="utf-8")
+    head = INBOX_HEAD.search(text)
+    if head is None:
+        return f"{newest.name} (no ## Inbox)", True
+    rest = text[head.end():]
+    nxt = re.search(r"^## ", rest, re.M)
+    section = rest[:nxt.start()] if nxt else rest
+    missing = [what for what, rx in (("no project-inbox: line", INBOX_PI),
+                                     ("no hub: SHA or UNREAD line", INBOX_HUB)) if not rx.search(section)]
+    return (f"{newest.name} ({'; '.join(missing)})", True) if missing else ("none", False)
+
+
 def main(argv):
     today = dt.datetime.now(dt.timezone.utc).date()
     if argv[:1] == ["--next-id"]:
@@ -650,6 +683,11 @@ def main(argv):
     print(f"RESEARCH CODE: {'not checked (no git)' if research is None else research[0]}")
     orphans = orphan_log_lines()
     print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
+    inbox, inbox_bad = inbox_section()  # item 069
+    print(f"INBOX: {inbox}")
+    if inbox_bad:
+        print(f"SKIPPED: {', '.join(skipped) or 'none'}")
+        return 1
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped or failed or unfinished or late or orphans or (untracked and untracked[1]) else 0
 
