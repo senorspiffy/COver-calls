@@ -151,11 +151,9 @@ Re-derive every numeric threshold in the map from that step's "How we check it" 
 
 `python3 scripts/check_handoff.py 070` output (pasted, must say PASS):
 ```
-```
 sources count (unique URLs in 01-research.md): 1
 fact-check rows: 60
 totals line: 60 rows -> 40 as-is, 20 fixed, 0 removed
 PASS
 ```
 (run by the orchestrator 2026-11-17, exit 0)
-```
