@@ -19,3 +19,4 @@ A1, please check:
   - Comparison scripts `compare_068.py` / `compare_068_tk.py` stay in the scratchpad, uncommitted (by plan, to avoid a work/ `.py`, item 064). Not re-runnable after the scratchpad is cleared.
 - **Recurring issues**
   - No new occurrence. RI-001 and RI-002 stay ESCALATED; RI-013 stays OPEN (068 does not build 067's guardrail).
+A1 result: PASS (2026-11-17, logs/audit/2026-11-17-068.md: suite 342/1 skipped and M1-M3 re-run in clean worktree at bd6ec78; diff_reports + compare_068/_tk re-run on 065-after/068-after/068-tk: only 5 warnings leaves + 15 CSV rows change; I3 single head run is a disclosed deviation flagged for the person)
