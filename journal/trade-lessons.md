@@ -3,6 +3,12 @@
 Lessons from the paper bot's real trades, newest first. Each line: date, lesson, evidence. UNCONFIRMED = seen once; CONFIRMED = seen 3+ times.
 Paper only, research, not financial advice. Lessons are notes only: no setting is tuned from paper results; any change waits for the Sunday review.
 
+## 2026-11-16
+- **The call cushion is now small next to the drop.** Shares -$373, calls +$40.50 (11% offset). VALE alone: -$302 vs +$25 (8%). Seen 3 days: CONFIRMED. On a falling stock, the premium does not protect the account.
+- **Two names = concentrated risk.** Both holdings fell together (F -5.8%, VALE -12.6% from basis), so equity is -6.7% in a week. Notes only for the Sunday review: compare with a wider or ETF-based setup before adding capital. UNCONFIRMED.
+- **Full slots lock out new setups.** AAL passed the screen but could not be bought because both position slots hold losing stocks. UNCONFIRMED.
+- **Once the stock falls, the short call has almost nothing left to give.** VALE 13C is now 24% out of the money at $0.035. The remaining premium ($7) is too small to matter, and the cost-basis floor (kept by the user 2026-11-14) blocks rolling the strike down below basis. UNCONFIRMED.
+
 ## 2026-11-13
 - **The call cushion keeps shrinking as the stock falls.** VALE: shares -$150, calls +$24 (16% offset, down from 22% on 11-11). F: shares -$37, call +$11. Repeat of the 11-11 lesson: the risk is the stock. Seen 2 days.
 - **Most of the premium is already earned on the falling names.** VALE 13C 0.16 to 0.04 (75% kept), F 0.23 to 0.12 (48%). A 50% buy-back (V1) would close VALE now and free it to sell again. Notes only; any rule change waits for the Sunday review. UNCONFIRMED.
