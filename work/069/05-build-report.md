@@ -128,3 +128,89 @@ RI-013: OPEN, n/a (no realtest output change).
 RI-003, RI-011: not applicable.
 RI-002: ESCALATED, unchanged by 069 (no data path touched).
 RI-010: guardrail extended (069); the INBOX check holds once a daily report dated 2026-11-18 or later exists and A1 sees `INBOX: none` on it.
+
+# Round 2 (fixes for 06 FAIL round 1)
+Base: 875158e (branch head; includes 069 build 8dc2c2d, I3 FAIL 652a320, 070 build 875158e). 070's code (REAL-DATA FIELD in scripts/check_pipeline.py, tests/test_real_data_field.py) is untouched: this round changes no file 070 changed, and scripts/check_pipeline.py is not edited at all.
+
+## Changes made (file: what changed)
+File counts (from commands, 012):
+- new: `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'` -> `0`
+- changed: `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'` -> `2`
+
+1. `templates/daily-audit.md` (06 problem 2, I3's first option): the allowed forms of each channel line moved into the comment, written so no comment line starts with `project-inbox:` or `hub:`. The two lines in the section are now `project-inbox: <fill in>` and `hub: <fill in>`, which match neither INBOX_PI nor INBOX_HUB. The comment says "an unfilled line fails INBOX". The forms are the same as before ("nothing new (N seen before)", "N new", "UNREAD: not reachable (error)"; "SHA, nothing new", "SHA, N new lines", "UNREAD: not reachable (error)") and match a1-auditor.md 2a/2b. The check code is unchanged, so no `<n>`/`|` rejection was added.
+2. `tests/test_pipeline_check.py`: 3 new tests at the end of the file.
+   - (xi) `test_inbox_code_words_mid_line_fail` (06 problem 1, m8): the Inbox section holds `project-inbox: nothing new` and `hub: 116c68c` only inside an FYI bullet. Expects `INBOX: 2026-11-18.md (no project-inbox: line; no hub: SHA or UNREAD line)` and exit 1. This is I3's probe fixture.
+   - (xii) `test_inbox_heading_mid_line_fails` (06 problem 1, m9): `## Inbox` appears only mid-line ("Notes: see ## Inbox below"), followed by valid channel lines. Expects `INBOX: 2026-11-18.md (no ## Inbox)` and exit 1.
+   - (xiii) `test_inbox_unfilled_template_fails` (06 problem 2): reads `templates/daily-audit.md` from the repo, writes it unchanged as `logs/audit/2026-11-18.md`, and expects both channel parts named as missing, with exit 1. It also asserts that the template still has `## Inbox` and `<fill in>`, so the test can't pass vacuously on a template without the section.
+
+## Connectivity check
+- [x] Each new test is collected (`-k inbox`: 14 cases, was 11). (xiii) reads the shipped template, so the template and the check are tied by a test: a future edit that makes a placeholder line match fails it.
+- [x] Input/output: unchanged from round 1. A1 fills the template's lines, and `inbox_section` reads them. The comment tells A1 which forms are allowed.
+- [x] Branches: no code change, so the round-1 branch list holds. The new tests cover two more inputs that end in exit 1 (mid-line code words, mid-line heading).
+- [x] No TODOs: `git diff -U0 | grep '^+' | grep -cE "fillna|nan_to_num|or 0|else 0|is not None and|max\(1,|min\(1,|\.get\([^)]*, 0\)|TODO"` -> `0`.
+- Missing-data grep over ccbot/: 37 hits, all pre-existing (no ccbot/ change; `git diff --stat -- ccbot/` is empty). 014 patterns: no dataclass, no numeric comparison added.
+
+## Test output (pasted, not summarized)
+```
+$ python3 -m pytest -q -p no:cacheprovider
+377 passed, 1 skipped in 55.19s
+$ python3 -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py
+104 passed in 13.46s
+$ python3 -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py -k inbox
+14 passed, 90 deselected in 1.01s
+$ python3.11 -m py_compile tests/test_pipeline_check.py && echo py311 ok
+py311 ok
+```
+test_pipeline_check: 101 (06 round 1) + 3 = 104. The full-suite total includes 070's tests from 875158e.
+
+`python3 scripts/check_pipeline.py` (exit=0), tail:
+```
+069: in progress (FULL: next 07)
+070: in progress (FULL: next 06)
+STUCK: none
+AWAITING A1: none
+IN PR: none
+OPEN BRANCHES (not merged into HEAD):
+  origin/claude/project-thread-f64g3k: items none; merges cleanly; last commit 2026-11-17 (0 days)
+RULES BRANCH: none
+ID CLASH: none
+A1 FAIL: none
+INCOMPLETE: none
+LOG TIME: none (not checked: 048: built before 045's --log rule reached main; times typed by hand, not recoverable (item 049))
+UNTRACKED CHANGE: none
+RESEARCH CODE: none
+REAL-DATA FIELD: none
+ORPHAN LOG: none
+INBOX: not checked (no daily report from 2026-11-18)
+SKIPPED: none
+```
+(069 shows `next 07` because 06 exists with a FAIL. I3 re-runs 06.)
+
+Mutations (scratch worktrees of HEAD 875158e with this round's two files copied in, under `/tmp/claude-0/-home-claude/4cc69c4f-899b-56b8-af6f-c0c8dcf01a44/scratchpad/i2r2-069/<m>/`; run with `python3 -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py -k inbox`; worktrees removed afterwards):
+```
+m8  `^` removed from INBOX_PI and INBOX_HUB:  1 failed, 13 passed
+    FAILED tests/test_pipeline_check.py::test_inbox_code_words_mid_line_fail
+m9  `^` removed from INBOX_HEAD:              1 failed, 13 passed
+    FAILED tests/test_pipeline_check.py::test_inbox_heading_mid_line_fails
+mt  round-1 template restored (git show HEAD:templates/daily-audit.md): 1 failed, 13 passed
+    FAILED tests/test_pipeline_check.py::test_inbox_unfilled_template_fails
+    (with the `<fill in>` assert removed, so the INBOX line itself is compared:)
+    - INBOX: 2026-11-18.md (no project-inbox: line; no hub: SHA or UNREAD line)
+    + INBOX: 2026-11-18.md (no hub: SHA or UNREAD line)
+```
+The mt output repeats 06's finding: the round-1 template passed the project-inbox half. With the new template, both halves fail.
+
+## Real-data effect (diff_reports output, pasted)
+not required (`templates/daily-audit.md`, `tests/test_pipeline_check.py`; neither is ccbot/realtest.py or a file it reads)
+
+## Deviations from plan
+None in round 2. Both fixes are the ones 06 named. For problem 2 I took I3's first option (placeholders that cannot match). It needs no code change, and the template test pins it.
+
+## Recurring issues checked (round 2)
+RI-001: ESCALATED, checked. No new filter. The new fixtures are real counts: 0 of 2 mid-line code words match, and 0 of 1 mid-line headings match.
+RI-002: ESCALATED, unchanged. An unfilled template line is no longer read as a filled one (06 problem 2), and no value is defaulted.
+RI-008: checked (py_compile on 3.11).
+RI-009: checked. Mutations ran only in scratch worktrees, which were removed after. work/070 was not touched or staged.
+RI-010: guardrail extended (069). The INBOX check now also fails an unfilled template.
+RI-012: guardrail applied. The `^` anchors are pinned by tests (xi, xii), and m8 and m9 each fail 1 test.
+RI-013: OPEN, n/a (no realtest change).

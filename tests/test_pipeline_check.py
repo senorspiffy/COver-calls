@@ -1276,3 +1276,34 @@ def test_inbox_hub_line_outside_section_fails(tmp_path):
     code, out, line = _inbox(tmp_path)
     assert line == "INBOX: 2026-11-18.md (no hub: SHA or UNREAD line)", out
     assert code == 1
+
+
+def test_inbox_code_words_mid_line_fail(tmp_path):
+    """(xi, RI-012, 069 round 2): `project-inbox:` and `hub:` count only at the start of a line.
+    Pins the `^` anchors of INBOX_PI and INBOX_HUB (mutation m8)."""
+    _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\n- FYI: quant-trader note (see project-inbox: nothing new "
+                                      "there; hub: 116c68c)\n## ESCALATED recurring issues\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-18.md (no project-inbox: line; no hub: SHA or UNREAD line)", out
+    assert code == 1
+
+
+def test_inbox_heading_mid_line_fails(tmp_path):
+    """(xii, RI-012, 069 round 2): `## Inbox` counts only as a heading at the start of a line.
+    Pins the `^` anchor of INBOX_HEAD (mutation m9)."""
+    _daily(tmp_path, "2026-11-18.md", "# Daily audit - 2026-11-18\nNotes: see ## Inbox below\n"
+                                      "project-inbox: nothing new (2 seen before)\nhub: 116c68c, nothing new\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-18.md (no ## Inbox)", out
+    assert code == 1
+
+
+def test_inbox_unfilled_template_fails(tmp_path):
+    """(xiii, 069 round 2): templates/daily-audit.md copied as-is must fail both channel lines,
+    so a report whose placeholder lines were never filled in can't pass INBOX."""
+    template = (REPO / "templates" / "daily-audit.md").read_text(encoding="utf-8")
+    assert "## Inbox" in template and "<fill in>" in template
+    _daily(tmp_path, "2026-11-18.md", template)
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-18.md (no project-inbox: line; no hub: SHA or UNREAD line)", out
+    assert code == 1

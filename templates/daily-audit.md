@@ -1,8 +1,11 @@
 # Daily audit - <YYYY-MM-DD>
 ## Inbox (other projects asking us to test or try something; item 069)
-<!-- One line per channel; check_pipeline.py checks both from 2026-11-18 (INBOX:). Never write "nothing new" for a channel you could not read. -->
-project-inbox: nothing new (<n> seen before) | <n> new | UNREAD: not reachable (<error>)
-hub: <origin/main sha>, nothing new | <origin/main sha>, <n> new lines | UNREAD: not reachable (<error>)
+<!-- One line per channel; check_pipeline.py checks both from 2026-11-18 (INBOX:). Never write "nothing new" for a channel you could not read.
+Replace each <fill in> with ONE of these forms (an unfilled line fails INBOX):
+  project-inbox line: "nothing new (N seen before)", "N new" or "UNREAD: not reachable (error)"
+  hub line: "SHA, nothing new", "SHA, N new lines" or "UNREAD: not reachable (error)", SHA = origin/main -->
+project-inbox: <fill in>
+hub: <fill in>
 ### New items (ID -> key; urgent first)
 ### FYI (key, subject; own notes marked "own note")
 ### Refused (key, why; also under "For the person")
