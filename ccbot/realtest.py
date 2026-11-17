@@ -15,8 +15,10 @@ Simulation (one ticker; both arms fully invested with fractional shares, see sim
   * Entry follows the bot (rules._option_entry, 061/04): expiry from expiries.third_fridays on
     the trading calendar + pick_expiry (30-45 DTE, config slack), which must be quoted that day
     (NO_EXPIRY); strike from pricing.pick_strike with the config tolerance; the cost-basis floor;
-    EARNINGS_UNKNOWN for a stock with no known next earnings date; no call held through an
-    earnings date (a <= e <= expiry, like screen._reject).
+    EARNINGS_UNKNOWN for a stock with no known next earnings date, on a day before its first
+    listed date (history not in the file, item 063), or strictly inside a gap > EARNINGS_GAP_WARN
+    days between listed dates (item 065); no call held through an earnings date
+    (a <= e <= expiry, like screen._reject).
   * A call is only ever sold on a day that has a real quote for it (a snapshot day), at the bid
     ("bid" fills) or at bid + 25% of the spread ("quarter" fills). Buy-backs pay the ask (or
     ask - 25% of spread). Mid fills are reported only to show what the spread costs.
@@ -36,6 +38,7 @@ and walk-forward picks each 6-month block's config from the 24 months before it.
 Earnings dates are read as if known in advance (APPROXIMATE: no record of publication dates).
 """
 import argparse
+import bisect
 import collections
 import itertools
 import json
@@ -58,7 +61,8 @@ CONFIG_PATH = ROOT / "config" / "default.json"
 TICKERS_PATH = ROOT / "config" / "tickers.json"
 STOCK_SLIP = 0.01           # $/share paid when re-buying shares after assignment
 GRID_TOL = 0.075            # grid-only: tolerance half-width around a target that is not the config's
-EARNINGS_GAP_WARN = 120     # days between consecutive earnings dates counted as a data-hole warning
+EARNINGS_GAP_WARN = 120     # days between consecutive listed earnings dates above which the stretch between
+                            # them is a data hole: EARNINGS_UNKNOWN inside it (065)
 SUB_3C = 0.03               # information only: sales below 3 cents are counted, not blocked (bot has no floor)
 
 # One row per input (item 061/04, RI-002): what happens when it is absent. The code below
@@ -73,6 +77,8 @@ REALTEST_MISSING = {
     "volhist": "atm_iv_minus_next30d_rv NaN, atm_na_reason 'volhist: not supplied'",
     "BXM_History.csv": "bxm_vs_spy.error 'BXM_History.csv: not supplied'",
     "asset_type": "not in config/tickers.json (SPY: etf) -> treated as a stock (earnings required), warning",
+    "earnings_before_first": "EARNINGS_UNKNOWN before a stock's first listed earnings date; warning with the lead in days",
+    "earnings_interior_gap": "EARNINGS_UNKNOWN strictly inside a gap > 120 days between listed earnings dates; warning with the gap dates",
 }
 
 
@@ -180,9 +186,7 @@ def load_ticker(root, tk, facts=None):
         earnings = []
     else:
         earnings = sorted(set(pd.to_datetime(er[_col(er, "date")]).dt.date)) if not er.empty else []
-    gaps = sum((b - a).days > EARNINGS_GAP_WARN for a, b in zip(earnings, earnings[1:]))
-    if gaps:
-        warnings.append(f"earnings: {gaps} gap(s) > {EARNINGS_GAP_WARN} days between dates")
+    gaps = len(_gap_pairs(earnings))
 
     oc = _read(root / "options" / f"{tk}.csv.gz")
     if oc is None:
@@ -221,6 +225,8 @@ def load_ticker(root, tk, facts=None):
     asset, aw = _asset_type(tk, facts)
     if aw:
         warnings.append(aw)
+    if er is not None and not earnings and asset != "etf":
+        warnings.append("earnings: no dates (EARNINGS_UNKNOWN for a stock)")
     td = TickerData(tk, close, divs, splits, earnings, chain, vh, asset_type=asset, volhist_na=vh_na,
                     quote_rows_dropped=dropped, earnings_gaps=gaps, warnings=warnings, quotes=quotes)
     _check_units(td)
@@ -369,9 +375,40 @@ def _earnings_between(td, a, b):
     return any(a <= e <= b for e in td.earnings)
 
 
+def _is_gap(a, b):
+    """Two consecutive listed earnings dates too far apart: the dates between them are missing (065).
+    The only place EARNINGS_GAP_WARN is compared."""
+    return (b - a).days > EARNINGS_GAP_WARN
+
+
+def _gap_pairs(earnings):
+    """(a, b) for each pair of consecutive dates in a sorted list that _is_gap; load_ticker counts
+    them and simulate names them in its warning (one warning line, from simulate; item 068),
+    so warned <=> blocked."""
+    return [(a, b) for a, b in zip(earnings, earnings[1:]) if _is_gap(a, b)]
+
+
+def _earnings_state(td, d):
+    """Where day d sits against the sorted listed dates, one helper for all three edges:
+    "before_first" (no dates, or d before the first: history not in the file, 063), "after_last"
+    (d after the last: next report unknown), "interior_gap" (strictly inside a gap _is_gap, 065),
+    else "known" (d on a listed date, or between two dates <= EARNINGS_GAP_WARN days apart)."""
+    i = bisect.bisect_right(td.earnings, d)      # earnings[i-1] <= d < earnings[i]
+    if i == 0:
+        return "before_first"
+    if td.earnings[i - 1] == d:
+        return "known"
+    if i == len(td.earnings):
+        return "after_last"
+    if _is_gap(td.earnings[i - 1], td.earnings[i]):
+        return "interior_gap"
+    return "known"
+
+
 def _earnings_known(td, d):
-    """A next earnings date on or after d exists (the bot's earnings_known for a stock)."""
-    return bool(td.earnings) and td.earnings[-1] >= d
+    """The bot's earnings_known for a stock: _earnings_state is "known" (a listed date on or before
+    d and one on or after d, with no gap > EARNINGS_GAP_WARN days between them; items 063, 065)."""
+    return _earnings_state(td, d) == "known"
 
 
 def _realized_vol(close, a, b):
@@ -400,6 +437,24 @@ def simulate(td, rule, cfg, start=None, end=None):
     days = [d for d in days if d >= snaps[0]]
     if not days:
         raise ValueError(f"{td.ticker}: no closes on or after the first quote day {snaps[0]}")
+    # leading edge (item 063): days from the first day a sale can be tried to the first listed
+    # earnings date; NaN (unknown, never 0) for an ETF or a stock with no dates
+    lead = (td.earnings[0] - days[0]).days if td.asset_type != "etf" and td.earnings else None
+    earnings_lead_days = float("nan") if lead is None else max(lead, 0)
+    edge_warn = []
+    if lead is not None and lead > 0:
+        edge_warn.append(f"earnings: first listed date {td.earnings[0]} is {lead} days after the first quote day "
+                         f"{days[0]}" + ("; no call sold before it (EARNINGS_UNKNOWN)" if rule.skip_earnings
+                                         else "; earnings not checked by this rule"))
+    # interior gaps (item 065): blocked attempt days strictly inside a gap > EARNINGS_GAP_WARN days;
+    # NaN (unknown, never 0) for an ETF or a stock with no dates, like earnings_lead_days
+    earnings_gap_days = float("nan") if td.asset_type == "etf" or not td.earnings else 0
+    gap_pairs = _gap_pairs(td.earnings) if td.asset_type != "etf" else []
+    if gap_pairs:
+        edge_warn.append(f"earnings: {len(gap_pairs)} gap(s) > {EARNINGS_GAP_WARN} days between listed dates ("
+                         + ", ".join(f"{a}→{b}" for a, b in gap_pairs) + ")"
+                         + ("; no call sold inside them (EARNINGS_UNKNOWN)" if rule.skip_earnings
+                            else "; earnings not checked by this rule"))
     calendar = expiries.extend(td.close.index, td.close.index[-1] + timedelta(days=90))
     monthly = expiries.third_fridays(calendar)
     c0 = float(td.close[days[0]])
@@ -482,6 +537,8 @@ def simulate(td, rule, cfg, start=None, end=None):
         if open_t is None and g is not None and nxt is not None:
             if rule.skip_earnings and td.asset_type != "etf" and not _earnings_known(td, d):
                 r, code = None, "EARNINGS_UNKNOWN"
+                if not (isinstance(earnings_gap_days, float) and math.isnan(earnings_gap_days)):
+                    earnings_gap_days += _earnings_state(td, d) == "interior_gap"
             else:
                 r, code = _pick(g, d, rule, cfg, monthly, basis)
                 if code == "OK" and rule.skip_earnings and _earnings_between(td, d, r.expiration):
@@ -520,7 +577,10 @@ def simulate(td, rule, cfg, start=None, end=None):
         "sub_3c_sales": int(sub3c),
         "snap_days": len(snaps),
         "snap_days_no_close": sum(d not in closes for d in snaps),
+        "earnings_lead_days": earnings_lead_days,
+        "earnings_gap_days": earnings_gap_days,   # blocked attempt days inside interior gaps (065)
     }
+    df.attrs["warnings"] = edge_warn
     return df, trades
 
 
@@ -592,7 +652,7 @@ def summarize(td, rule, df, trades, cfg):
         "quote_rows_dropped": td.quote_rows_dropped, "earnings_gaps_gt120": td.earnings_gaps,
         "lot_cost_first": 100 * first, "lot_cost_last": 100 * last,
         "fits_3k": fits_account(td, last, cfg), "asset_type": td.asset_type,
-        "warnings": "; ".join(td.warnings),
+        "warnings": "; ".join(td.warnings + df.attrs.get("warnings", [])),
     }
 
 
@@ -745,6 +805,10 @@ def run(root, out, tickers, cfg, grid=GRID, mc_paths=10000, start=None, min_year
                 counts[tk] = {k: s[k] for k in (*df.attrs["counts"], "calls_sold", "quote_rows_dropped",
                                                 "earnings_gaps_gt120", "lot_cost_first", "lot_cost_last",
                                                 "fits_3k", "atm_na_reason", "warnings")}
+                for k in ("earnings_lead_days", "earnings_gap_days"):
+                    v = counts[tk][k]
+                    if isinstance(v, float) and math.isnan(v):
+                        counts[tk][k] = None   # unknown -> JSON null (NaN is not valid JSON), never 0
     if spy is not None:   # SPY with the same rule: our own check against BXM (not in the pooled tests)
         for fill in ("bid", "quarter", "mid"):
             rule = Config(bot.delta, bot.dte, bot.skip_earnings, bot.manage, fill)

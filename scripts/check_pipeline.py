@@ -79,7 +79,12 @@ writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMP
                   your 05; (c) PRs must land as merge commits (squash or rebase drops the cutoff ->
                   exit 1); (d) a merge's conflict edits are judged together with the whole merge
                   against its first parent; (e) paths outside CODE_PATHS (pyproject.toml, README.md,
-                  data/) are not checked; (f) non-ASCII paths are quoted (no -z).
+                  data/) are not checked, and under work/ only .py files are code (WORK_CODE; other
+                  script types there are not checked); (f) non-ASCII paths are quoted (no -z), under
+                  work/ too.
+                  Item 064: a .py file under work/<ID>/ (any depth, WORK_CODE) is code too, so a
+                  diagnostic is committed together with an open item's step file. diff-tree lists
+                  deleted paths too, so deleting or moving such a file is a code change as well.
   RESEARCH CODE   (item 062, RI-007) a RESEARCH ONLY item whose unit changes RESEARCH_CODE_PATHS
                   (ccbot/, config/, scripts/, tests/) with no I1-I3. A unit is one HEAD commit after
                   the cutoff (as 053, against its first parent) or one open branch as a whole. On
@@ -95,6 +100,14 @@ writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMP
                   without the research item's step file is caught by 053 on HEAD, not by 062;
                   (j) only the first `Waived:` line is read, so 04 05 06 go on the item's single
                   Waived line.
+                  Item 064: a .py file under work/<ID>/ (WORK_CODE) is code here too. On a branch the
+                  unit is the code and work/ .py files the branch changes plus the tip's step files
+                  of the items it touches; a .py already at the tip and unchanged is not counted.
+                  For (i): a work/ .py committed on a branch with no step file is 053's on HEAD.
+                  (k) a diagnostic in a FULL/FAST item is covered by its step files; its logic is
+                  checked only by I3's re-run. (l) if the branch `git diff` fails, its change list
+                  is empty and its code is not seen here (information only, like the rest of
+                  BRANCH SKIPPED).
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 """
@@ -138,6 +151,8 @@ UNTRACKED_FROM = "694bf4d0038e25bb82bd111018fbd67a94bbc74d"
 # Item 062: a RESEARCH ONLY item may not change these unless I1-I3 ran or the person waived them.
 # .claude/ and templates/ are left to 053 (gap h).
 RESEARCH_CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/")
+# Item 064: a .py file under a work item's folder (any depth) is code for 053 and 062.
+WORK_CODE = re.compile(r"work/\d{3}/.+\.py")
 WAIVE_BUILD = {"04", "05", "06"}
 WAIVE_BUILD_BY_PERSON = re.compile(r"\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*:")
 STEP_FILE = re.compile(r"^work/(\d{3})/(01-research|02-improvements|03-handoff|04-build-plan|"
@@ -190,12 +205,18 @@ def _build_waived(text):
     return WAIVE_BUILD <= set(steps) and who == "person" and bool(WAIVE_BUILD_BY_PERSON.search(waived_line))
 
 
+def _is_code(f, paths):
+    """Item 064: path `f` is code if it starts with one of `paths` or is a .py file under a work
+    item's folder (WORK_CODE, whole path; never from commit text, RI-012)."""
+    return f.startswith(paths) or WORK_CODE.fullmatch(f) is not None
+
+
 def _research_code(files, request_text_of):
     """Item 062 (RI-007): [(ID, detail)] for the RESEARCH ONLY items in one unit (a HEAD commit
     or an open branch) whose `files` change RESEARCH_CODE_PATHS with no I1-I3 and no person's
     waiver. `request_text_of(ID)` is the item's request.md text at the tip, or None. Items come
     from the paths only, never from commit messages (RI-012)."""
-    code = [f for f in files if f.startswith(RESEARCH_CODE_PATHS)]
+    code = [f for f in files if _is_code(f, RESEARCH_CODE_PATHS)]
     if not code:
         return []
     items = sorted({m[1] for m in map(STEP_FILE.match, files) if m})
@@ -414,7 +435,10 @@ def open_branches(today=None):
                 if status == "SKIPPED":
                     skipped.append((item, detail))
         # item 062: the branch is one unit; its RESEARCH ONLY items may not change code
-        unit = changed(*RESEARCH_CODE_PATHS) + [f"work/{i}/{f}" for i in sorted(touched) for f in files[i]]
+        # item 064: plus the work/ .py files the branch changes; the tip's other files count
+        # only as step files, so an unchanged .py at the tip is not the branch's code
+        unit = (changed(*RESEARCH_CODE_PATHS) + [f for f in changed("work/") if WORK_CODE.fullmatch(f)]
+                + [f"work/{i}/{f}" for i in sorted(touched) for f in files[i] if f in STEPS.values()])
         for item, detail in _research_code(unit, requests.get):
             have = [k for k, (i, _) in enumerate(skipped) if i == item]
             if have:
@@ -478,7 +502,7 @@ def untracked_changes(cutoff=UNTRACKED_FROM, walked=None):
         if files is None:
             entries.append(f"{c[:7]} (git diff-tree failed)")
             continue
-        code = [f for f in files if f.startswith(CODE_PATHS)]
+        code = [f for f in files if _is_code(f, CODE_PATHS)]
         if not code:
             continue
         items = sorted({m[1] for m in map(STEP_FILE.match, files) if m})
