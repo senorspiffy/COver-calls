@@ -187,3 +187,52 @@ check_pipeline line: `070: awaiting A1 (FULL)`
 ## Sent back / sent to Audit (round 2)
 Sent to Audit: yes (work/070/07-audit-task.md). Sent back: nothing.
 Note for the orchestrator: `test_repo_pipeline_has_no_skipped_items` stays red on this branch until 069 gets a later A1 PASS line. It is not a 070 defect (see above).
+
+## Round 3 (after A1 FAIL, logs/audit/2026-11-18-070.md)
+Verdict: **PASS**. I2's fix is 4789b44 (tests only). All runs in scratch worktree `scratchpad/i3-070r3` at 4789b44 (removed afterwards); in /home/claude/df17 only this file and 07 were edited.
+
+### I1 audit (round 3)
+No new plan. The fix is the one A1 asked for (an item-070 edge test next to T7, keep T7's 069 case, optional constant-vs-template assert). Nothing unsourced added.
+
+### I2 audit (round 3): diff aace9dc..4789b44
+`git diff --stat aace9dc..4789b44`: `logs/implementation/2026-11-18.md | 1 +`, `tests/test_real_data_field.py | 35 +++`, `work/070/05-build-report.md | 64 +++`. No scripts/, templates/ or ccbot/ change. New: T7b (item 070 trigger, empty field -> `REAL-DATA FIELD: 070`, INCOMPLETE, exit 1), T7c (069 + 070 in one repo -> only 070), T7d x2 (`WHOLE_DIFF_FROM == 70` and matches "from item 070" in both templates). T7 unchanged. 05 Round 3 matches the diff.
+
+### Mutations re-run by I3 (scripts/check_pipeline.py, one at a time, restored; `pytest -q tests/test_real_data_field.py` with T7d deselected so only behaviour tests count)
+| Mutation | Result (behaviour tests only) |
+|---|---|
+| `WHOLE_DIFF_FROM = 100` | killed: 2 failed (T7b, T7c), 28 passed |
+| `WHOLE_DIFF_FROM = 71` | killed: 2 failed (T7b, T7c), 28 passed |
+| `WHOLE_DIFF_FROM = 69` | killed: 2 failed (T7, T7c), 28 passed |
+| L645 `int(item) < WHOLE_DIFF_FROM` -> `<=` | killed: 2 failed (T7b, T7c), 28 passed |
+Matches 05 (05's counts include T7d; with T7d the totals are 4/4/4/2 failed, as I2 reports).
+
+### Tests re-run (round 3)
+- `pytest -q tests/test_real_data_field.py`: `32 passed`.
+- Full suite at 4789b44: `1 failed, 403 passed, 1 skipped in 63.55s`; failure `test_repo_pipeline_has_no_skipped_items`.
+- Known-failure check: scratch commit 7084343 dropped the last `A1 result: FAIL` line of work/069/07 and work/070/07 -> that test `1 passed`, `check_pipeline.py` exit 0. So the only failure is `A1 FAIL: 069, 070`. Scratch commit discarded (`reset --hard 4789b44`).
+- `test_every_py_compiles_on_oldest_python`: passed with python3.11; python3.10 not on PATH.
+- `check_handoff.py 070`: `fact-check rows: 60`, `totals line: 60 rows -> 40 as-is, 20 fixed, 0 removed`, `PASS`.
+- `check_pipeline.py` at 4789b44: exit 1; `A1 FAIL: 069, 070`; STUCK, IN PR, RULES BRANCH, ID CLASH, INCOMPLETE, UNTRACKED CHANGE, RESEARCH CODE, REAL-DATA FIELD, ORPHAN LOG, SKIPPED all `none`; LOG TIME none (048 legacy note).
+- Connectivity: T7b/T7c/T7d are collected (28 -> 32) and each assert on output, exit code or template text.
+
+### Real-data effect (round 3)
+not required: only tests/, work/, logs/ changed; none is a TRIGGER path.
+
+### Recurring issues checked (round 3)
+Recurring issues checked: RI-001, RI-002, RI-007, RI-008, RI-009, RI-010, RI-011, RI-012, RI-013 (RI-003 to RI-006 not applicable: no calendar, worked example or hand total changed)
+- RI-001 (ESCALATED): every number above is from a run in this round.
+- RI-002 (ESCALATED): no code changed; no value defaulted.
+- RI-007: the A1 FAIL lines are the check working; nothing used before its step.
+- RI-008: 3.11 compile ok; 3.10 absent.
+- RI-009: all runs in the scratch worktree; 069's files untouched.
+- RI-010: log line written by `--log`.
+- RI-011: no branch-diff code changed.
+- RI-012 (GUARDED): unchanged from round 2 (T21/T22).
+- RI-013 (OPEN): the cutoff is now pinned at the edge (070 checked, 069 not) by behaviour tests. GUARDED when 070 is merged and the probe fails on main.
+
+### Pipeline line (round 3)
+check_pipeline line: `070: A1 FAIL (FULL; sent back, needs a later A1 PASS line (item 042))`
+(Not SKIPPED or INCOMPLETE; it clears when A1 writes a later PASS line. Run in /home/claude/df17 after 06 and 07 were written.)
+
+### Sent back / sent to Audit (round 3)
+Sent to Audit: yes (work/070/07-audit-task.md, round 3 section). Sent back: nothing.

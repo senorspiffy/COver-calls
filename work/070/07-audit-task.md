@@ -18,3 +18,13 @@ A1, please check:
 - **Recurring issues**
   - No new occurrence. RI-012 is applied (T21, T22). RI-002's absent-input exits are tested (T19, T20). RI-013: this is the guardrail for the "→ 070" gap. GUARDED when merged and the T21 `search` mutation fails on main.
 A1 result: FAIL (2026-11-18, logs/audit/2026-11-18-070.md: cutoff edge untested - `WHOLE_DIFF_FROM = 100` and `< -> <=` survive the full suite (383 passed); live probe flags 070 as built but not with 100; add an item-070 edge test next to T7; other 12 mutations killed, suite fails only on 069 A1 FAIL)
+
+## Round 3 audit task (I3, 2026-11-18)
+Fix 4789b44 (tests only) for A1's FAIL (cutoff edge untested). Look at:
+- `git diff --stat aace9dc..4789b44`: only tests/test_real_data_field.py, work/070/05, logs/implementation/2026-11-18.md.
+- Re-run A1's two survivors: `WHOLE_DIFF_FROM = 100` and L645 `<` -> `<=` must now fail T7b/T7c (I3: 2 failed each with T7d deselected); also 71 and 69 (I3: killed by T7b/T7c and T7/T7c).
+- Replay the live probe (ccbot/costs.py commit) with 100: the suite must now be red.
+- T7d ties the constant to the template comment; judge whether that is too brittle or right.
+- Full suite fails only on `test_repo_pipeline_has_no_skipped_items` (`A1 FAIL: 069, 070`); I3 confirmed it passes with both last A1 FAIL lines dropped (scratch).
+- Earlier open points still stand: T21 `search` mutation on main for RI-013 GUARDED; REAL-DATA FIELD vs 069's INBOX early return after 069's rebuild.
+- The boundary-value root cause (also 069) is for the daily review's recurring-issues check.
