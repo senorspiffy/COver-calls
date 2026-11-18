@@ -26,15 +26,31 @@ Each item is one of:
   in progress  the required steps present so far have no gap
   awaiting A1  every required step is present, but 07-audit-task.md has no `A1 result:` line
                (every item except the closed PRE_A1_LINE list; items 033, 035). Listed, not an error.
-  IN PR        stuck, not started or in progress here, but an unmerged remote branch has more of
+  IN PR        stuck, not started, in progress or I3 FAIL here, but an unmerged remote branch has more of
                its step files (item 034). Listed, not an error: it waits for the person's merge.
   A1 FAIL      every required step is present and the last `A1 result:` line is FAIL (item 042):
                the item went back to the team and is not complete until a later PASS line (exit 1)
+  I3 FAIL      06's verdict line (its first `Verdict:` line outside code fences; templates/verification.md
+               L2) is FAIL (item 071): I3 sent the item back to the step on 06's first `Sent back to:`
+               line (I1, I2 or I1 I2; else `sent back to: not stated`, never a default). Checked before
+               A1's result: a FAIL in 06 means the current build has not passed I3. Not complete until a
+               later round rewrites that line to PASS (exit 1).
   complete     every required step is present and A1's last result is PASS
 Items in LEGACY are older than this check and are reported as such.
 INCOMPLETE (item 043, exit 1): for items from CHECKLIST_FROM on, a 06 with no
 `Recurring issues checked:` line naming an RI-, or a step file whose agent wrote no
 `| <agent> | <ID> |` line in logs/research or logs/implementation.
+Item 071: from VERDICT_FROM on, a 06 whose verdict line is missing or unreadable (only `PASS` or
+`FAIL`, case-sensitive, optionally **bold**; the unfilled `PASS | FAIL` is unreadable), or a FAIL
+with no `Sent back to: I1|I2|I1 I2` line, or a PASS with no `Sent back to: none` line (a stale
+field), is INCOMPLETE. From CHECKLIST_FROM on, a readable verdict that differs from the first word
+of the item's last well-formed `| I3 |` log line (a malformed last line is 045's, never replaced by
+an earlier one) (logs/implementation, by file date then line order) is INCOMPLETE; the log never
+fills in a missing verdict. Known gaps: (w) a 06 FAIL with a 07 whose last A1 line is PASS shows I3
+FAIL, but _open_at (053) treats the item as closed (a re-opened completed item is a new item,
+run-item.md); (x) open branches report only SKIPPED, so a branch's I3 FAIL (like its A1 FAIL) is not
+listed; (y) below VERDICT_FROM an unreadable verdict is not checked; (z) the line proves what I3
+wrote, not that I3 ran (the log cross-check is the second source).
 
 When run inside a git repo, it also prints OPEN BRANCHES: every remote branch not merged into
 HEAD, the work items it carries (what merging it into HEAD would change, from the
@@ -178,6 +194,12 @@ LOG_CHECK_FROM = 45
 LOG_TIME_EXCEPT = {"048": "built before 045's --log rule reached main; times typed by hand, not recoverable (item 049)"}
 # Item 070: the Real-data effect field is checked from this ID on; earlier items are not re-checked.
 WHOLE_DIFF_FROM = 70
+# Item 071: I3's verdict and send-back target in 06 (templates/verification.md L2-3). The first
+# column-0 `Verdict:` / `Sent back to:` line outside code fences and HTML comments decides; never
+# a later one, never a substring (RI-012). From VERDICT_FROM on an unreadable value is INCOMPLETE.
+VERDICT_FROM = 71
+VERDICT_LINE = re.compile(r"Verdict:[ \t]*(?:\*\*)?(PASS|FAIL)\b(?![ \t*]*[|/])")   # .match on the line
+SENT_BACK_LINE = re.compile(r"Sent back to:[ \t]*(I1 I2|I1|I2|none)[ \t]*")         # .fullmatch on the line
 # Item 070: realtest's decision path: ccbot/realtest.py, the ccbot modules it imports and the config
 # files they read by literal path (tests/test_real_data_field.py keeps this list in step).
 TRIGGER = ("ccbot/realtest.py", "ccbot/costs.py", "ccbot/expiries.py", "ccbot/config.py", "ccbot/pricing.py",
@@ -257,6 +279,32 @@ def _build_waived(text):
     return WAIVE_BUILD <= set(steps) and who == "person" and bool(WAIVE_BUILD_BY_PERSON.search(waived_line))
 
 
+def i3_verdict(path):
+    """Item 071: (verdict, target) from 06; the first column-0 line of each, outside ``` fences and
+    HTML comments, decides, never a later one; None = unreadable. Fences as in _field_gap: ``` only
+    (~~~ is not tracked, 0 in 06 files 2026-11-18)."""
+    text = re.sub(r"<!--.*?-->", "", path.read_text(encoding="utf-8"), flags=re.S)
+    verdict = target = None
+    seen_verdict = seen_target = fence = False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        if not seen_verdict and line.startswith("Verdict:"):
+            seen_verdict = True
+            m = VERDICT_LINE.match(line)
+            verdict = m[1] if m else None
+        elif not seen_target and line.startswith("Sent back to:"):
+            seen_target = True
+            m = SENT_BACK_LINE.fullmatch(line)
+            target = m[1] if m else None
+        if seen_verdict and seen_target:
+            break
+    return verdict, target
+
+
 def _is_code(f, paths):
     """Item 064: path `f` is code if it starts with one of `paths` or is a .py file under a work
     item's folder (WORK_CODE, whole path; never from commit text, RI-012)."""
@@ -312,6 +360,11 @@ def classify(item_dir, today):
     unchecked = [s for s in need[:need.index("03") + 1] if s not in have] if "03" in need else []
     if results and unchecked:
         return "SKIPPED", f"{scope}: {', '.join(results)} written before {' '.join(unchecked)}{extra}"
+    if "06" in have:                                    # item 071: before A1's result (D7)
+        verdict, target = i3_verdict(item_dir / STEPS["06"])
+        if verdict == "FAIL":
+            where = f"sent back to {target}" if target in ("I1", "I2", "I1 I2") else "sent back to: not stated"
+            return "I3 FAIL", f"{scope}; {where}, needs a later PASS round in 06 (item 071){extra}"
     if len(have) == len(need):
         audit = item_dir / STEPS["07"]
         verdicts = re.findall(r"^A1 result:\s*(\w+)", audit.read_text(encoding="utf-8"), re.M) \
@@ -344,6 +397,26 @@ def incomplete(item_dir, logs=Path("logs")):
         if bad:
             wants = "; ".join(f'{a} wants "{LOG_HINT[a][0]}"' for a in bad)
             missing.append(f"log line for {' '.join(bad)} does not match its format (item 045): {wants}")
+    if ver.exists():                                        # item 071 (a)-(d)
+        verdict, target = i3_verdict(ver)
+        if int(item_dir.name) >= VERDICT_FROM:
+            if verdict is None:
+                missing.append("06 has no readable 'Verdict: PASS' or 'Verdict: FAIL' line (item 071)")
+            elif verdict == "FAIL" and target not in ("I1", "I2", "I1 I2"):
+                missing.append("06 Verdict is FAIL but has no 'Sent back to: I1, I2 or I1 I2' line (item 071)")
+            elif verdict == "PASS" and target != "none":
+                missing.append("06 Verdict is PASS but has no 'Sent back to: none' line (item 071)")
+        if verdict is not None:
+            last = None                                     # the item's last I3 line: by file date, then line order
+            impl = logs / "implementation"
+            for f in (sorted(impl.glob("????-??-??.md")) if impl.is_dir() else []):
+                for l in f.read_text(encoding="utf-8").splitlines():
+                    m = LOG_LINE.match(l)
+                    if m and m[3] == "I3" and m[4] == item_dir.name:
+                        last = m
+            w = re.fullmatch(LOG_FORMAT["I3"], last[5].strip()) if last else None
+            if w and w[1] != verdict:                       # malformed last line: 045's, no fallback (C2)
+                missing.append(f"06 Verdict says {verdict}, last I3 log line says {w[1]} (item 071)")
     return missing
 
 
@@ -779,7 +852,7 @@ def main(argv):
             cutoff = rest[1]
         rest = rest[2:]
     work = Path("work")
-    skipped, stuck, awaiting, in_pr, failed, unfinished = [], [], [], [], [], []
+    skipped, stuck, awaiting, in_pr, failed, i3_failed, unfinished = [], [], [], [], [], [], []
     branches = open_branches(today)
     walked = _walk(cutoff) if _git("rev-parse", "HEAD") is not None else None
     untracked = untracked_changes(cutoff, walked)
@@ -793,7 +866,7 @@ def main(argv):
             status, detail = "LEGACY", LEGACY[d.name]
         if d.name in flagged:                       # item 062: replaces the classify line
             status, detail = "SKIPPED", f"{flagged[d.name][0]} {flagged[d.name][1]}"
-        if status in ("STUCK", "not started", "in progress"):
+        if status in ("STUCK", "not started", "in progress", "I3 FAIL"):
             here = {s for s, f in STEPS.items() if (d / f).exists()}
             best = max(((len(items.get(d.name, set()) - here), ref, items.get(d.name, set()))
                         for ref, items in ((b["ref"], b["items"]) for b in branches)), default=(0, "", set()))
@@ -809,6 +882,8 @@ def main(argv):
             awaiting.append(d.name)
         if status == "A1 FAIL":
             failed.append(d.name)
+        if status == "I3 FAIL":
+            i3_failed.append(d.name)
         gaps = incomplete(d) + (real[1].get(d.name, []) if real else [])
         if gaps:
             unfinished.append(f"{d.name} ({'; '.join(gaps)})")
@@ -838,6 +913,7 @@ def main(argv):
     for b in branches:
         for item, detail in b["skipped"]:
             print(f"BRANCH SKIPPED: {item} ({b['ref']}: {detail})")
+    print(f"I3 FAIL: {', '.join(i3_failed) or 'none'}")
     print(f"A1 FAIL: {', '.join(failed) or 'none'}")
     print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
     late = late_log_lines()
@@ -856,7 +932,7 @@ def main(argv):
         print(f"SKIPPED: {', '.join(skipped) or 'none'}")
         return 1
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
-    return 1 if skipped or failed or unfinished or late or orphans or (untracked and untracked[1]) \
+    return 1 if skipped or failed or i3_failed or unfinished or late or orphans or (untracked and untracked[1]) \
         or (real and real[2]) else 0
 
 

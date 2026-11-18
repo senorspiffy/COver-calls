@@ -26,7 +26,7 @@ def _rd_item(repo, item, body05=FILLED, body06=FILLED, files=ALL, scope="FULL"):
     if "05-build-report.md" in files:
         (d / "05-build-report.md").write_text(f"# 05\n{body05}", encoding="utf-8")
     if "06-verification.md" in files:
-        (d / "06-verification.md").write_text(f"# 06\nRecurring issues checked: RI-007\n{body06}",
+        (d / "06-verification.md").write_text(f"# 06\nVerdict: PASS (round 1)\nSent back to: none\nRecurring issues checked: RI-007\n{body06}",
                                               encoding="utf-8")
 
 

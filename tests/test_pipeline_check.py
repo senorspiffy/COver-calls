@@ -17,8 +17,10 @@ FIELDS = {"R1": "brief written | 0", "R2": "3 for / 3 against | languages: N/A",
 
 
 def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A1 result: PASS (test)",
-          logged=True):
-    """A fixture item. Its 06 carries the step-0 line and each step gets its log line (item 043)."""
+          logged=True, verdict="PASS", sent_back="auto"):
+    """A fixture item. Its 06 carries the step-0 line and each step gets its log line (item 043).
+    Item 071: 06 starts with `Verdict: <verdict> (round 1)` (none when verdict is None) and
+    `Sent back to: <t>` (auto: none on PASS, I2 on FAIL; none when sent_back is None)."""
     if scope == "FAST":
         scope = "FAST (person, 2026-10-31)"
     d = root / "work" / item
@@ -30,14 +32,17 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
     for f in files:
         body = f"x\n{a1}\n" if f == "07-audit-task.md" and a1 else "x\n"
         if f == "06-verification.md":
-            body += "Recurring issues checked: RI-007\n"
+            t = {"PASS": "none", "FAIL": "I2"}.get(verdict) if sent_back == "auto" else sent_back
+            body = (f"Verdict: {verdict} (round 1)\n" if verdict is not None else "") \
+                + (f"Sent back to: {t}\n" if t is not None else "") + body + "Recurring issues checked: RI-007\n"
         (d / f).write_text(body, encoding="utf-8")
         agent = AGENTS.get(f[:2])
         if agent and logged:
             log = root / "logs" / ("research" if agent[0] == "R" else "implementation") / f"{date}.md"
             log.parent.mkdir(parents=True, exist_ok=True)
             with log.open("a", encoding="utf-8") as fh:
-                fh.write(f"12:00 | {agent} | {item} | {FIELDS[agent]}\n")
+                field = "FAIL | sent to audit: no" if agent == "I3" and verdict == "FAIL" else FIELDS[agent]
+                fh.write(f"12:00 | {agent} | {item} | {field}\n")
 
 
 NO_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
@@ -161,6 +166,7 @@ def test_repo_pipeline_has_no_skipped_items(tmp_path):
     assert code == 0, out
     assert "RESEARCH CODE: none" in out                 # item 062
     assert "061: complete" in out                      # item 064: 061 stays complete with work/ .py as code
+    assert "I3 FAIL: none" in out  # item 071
 
 
 def test_no_tracked_pycache():
@@ -339,7 +345,8 @@ def test_incomplete_06_and_missing_log_line(tmp_path):
     """043: from 041 on, 06 names the recurring issues checked and every step has a log line."""
     _item(tmp_path, "130", ALL, logged=False)
     _item(tmp_path, "131", ALL)
-    (tmp_path / "work" / "131" / "06-verification.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "work" / "131" / "06-verification.md").write_text("Verdict: PASS (round 1)\nSent back to: none\nx\n",
+                                                               encoding="utf-8")
     _item(tmp_path, "040", ALL, logged=False)          # before CHECKLIST_FROM: not re-checked
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-04")
     assert code == 1
@@ -1506,3 +1513,194 @@ def test_inbox_repo_without_commits_checks_content(tmp_path, monkeypatch):
     cp = _cp()
     monkeypatch.chdir(tmp_path)
     assert cp.inbox_section() == ("none", False)
+
+
+# Item 071: I3's verdict and send-back target in 06 (templates/verification.md L2-3).
+def test_i3_fail_shows_and_exits_1(tmp_path):
+    """T1: a 06 FAIL with no 07 is I3 FAIL, not `in progress (next 07)`, and exits 1."""
+    _item(tmp_path, "171", ALL[:6], verdict="FAIL")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    assert "171: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))" in out
+    assert "I3 FAIL: 171" in out and "A1 FAIL: none" in out and "INCOMPLETE: none" in out
+
+
+def _rounds_item(root, item, files):
+    """T2: line 2 rewritten to PASS above a round-1 FAIL body; I3 logged FAIL 23:50 and PASS 00:00
+    across UTC midnight; the other steps logged in the fixture's well-formed format."""
+    _item(root, item, files, logged=False)
+    (root / "work" / item / "06-verification.md").write_text(
+        f"# 06 Verification - {item}\nVerdict: PASS (round 2; earlier rounds: FAIL round 1)\nSent back to: none\n"
+        "Recurring issues checked: RI-007\n# Round 1\nVerdict: FAIL (round 1)\nSent back to: I2\n", encoding="utf-8")
+    for team, date, lines in (
+            ("research", "2026-11-17", [f"10:00 | {a} | {item} | {FIELDS[a]}" for a in ("R1", "R2", "R3")]),
+            ("implementation", "2026-11-17", [f"11:00 | {a} | {item} | {FIELDS[a]}" for a in ("I1", "I2")]
+             + [f"23:50 | I3 | {item} | FAIL | sent to audit: no"]),
+            ("implementation", "2026-11-18", [f"00:00 | I3 | {item} | PASS | sent to audit: yes"])):
+        log = root / "logs" / team / f"{date}.md"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write("".join(l + "\n" for l in lines))
+
+
+def test_later_pass_round_clears_i3_fail(tmp_path):
+    """T2: the first Verdict line decides (a later round-1 FAIL is not read); log by date, then line."""
+    _rounds_item(tmp_path, "172", ALL[:6])
+    _rounds_item(tmp_path, "179", ALL)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert "172: in progress (FULL: next 07)" in out
+    assert "179: complete (FULL)" in out
+    assert "I3 FAIL: none" in out and "INCOMPLETE: none" in out
+    assert code == 0, out
+
+
+def test_old_06_without_round_headers_unchanged(tmp_path):
+    """T3: below VERDICT_FROM a missing verdict line is not checked; from 071 it is INCOMPLETE."""
+    _item(tmp_path, "060", ALL, verdict=None)
+    (tmp_path / "work" / "060" / "06-verification.md").write_text(
+        "Verdict: PASS\nx\nRecurring issues checked: RI-007\n", encoding="utf-8")
+    _item(tmp_path, "065", ALL, verdict=None)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 0, out
+    assert "060: complete (FULL)" in out and "065: complete (FULL)" in out and "INCOMPLETE: none" in out
+    _item(tmp_path, "173", ALL, verdict=None)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    assert "173 (06 has no readable 'Verdict: PASS' or 'Verdict: FAIL' line (item 071))" in out
+    assert "065 (" not in out.split("INCOMPLETE:")[1]
+
+
+UNFILLED = "Verdict: PASS | FAIL (round <n>; earlier rounds: <verdicts>)\n"
+
+
+@pytest.mark.parametrize("text, want", [
+    # read as a verdict
+    ("Verdict: PASS (round 3; earlier rounds: FAIL round 1)\n", ("PASS", None)),
+    ("Verdict: **FAIL** (x)\n", ("FAIL", None)),
+    ("Verdict: **PASS**. note\n", ("PASS", None)),
+    # unreadable: None, never PASS (RI-002, RI-012)
+    (UNFILLED, (None, None)),
+    ("Verdict: **PASS** | FAIL\n", (None, None)),
+    ("Verdict: PASS/FAIL\n", (None, None)),
+    ("Verdict: pass\n", (None, None)),
+    ("Verdict: PASSED\n", (None, None)),
+    ("see 05. Verdict: FAIL\n", (None, None)),
+    ("  Verdict: FAIL\n", (None, None)),
+    (UNFILLED + "x\nVerdict: FAIL (round 1)\n", (None, None)),
+    ("```\nVerdict: PASS (round 1)\n", (None, None)),                     # unclosed fence (C6)
+    # skipped text: fences and HTML comments
+    ("```\nVerdict: FAIL (pasted)\n```\nVerdict: PASS (round 1)\n", ("PASS", None)),
+    ("<!--\nVerdict: FAIL (old)\n-->\nVerdict: PASS (round 1)\n", ("PASS", None)),
+    # targets: full-line match only
+    ("Verdict: FAIL (round 1)\nSent back to: I1 I2\n", ("FAIL", "I1 I2")),
+    ("Verdict: FAIL (round 1)\nSent back to: I2 (tests only)\n", ("FAIL", None)),
+    ("Verdict: FAIL (round 1)\nSent back to: <I1 | I2 | I1 I2 | none>\n", ("FAIL", None)),
+    ("Verdict: FAIL (round 1)\nx Sent back to: I2\n", ("FAIL", None)),
+])
+def test_i3_verdict_reader(tmp_path, text, want):
+    """T4: the reader's anchored first-line rule (D1-D4)."""
+    f = tmp_path / "06.md"
+    f.write_text(text, encoding="utf-8")
+    assert _cp().i3_verdict(f) == want
+
+
+def test_i3_fail_beats_older_a1_fail(tmp_path):
+    """T5: the 069/070 order: 06 FAIL after an older 07 A1 FAIL shows I3 FAIL (D7)."""
+    _item(tmp_path, "174", ALL, verdict="FAIL", a1="A1 result: FAIL (2026-11-17, test)")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    assert "174: I3 FAIL (" in out and "I3 FAIL: 174" in out and "A1 FAIL: none" in out
+
+
+def test_i3_fail_target_not_stated(tmp_path):
+    """T6: the target is never defaulted (RI-002); from 071 a FAIL without one is INCOMPLETE."""
+    _item(tmp_path, "175", ALL[:6], verdict="FAIL", sent_back=None)
+    _item(tmp_path, "178", ALL[:6], verdict="FAIL", sent_back="none")
+    _item(tmp_path, "066", ALL[:6], verdict="FAIL", sent_back=None)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    for i in ("175", "178", "066"):
+        assert f"{i}: I3 FAIL (FULL; sent back to: not stated, needs a later PASS round in 06 (item 071))" in out
+    for i in ("175", "178"):
+        assert f"{i} (06 Verdict is FAIL but has no 'Sent back to: I1, I2 or I1 I2' line (item 071))" in out
+    assert "066 (" not in out.split("INCOMPLETE:")[1]
+    assert "sent back to I2" not in out
+
+
+def test_06_verdict_disagrees_with_last_i3_log(tmp_path):
+    """T7: from CHECKLIST_FROM, 06's verdict must match the last I3 log line's first word (D6)."""
+    for i in ("176", "040"):
+        _item(tmp_path, i, ALL[:6])
+        with (tmp_path / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+            fh.write(f"12:30 | I3 | {i} | FAIL | sent to audit: no\n")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    assert "176 (06 Verdict says PASS, last I3 log line says FAIL (item 071))" in out
+    assert "040 (" not in out.split("INCOMPLETE:")[1]
+
+
+@NO_GIT
+def test_i3_fail_with_more_steps_on_branch_is_in_pr(tmp_path):
+    """T8: an I3 FAIL item whose open branch has more step files is IN PR (D8)."""
+    origin, repo = tmp_path / "origin.git", tmp_path / "repo"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    _git(tmp_path, "clone", "-q", str(origin), str(repo))
+    _git(repo, "checkout", "-q", "-b", "main")
+    _item(repo, "177", ALL[:6], verdict="FAIL")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "main")
+    _git(repo, "push", "-q", "origin", "main")
+    _branch_adds(repo, "fix", "177", ["07-audit-task.md"])
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-18")
+    assert "177: IN PR (origin/fix has " in out and "; was I3 FAIL here)" in out
+    assert "I3 FAIL: none" in out and "IN PR: 177" in out
+
+
+def test_verification_template_lines_unfilled(tmp_path):
+    """T10: the shipped template's top lines are unreadable until filled."""
+    cp = _cp()
+    tpl = REPO / "templates" / "verification.md"
+    assert cp.i3_verdict(tpl) == (None, None)
+    lines = tpl.read_text(encoding="utf-8").splitlines(keepends=True)
+    assert lines[1].startswith("Verdict:") and lines[2].startswith("Sent back to:")
+    lines[1:3] = ["Verdict: PASS (round 1)\n", "Sent back to: none\n"]
+    f = tmp_path / "06.md"
+    f.write_text("".join(lines), encoding="utf-8")
+    assert cp.i3_verdict(f) == ("PASS", "none")
+
+
+def test_pass_without_sent_back_none_is_incomplete(tmp_path):
+    """T11 (C1): from 071 a PASS needs `Sent back to: none`; a stale or missing field is INCOMPLETE."""
+    _item(tmp_path, "180", ALL, sent_back="I2")
+    _item(tmp_path, "181", ALL, sent_back=None)
+    _item(tmp_path, "182", ALL)
+    _item(tmp_path, "067", ALL, sent_back="I2")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    rest = out.split("INCOMPLETE:")[1]
+    for i in ("180", "181"):
+        assert f"{i} (06 Verdict is PASS but has no 'Sent back to: none' line (item 071))" in rest
+    assert "182 (" not in rest and "067 (" not in rest
+
+
+def test_malformed_last_i3_line_is_not_replaced(tmp_path):
+    """T12 (C2): a malformed last I3 line is 045's; an earlier well-formed line is never used."""
+    _item(tmp_path, "183", ALL)
+    log = tmp_path / "logs" / "implementation" / "2026-10-31.md"
+    log.write_text(log.read_text(encoding="utf-8").replace(
+        "12:00 | I3 | 183 | PASS | sent to audit: yes\n",
+        "12:00 | I3 | 183 | FAIL | sent to audit: no\n12:05 | I3 | 183 | see 06\n"), encoding="utf-8")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    rest = out.split("INCOMPLETE:")[1]
+    assert "183 (log line for I3 does not match its format (item 045)" in rest
+    assert "06 Verdict says" not in rest
+    assert code == 1, out
+
+
+@pytest.mark.parametrize("path, must, must_not", [
+    (".claude/agents/i3-verifier.md", ["On FAIL write no 07", "Sent back to:", "(item 071)"], ["5. On PASS, write"]),
+    (".claude/agents/i2-builder.md", ["not a defect of this build (item 071)"], []),
+])
+def test_agent_texts_name_item_071(path, must, must_not):
+    """T13 (C5, RI-010): the two agent sentences stay in place."""
+    text = (REPO / path).read_text(encoding="utf-8")
+    assert all(m in text for m in must) and not any(m in text for m in must_not)
