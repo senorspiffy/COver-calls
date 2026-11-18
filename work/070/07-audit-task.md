@@ -28,3 +28,4 @@ Fix 4789b44 (tests only) for A1's FAIL (cutoff edge untested). Look at:
 - Full suite fails only on `test_repo_pipeline_has_no_skipped_items` (`A1 FAIL: 069, 070`); I3 confirmed it passes with both last A1 FAIL lines dropped (scratch).
 - Earlier open points still stand: T21 `search` mutation on main for RI-013 GUARDED; REAL-DATA FIELD vs 069's INBOX early return after 069's rebuild.
 - The boundary-value root cause (also 069) is for the daily review's recurring-issues check.
+A1 result: PASS (2026-11-18, logs/audit/2026-11-18-070.md "Re-audit (round 3)": cutoff mutations 100/71/69 and `<`->`<=` killed by behaviour tests T7/T7b/T7c with T7d deselected; live probe with 100 now red (4 failed); full suite 1 failed 403 passed, the failure only A1 FAIL 069/070 (passes with those lines dropped); check_pipeline otherwise clean; check_handoff 070 PASS)
