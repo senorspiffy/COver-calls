@@ -1,5 +1,5 @@
 # 06 Verification - 070
-Verdict: FAIL (round 1)
+Verdict: PASS (round 2; earlier rounds: FAIL round 1)
 
 All test runs and mutations were done in a scratch worktree at 875158e (the 070 build commit), never in /home/claude/df17. The build diff checked is 652a320..875158e.
 
@@ -113,3 +113,77 @@ Sent back to I2 (tests only; the code logic is right):
 For I1 (note only, no re-plan needed): the plan copied 03's two-change mutation ("comments kept + substring"), and it listed exit-1 results without a test that checks the exit code. When a plan names a mutation, it should change a single thing.
 
 Sent to Audit: no.
+
+# Round 2
+Verdict: PASS (round 2; earlier rounds: FAIL round 1)
+
+All runs and mutations were done in a scratch worktree at a237da7 (`git worktree add .../scratchpad/i3-070r2 a237da7`), never in /home/claude/df17. The worktree was removed afterwards.
+
+## I1 audit (round 2)
+No re-plan. Round 1's note to I1 (single-change mutations, exit-1 results need an exit test) is met by I2's round-2 list in 05.
+
+## I2 audit (round 2): diff 7f5e345..a237da7
+- `git diff --stat 7f5e345 a237da7`: tests/test_real_data_field.py +74, work/070/05 +79, and 069's files (logs/audit/2026-11-18-069.md, work/069/07, logs/implementation/2026-11-18.md: e75703b, the A1 FAIL for 069). `git diff 7f5e345 a237da7 -- scripts` is empty: no code changed.
+- New tests T19-T22 match 05's Round 2 text:
+  - T19: main in-process, `_git("log","--no-merges",...)` patched to fail, asserts `REAL-DATA FIELD: git log failed (item 070)`, every other line `none`, return 1. Fixes problem 1.
+  - T20: triggered ID 162 with no request.md, 053 and 062 quiet, exit 1 from REAL-DATA FIELD only. Fixes problem 1.
+  - T21 (4 cases): TOTAL inside prose, outside comments, gives INCOMPLETE. Fixes problem 2 (RI-012).
+  - T22: a whole TOTAL line inside an HTML comment gives INCOMPLETE. It was added because the one-change "comments kept" mutation survived (problem 3).
+- 05's mutation list now changes one thing per mutation (problem 3).
+
+## Tests re-run (round 2 output)
+Scratch at a237da7, Python 3.13.18:
+```
+python3 -m pytest -q -p no:cacheprovider -rs
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items   (assert 1 == 0)
+SKIPPED [1] tests/test_calendar.py:110: could not import 'exchange_calendars'
+1 failed, 383 passed, 1 skipped in 59.38s
+```
+The failure is not a 070 defect:
+- `check_pipeline.py` at a237da7 exits 1 with `A1 FAIL: 069` as its only failing line. INCOMPLETE, SKIPPED, UNTRACKED CHANGE, RESEARCH CODE, REAL-DATA FIELD and ORPHAN LOG are all `none`, and LOG TIME shows only 048's old exception.
+- I committed a throwaway scratch commit (detached HEAD, 2bb50d1, discarded with the worktree) that drops 069's last 07 line (`A1 result: FAIL ...`). Then `069: awaiting A1 (FULL)`, `A1 FAIL: none`, check_pipeline exit 0, `test_repo_pipeline_has_no_skipped_items` 1 passed, and the full suite gives **384 passed, 1 skipped in 59.65s**. 384 + 1 = 385, the same as 05's count.
+- `python3 -m pytest -q tests/test_real_data_field.py` → 28 passed (05: 28).
+- python3.11 is on PATH, python3.10 is not. `test_every_py_compiles_on_oldest_python` ran and passed with 3.11. `python3.11 -m py_compile scripts/check_pipeline.py tests/test_real_data_field.py` → ok.
+
+`python3 scripts/check_handoff.py 070` (scratch, a237da7):
+```
+sources count (unique URLs in 01-research.md): 1
+fact-check rows: 60
+totals line: 60 rows -> 40 as-is, 20 fixed, 0 removed
+PASS
+```
+
+Mutations: one change each, done by a script with an exact pattern that occurs once (asserted). Each was restored, and the script printed `restored: True`. Run: `pytest -q -rf tests/test_real_data_field.py`.
+```
+exit drops `or (real and real[2])`: 2 failed, 26 passed -> t19, t20
+"TOTAL" in line (strip kept):       4 failed, 24 passed -> t21[quoted-total, total-in-brackets, word-total, total-colon]
+"TOTAL:" in line:                   3 failed, 25 passed -> t21[quoted-total, total-in-brackets, total-colon]
+TOTAL_LINE.search(line):            2 failed, 26 passed -> t21[quoted-total, total-in-brackets]
+comment strip removed (text.splitlines()): 1 failed, 27 passed -> t22
+no-request `failed = True` removed: 1 failed, 27 passed -> t20
+restored: True
+```
+These are the same counts and names as 05 Round 2. All 3 round-1 problems are fixed. Both round-1 survivors (the exit term, no-request) are now killed, and the three TOTAL-matcher swaps and the comment-strip removal each fail a test.
+
+## Real-data effect (round 2)
+not required (`git diff --stat 7f5e345 a237da7 -- . ':!work' ':!logs'`: tests/test_real_data_field.py only). Not a TRIGGER path and not under data/real/. `REAL-DATA FIELD: none` at a237da7.
+
+## Recurring issues checked (round 2)
+Recurring issues checked: RI-001, RI-002, RI-007, RI-008, RI-009, RI-010, RI-011, RI-012, RI-013 (RI-003 to RI-006 not applicable: no calendar, no worked example, and no hand total changed in round 2)
+- RI-001 (ESCALATED): every count above comes from a run: 28 file tests, 385 suite tests, and the mutation counts. They match 05.
+- RI-002 (ESCALATED): both absent-input exit-1 paths (git log failed; no request.md) are now tested through main's return value (T19, T20), and both mutations fail. No value is defaulted.
+- RI-012 (GUARDED): there are now negative tests with the TOTAL pattern inside prose (T21) and inside a comment (T22). The substring, `TOTAL:` and `search` swaps and the strip removal each fail a test on their own. Problem 2 is fixed.
+- RI-013 (OPEN): unchanged. 070 is the "→ 070" fix, and gap (o) is stated.
+- RI-007 (GUARDED): T20 asserts that RESEARCH CODE and UNTRACKED CHANGE are `none`. The 069 A1 FAIL line is RI-007's own check working.
+- RI-008: the 3.11 compile passes. python3.10 is not on PATH.
+- RI-009: everything was done in a scratch worktree. 069's uncommitted edit to scripts/check_pipeline.py in /home/claude/df17 was not touched.
+- RI-010: `--log` is used for the log line. No check is weakened.
+- RI-011: no branch-diff code changed.
+
+## Pipeline line (round 2)
+check_pipeline line: `070: awaiting A1 (FULL)`
+(Run in /home/claude/df17 after 06 and 07 were written. That tree also holds 069's uncommitted I2 edit to scripts/check_pipeline.py.)
+
+## Sent back / sent to Audit (round 2)
+Sent to Audit: yes (work/070/07-audit-task.md). Sent back: nothing.
+Note for the orchestrator: `test_repo_pipeline_has_no_skipped_items` stays red on this branch until 069 gets a later A1 PASS line. It is not a 070 defect (see above).
