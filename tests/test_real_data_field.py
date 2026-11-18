@@ -154,6 +154,22 @@ def test_t7d_cutoff_constant_matches_template_comment(tpl):
     assert f"from item {check_pipeline.WHOLE_DIFF_FROM:03d} check_pipeline.py requires" in \
         (REPO / tpl).read_text(encoding="utf-8")
 
+@pytest.mark.parametrize("path, must, must_not", [
+    (".claude/agents/i3-verifier.md",
+     ["Your head run is always your own", "never use the head run made for 05", "(item 073)"], []),
+    (".claude/commands/run-item.md",
+     ["I3's head run is always its own full run", "never give I3 the head run made for 05", "(item 073)"], []),
+    ("templates/verification.md",
+     ["never 05's head dir (item 073)", "same `--max-rows` as 05"], ["same dirs"]),
+], ids=["i3", "run-item", "template"])
+def test_t23_own_head_run_text(path, must, must_not):
+    """073: I3's head run is its own (person's choice 2026-11-18); RI-010, a text duty with a check."""
+    text = (REPO / path).read_text(encoding="utf-8")
+    for s in must:
+        assert s in text, f"{path}: missing {s!r}"
+    for s in must_not:
+        assert s not in text, f"{path}: still has {s!r}"
+
 def test_t8_no_git_is_not_checked(tmp_path):
     _rd_item(tmp_path, "160", body05="x\n", body06="x\n")
     code, out = _run(tmp_path, "check_pipeline.py", "--today", DATE)
