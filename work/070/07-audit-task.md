@@ -17,3 +17,4 @@ A1, please check:
   - Gaps (m)-(t) in the docstring: conflict-only merge edits, reverted changes, and a TOTAL that is stale but present. Judge whether a TOTAL-line presence check is enough for RI-013 to move to GUARDED.
 - **Recurring issues**
   - No new occurrence. RI-012 is applied (T21, T22). RI-002's absent-input exits are tested (T19, T20). RI-013: this is the guardrail for the "→ 070" gap. GUARDED when merged and the T21 `search` mutation fails on main.
+A1 result: FAIL (2026-11-18, logs/audit/2026-11-18-070.md: cutoff edge untested - `WHOLE_DIFF_FROM = 100` and `< -> <=` survive the full suite (383 passed); live probe flags 070 as built but not with 100; add an item-070 edge test next to T7; other 12 mutations killed, suite fails only on 069 A1 FAIL)
