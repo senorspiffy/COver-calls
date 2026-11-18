@@ -119,6 +119,41 @@ def test_t7_items_before_cutoff_are_not_checked(tmp_path):
     assert real == "REAL-DATA FIELD: none", out
 
 
+
+@NO_GIT
+def test_t7b_cutoff_edge_item_070_is_checked(tmp_path):
+    """Round 3 (A1 FAIL): the edge ID itself. Kills `<` -> `<=` and any WHOLE_DIFF_FROM > 70;
+    T7 (069 not checked) kills any WHOLE_DIFF_FROM < 70."""
+    repo, cutoff, sha = _trigger_commit(tmp_path, item="070", body05="x\n", body06="x\n")
+    code, out, real, inc = _check(repo, cutoff)
+    assert real == "REAL-DATA FIELD: 070", out
+    assert inc.startswith(f"INCOMPLETE: 070 (05 has no '{HEAD}' section ({sha[:7]} changes "
+                          "ccbot/realtest.py; item 070)"), out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_t7c_cutoff_edge_pair_in_one_repo(tmp_path):
+    """069 and 070 each with their own trigger commit: only 070 is named."""
+    repo, cutoff = _history(tmp_path)
+    for item in ("069", "070"):
+        _rd_item(repo, item, body05="x\n", body06="x\n")
+        _write(repo, "ccbot/realtest.py", f"# {item}\n")
+        _commit(repo, f"{item} + realtest")
+    code, out, real, inc = _check(repo, cutoff)
+    assert real == "REAL-DATA FIELD: 070", out
+    assert "070 (" in inc and "069 (" not in inc, out
+    assert code == 1, out
+
+
+@pytest.mark.parametrize("tpl", ["templates/build-report.md", "templates/verification.md"])
+def test_t7d_cutoff_constant_matches_template_comment(tpl):
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_pipeline
+    assert check_pipeline.WHOLE_DIFF_FROM == 70
+    assert f"from item {check_pipeline.WHOLE_DIFF_FROM:03d} check_pipeline.py requires" in \
+        (REPO / tpl).read_text(encoding="utf-8")
+
 def test_t8_no_git_is_not_checked(tmp_path):
     _rd_item(tmp_path, "160", body05="x\n", body06="x\n")
     code, out = _run(tmp_path, "check_pipeline.py", "--today", DATE)

@@ -243,3 +243,67 @@ Recurring issues checked (round 2): RI-002, RI-012, RI-009, RI-001, RI-007, RI-0
 
 RI-012: GUARDED (070 round 2: T21 kills "TOTAL" in line, "TOTAL:" in line and TOTAL_LINE.search one change at a time; T22 kills dropping the comment strip)
 RI-002: ESCALATED (070 round 2: main's exit 1 for "git log failed" and "no request.md" now tested, T19/T20)
+
+## Round 3 (after A1 FAIL)
+A1 (logs/audit/2026-11-18-070.md) failed 070 because the cutoff edge was untested: `WHOLE_DIFF_FROM = 100` and `<` -> `<=` survived the full suite. Fix, tests only, in tests/test_real_data_field.py next to T7. scripts/, templates/, ccbot/ are unchanged (`git diff --stat`: `tests/test_real_data_field.py | 35 +++`).
+- **T7b** `test_t7b_cutoff_edge_item_070_is_checked`: item `070` with a ccbot/realtest.py commit and no Real-data section -> `REAL-DATA FIELD: 070`, `INCOMPLETE: 070 (05 has no '...' section (<sha7> changes ccbot/realtest.py; item 070)`, exit 1.
+- **T7c** `test_t7c_cutoff_edge_pair_in_one_repo`: 069 and 070 each with their own trigger commit -> only 070 named, exit 1.
+- **T7d** `test_t7d_cutoff_constant_matches_template_comment` (x2): `WHOLE_DIFF_FROM == 70` and equals the "from item 070" in templates/build-report.md and templates/verification.md.
+- T7 (069 not checked) is kept as is.
+
+File counts (from commands, excluding work/ and logs/):
+```
+git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'   -> 0
+git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'   -> 1
+```
+
+Mutations (scratch worktree `scratchpad/i2-070r3` at aace9dc with the new test file copied in; `python3 -m pytest -q tests/test_real_data_field.py`; worktree removed afterwards):
+
+| Mutation | Result |
+|---|---|
+| `WHOLE_DIFF_FROM = 100` | killed: 4 failed, 28 passed (T7b, T7c, T7d x2) |
+| `WHOLE_DIFF_FROM = 71` | killed: 4 failed, 28 passed (T7b, T7c, T7d x2) |
+| `WHOLE_DIFF_FROM = 69` | killed: 4 failed, 28 passed (T7, T7c, T7d x2) |
+| `int(item) < WHOLE_DIFF_FROM` -> `<=` | killed: 2 failed, 30 passed (T7b, T7c) |
+
+Each mutation is also killed by a behaviour test alone (T7b or T7/T7c), not only by the T7d constant check.
+
+A1's live probe replayed (scratch branch `scratch-i2-070r3-probe`, one commit cc1bd88 adding a comment to ccbot/costs.py and a line to work/070/05; branch deleted afterwards):
+```
+as built:              exit 1
+A1 FAIL: 069, 070
+INCOMPLETE: 070 (05 Real-data effect has no diff_reports TOTAL line (cc1bd88 changes ccbot/costs.py; item 070); 06 Real-data effect has no diff_reports TOTAL line (cc1bd88 changes ccbot/costs.py; item 070))
+REAL-DATA FIELD: 070
+WHOLE_DIFF_FROM = 100: exit 1
+A1 FAIL: 069, 070
+INCOMPLETE: none
+REAL-DATA FIELD: none
+```
+Same as A1's result; the 100 mutation is now caught by T7b/T7c/T7d.
+
+Test output (in /home/claude/df17):
+```
+python3 -m pytest -q tests/test_real_data_field.py
+32 passed in 4.49s
+python3 -m pytest -q
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 403 passed, 1 skipped in 63.04s (0:01:03)
+python3.11 -m py_compile tests/test_real_data_field.py -> ok
+```
+The one failure is the known one: its output shows `069: A1 FAIL (FULL; sent back ...)`, `070: A1 FAIL (FULL; sent back ...)`, `A1 FAIL: 069, 070`. It clears when both get a later A1 PASS line. 405 tests total from pytest (1 + 403 + 1); 4 are new in this round (file 28 -> 32).
+
+`python3 scripts/check_pipeline.py` (exit 1): `069: A1 FAIL`, `070: A1 FAIL`, `A1 FAIL: 069, 070`, STUCK, AWAITING A1, IN PR, RULES BRANCH, ID CLASH, INCOMPLETE, UNTRACKED CHANGE, RESEARCH CODE, REAL-DATA FIELD, ORPHAN LOG, SKIPPED all `none`; LOG TIME none (048 legacy note); `INBOX: not checked (2026-11-17.md added in b268a22; its templates/daily-audit.md has no ## Inbox)`. Exit 1 is from A1 FAIL alone.
+
+Missing-data grep (`grep -rnE "fillna|nan_to_num|or 0|..." ccbot/`): 37 hits, all pre-existing; ccbot/ is unchanged in this round, so no new or changed hit. The new tests add no numeric dataclass defaults and no `>`/`<` tests on data.
+
+Connectivity: T7b, T7c, T7d are collected (32 in the file); each asserts on the REAL-DATA FIELD line, the INCOMPLETE line, main's exit or the template text. No TODOs, no new files. 069's code, tests and work/069 were not touched; the I3-069 scratch worktree was left alone.
+
+Recurring issues checked (round 3): RI-001, RI-002, RI-007, RI-008, RI-009, RI-012, RI-013.
+- RI-001 (ESCALATED): every count above is from a real run.
+- RI-002 (ESCALATED): no value defaulted; unchanged code.
+- RI-007/RI-008: unchanged; 3.11 compile ok.
+- RI-009: mutations and the probe ran only in the scratch worktree/branch, both removed.
+- RI-012 (GUARDED): unchanged from round 2.
+- RI-013 (OPEN): the cutoff that decides which items are checked is now pinned at the edge (070 checked, 069 not).
+
+RI-013: OPEN (070 round 3: cutoff edge pinned; WHOLE_DIFF_FROM 100/71/69 and `<=` each fail a test; GUARDED when 070 is merged and the probe fails on main)
