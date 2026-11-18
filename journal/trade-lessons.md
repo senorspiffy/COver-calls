@@ -3,6 +3,10 @@
 Lessons from the paper bot's real trades, newest first. Each line: date, lesson, evidence. UNCONFIRMED = seen once; CONFIRMED = seen 3+ times.
 Paper only, research, not financial advice. Lessons are notes only: no setting is tuned from paper results; any change waits for the Sunday review.
 
+## 2026-11-17
+- **A near-worthless call still blocks the shares for a month.** VALE 13C is at $0.005 (97% of premium earned) with 31 days left. Closing it for about $1 per contract would let the bot sell a fresh call at a strike at or above the $11.97 basis. For the Sunday review: compare with variant V1 (50% buy-back). UNCONFIRMED.
+- **The loss is still growing while the premium is almost all earned.** Shares -$404, calls +$48 (12%). Repeats the CONFIRMED 11-16 lesson; no new cause.
+
 ## 2026-11-16
 - **The call cushion is now small next to the drop.** Shares -$373, calls +$40.50 (11% offset). VALE alone: -$302 vs +$25 (8%). Seen 3 days: CONFIRMED. On a falling stock, the premium does not protect the account.
 - **Two names = concentrated risk.** Both holdings fell together (F -5.8%, VALE -12.6% from basis), so equity is -6.7% in a week. Notes only for the Sunday review: compare with a wider or ETF-based setup before adding capital. UNCONFIRMED.
