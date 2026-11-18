@@ -19,3 +19,4 @@ A1, please check:
   - The check fails only on unfilled placeholders and missing lines. It does not check that the hub SHA is the actual origin/main, or that the "N seen before" count is right. Judge whether that is enough.
 - **Recurring issues**
   - No new occurrence. RI-012 is applied (xi, xii). RI-010 is extended (INBOX check, unfilled template). RI-001 and RI-002 stay ESCALATED, and RI-013 stays OPEN (n/a).
+A1 result: FAIL (2026-11-18, logs/audit/2026-11-18-069.md: suite 377/1 skipped, check_pipeline exit 0, check_handoff PASS and I3 mutations m8/m9/mt reproduced at ecc1538; FAIL: INBOX_FROM "2026-11-18" makes main exit 1 at merge on a daily report written under the old template (probe P1, exit=1) -> back to I1/I2; SHA 7-char minimum unpinned (m10 survives))
