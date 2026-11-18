@@ -53,3 +53,4 @@ A1, please re-check:
   - The first daily report added after this branch merges is checked by content. Every report added on main before the merge stays `not checked`.
 - **Recurring issues**
   - RI-010 fix (record A1's proposed occurrence in the daily review). RI-001 and RI-002 stay ESCALATED and were checked. RI-011 and RI-012 held. RI-013 n/a.
+A1 result: PASS (2026-11-18, logs/audit/2026-11-18-069.md 'Re-audit (round 3)': P1 replay --no-ff/--squash not checked; m10 2 failed; gate mutations g1-g6 caught)
