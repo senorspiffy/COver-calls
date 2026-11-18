@@ -1,5 +1,5 @@
 # 06 Verification - 069
-Verdict: PASS (round 2; earlier rounds: FAIL round 1)
+Verdict: PASS (round 3; earlier rounds: FAIL round 1, PASS round 2 then A1 FAIL)
 
 All checks were run in a scratch worktree of the build commit 8dc2c2d, because /home/claude/df17 is being edited at the same time by item 070 (uncommitted changes to scripts/check_pipeline.py, templates/build-report.md, templates/verification.md and tests/test_real_data_field.py). The scratch paths were `/tmp/claude-0/-home-claude/4cc69c4f-899b-56b8-af6f-c0c8dcf01a44/scratchpad/i3-069`, mutation copies in `.../scratchpad/i3m069/<m>/` and a probe root in `.../scratchpad/i3probe`. The repo tree was never mutated. Nothing connects to a brokerage.
 
@@ -157,3 +157,114 @@ check_pipeline line: `069: awaiting A1 (FULL)` (real tree, after this file, 07 a
 
 ## Sent back / sent to Audit
 Sent to Audit: `work/069/07-audit-task.md`. Nothing is sent back.
+
+# Round 3 (re-verification of I2 round 3, commit 21d7591, after A1 FAIL)
+Verdict: PASS (round 3; earlier rounds: FAIL round 1, PASS round 2 then A1 FAIL)
+
+All runs were made in the scratch worktree `/tmp/claude-0/-home-claude/4cc69c4f-899b-56b8-af6f-c0c8dcf01a44/scratchpad/i3-069r3` at f77247f (branch head; merges main c10b8ae, `git diff --stat 21d7591 f77247f` is empty). Mutation copies (`git archive 21d7591`) were in `.../scratchpad/i3m069r3/<m>/`, the P1 clone in `.../scratchpad/i3p1`. All three were removed afterwards. In the real tree I wrote only this file, 07 and the I3 log line. Nothing connects to a brokerage. During this run the real tree had an uncommitted `tests/test_real_data_field.py` change (+35 lines, tests t7b/t7c). That is 070 round 3 work by another agent, since committed by 070's I2 as 4789b44. It is not part of 069, and I did not run it or touch it.
+
+## I1 audit (plan vs research)
+04 "Round 2 (after A1 FAIL)" takes A1's send-back 1 and 2 (logs/audit/2026-11-18-069.md) and A1's option (a): the gate reads the template at the commit that added the report. Nothing is added without a source. The git behaviour it relies on is quoted from git-diff (`--diff-filter=A`) and git-log (History Simplification, TREESAME parent). Each claim is then pinned by a test (xiv-b, xiv-c) rather than taken on trust. The missing-input table gives every new input (git, history depth, adding commit, template at that commit, working template) a `not checked` or exit-1 result. None of them becomes `none` (RI-002). It drops two rows with stated reasons (the EFFICIENCY item and the RI record, both for the daily review, item 036). Scope is limited to 2 files and to 069's lines.
+
+## I2 audit (build vs plan)
+`git diff --stat ad30a07 21d7591` lists scripts/check_pipeline.py (+57 incl. docstring), tests/test_pipeline_check.py (+213), work/069/05, logs/implementation/2026-11-18.md, and 070's work/070/06, 07 (from 070's I3 commit 8dfc800, not 069's). `git diff --stat 8dfc800 21d7591` = the 4 files of 069 only.
+- R2-1.1: `INBOX_FROM` deleted, `INBOX_TEMPLATE` added (L230). No reference to INBOX_FROM remains.
+- R2-1.2: `_inbox_gate` follows steps 1-5 in order: shallow/no-git, HEAD verify, `git log --no-renames --diff-filter=A --format=%H -1 -- <path>`, non-zero → `(<name> (git log failed), True)`, `git show <sha>:templates/daily-audit.md` matched with INBOX_HEAD, else the working-tree template with `not committed`. The return annotation is a string (a deviation 05 declares, allowed by 04).
+- R2-1.3: `inbox_section` drops the date term, gives `not checked (no daily report)`, and calls the gate after picking the newest report. The content checks are unchanged.
+- R2-1.4: the docstring states the template rule and gaps (u) and (v).
+- R2-2: `_daily(..., template, commit, git)`, `_inbox` with `--untracked-from <HEAD>`, `@NO_GIT` on the git fixtures, vii rewritten and renamed (declared), ix wording, new tests xiv, xiv-b, xiv-c[main,t], xv, xv-b, xv-c, xvi[3], xvii, xvii-b, xviii, xix, xx, xxi. That is 14 + 16 = 30 `-k inbox` cases, as planned.
+- 070 untouched: `git diff --stat 8dfc800 21d7591 -- tests/test_real_data_field.py ccbot` is empty. `git diff 8dfc800 21d7591 -- scripts/check_pipeline.py | grep -ciE 'real_data|TRIGGER|TOTAL_LINE'` gives `0`. The hunks are only at old L134, 139 (docstring), 224 (constant), 705-713 (gate and inbox_section). main() is not edited.
+- Connectivity: `_inbox_gate` ← `inbox_section` ← main() INBOX block (prints, `return 1`). The 30 inbox tests are collected and run.
+- Text matching (item 059, RI-012): the gate reuses INBOX_HEAD (`^## Inbox\b`, re.M) on the template text. The mid-line negative xii (m9) still pins that anchor. The gate adds no new text classifier: git results are judged by exit code, and `--is-shallow-repository` is compared as a whole stripped string (`== "true"`).
+- No simulator or picker is involved (item 062 n/a).
+
+## Tests re-run (output)
+```
+$ python3 -m pytest -q -p no:cacheprovider                       (scratch @ f77247f)
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 399 passed, 1 skipped in 63.76s (0:01:03)
+$ python3 -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py -k inbox
+30 passed, 90 deselected in 6.88s
+$ python3 -m pytest -q -rs -p no:cacheprovider tests/test_safety.py
+9 passed in 0.86s     (test_every_py_compiles_on_oldest_python ran on /usr/bin/python3.11; python3.10 not on PATH; no skip)
+$ python3 scripts/check_handoff.py 069        (real tree)
+sources count (unique URLs in 01-research.md): 2
+fact-check rows: 57
+totals line: 57 rows -> 50 as-is, 6 fixed, 1 removed
+PASS
+```
+These match 05 round 3 (1 failed / 399 passed / 1 skipped, 30 inbox). The skip is exchange_calendars.
+
+The one failure comes from `A1 FAIL: 069` only. Scratch `check_pipeline.py` at f77247f: `069: A1 FAIL (FULL; sent back, needs a later A1 PASS line (item 042))`, `A1 FAIL: 069`, every other line `none`, `INBOX: not checked (2026-11-17.md added in b268a22; its templates/daily-audit.md has no ## Inbox)`, exit 1. I confirmed this with a scratch commit (a2b2fb5) that drops only the last line of work/069/07 (A1's FAIL line):
+```
+$ python3 -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 passed in 2.68s
+$ python3 scripts/check_pipeline.py
+069: awaiting A1 (FULL)
+A1 FAIL: none
+INCOMPLETE: none
+INBOX: not checked (2026-11-17.md added in b268a22; its templates/daily-audit.md has no ## Inbox)
+SKIPPED: none
+exit=0
+```
+
+Mutations (each in its own `git archive 21d7591` copy, `tests/test_pipeline_check.py -k inbox`):
+```
+m10  hub {7,40} -> {1,40}           2 failed, 28 passed: xvi[116c68], xvi[2026-11-18]
+m10b hub {7,40} -> {7,}             1 failed, 29 passed: xvi[41 hex]
+gate always None                   10 failed, 20 passed: vii, xiv, xiv-b, xiv-c[main], xiv-c[t], xv-c, xvii, xviii, xix, xx
+gate always not checked            27 failed, 3 passed (all but viii, ix, xvii-b)
+HEAD: instead of <sha>:             5 failed, 25 passed: xiv, xiv-b, xiv-c[main], xiv-c[t], xx
+--diff-filter=A removed             1 failed, 29 passed: xiv-b
+shallow guard off (if False)        1 failed, 29 passed: xviii
+git log failure -> (..., False)     1 failed, 29 passed: xix
+git log failure -> not checked      1 failed, 29 passed: xix
+round-1 check_pipeline.py (ad30a07) with the new tests:
+                                   12 failed, 18 passed (incl. xiv, xiv-b, xiv-c, xx; xix gives 'none')
+```
+Each mutation fails at least the tests 04 names. m10 is A1's surviving mutation, and it now fails 2 tests (send-back 2). With the round-1 code, xiv fails, so the new tests catch A1's P1.
+
+Probe P1, as real merges (scratch clone `i3p1` of the a2b2fb5 scratch commit, so that only INBOX can set the exit; origin/main c10b8ae fetched as `omain`; on `omain`, `logs/audit/2026-11-18.md` = copy of 2026-11-17.md committed first):
+```
+--no-ff (git merge --no-ff <tip>):
+A1 FAIL: none / INCOMPLETE: none / UNTRACKED CHANGE: none
+INBOX: not checked (2026-11-18.md added in 330ead4; its templates/daily-audit.md has no ## Inbox)
+SKIPPED: none
+exit=0
+--squash (git merge --squash <tip>; commit):
+A1 FAIL: none / INCOMPLETE: none / UNTRACKED CHANGE: none
+INBOX: not checked (2026-11-18.md added in 06ec053; its templates/daily-audit.md has no ## Inbox)
+SKIPPED: none
+exit=0
+test_repo_pipeline_has_no_skipped_items on both merge results: 1 passed / 1 passed
+then on the --no-ff result, logs/audit/2026-11-19.md = templates/daily-audit.md unfilled, committed:
+INBOX: 2026-11-19.md (no project-inbox: line; no hub: SHA or UNREAD line)
+exit=1
+round-1 check_pipeline.py (ad30a07) on the --no-ff merge:
+INBOX: 2026-11-18.md (no project-inbox: line; no hub: SHA or UNREAD line)
+exit=1
+```
+A1's P1 is fixed. After either merge type, main stays green with a report written under the old template, on any date. The first report under the new template is checked, and an unfilled one gives exit 1. The round-1 code still reproduces A1's FAIL on the same history.
+
+Guardrail would have caught the original error: xiv is P1's shape (an old-format report dated after 11-18, then the template change). It fails on the round-1 code (above) and under the `gate always None` and `HEAD:` mutations.
+
+## Real-data effect (diff_reports output, pasted)
+not required (`scripts/check_pipeline.py`, `tests/test_pipeline_check.py`; neither is ccbot/realtest.py or a file it reads)
+
+## Recurring issues checked (step 0)
+Recurring issues checked: RI-001, RI-002, RI-007, RI-008, RI-009, RI-010, RI-011, RI-012, RI-013 (one line each below)
+- RI-001 (ESCALATED): I re-ran the gate's dated count: on the real tree, 2026-11-17.md was added in b268a22 under a template with no Inbox, and the real-tree INBOX line agrees. 05 has the 0-of-8 count. The SHA filter is pinned on both ends (m10 fails 2, m10b fails 1).
+- RI-002 (ESCALATED): no git, shallow, no report, template absent or without Inbox all give `not checked`, never `none`. A git log failure gives exit 1 (both of its mutations fail xix). Nothing is defaulted.
+- RI-007: round 3 has its own I2 log line and 05 section. This 06 follows them. A1 runs next.
+- RI-008: the compile test ran on 3.11 (3.10 absent). The string annotation is never evaluated.
+- RI-009: all runs were in scratch. 070's code and its uncommitted test file were not touched.
+- RI-010 (GUARDED; A1 proposes an occurrence for the daily review): this round is the fix. The check is keyed to the rule's own file at the report's adding commit. P1 stays `not checked` after --no-ff and --squash.
+- RI-011: no merge-base is used. xiv-c pins the log through merges in both directions.
+- RI-012 (GUARDED): there is no new text classifier. INBOX_HEAD stays anchored (xii) and is reused on the template.
+- RI-013 (OPEN): n/a, no realtest change.
+
+## Pipeline line (step 2)
+check_pipeline line: `069: A1 FAIL (FULL; sent back, needs a later A1 PASS line (item 042))` (real tree, after this file, 07 and the I3 log line). This line is expected until A1 writes a later PASS line (item 042). It is not SKIPPED or INCOMPLETE: `INCOMPLETE: none`, `SKIPPED: none`, `LOG TIME: none`, `INBOX: not checked (2026-11-17.md added in b268a22; ...)`.
+
+## Sent back / sent to Audit
+Sent to Audit: `work/069/07-audit-task.md` (Round 3 section). Nothing is sent back.
