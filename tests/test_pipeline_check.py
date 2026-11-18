@@ -1174,19 +1174,40 @@ INBOX_OK = ("# Daily audit - 2026-11-18\n## Inbox (other projects asking us to t
             "project-inbox: nothing new (2 seen before)\nhub: {sha}, nothing new\n## ESCALATED recurring issues\n")
 
 
-def _daily(root, name, body):
+INBOX_TPL = "# Daily audit\n## Inbox (x)\nproject-inbox: <fill in>\nhub: <fill in>\n"
+OLD_TPL = "# Daily audit\n## Items reviewed\n"  # main's template before 069: no ## Inbox
+OLD_REPORT = ("# Daily audit - 2026-11-17\n## Inbox\nNo project-inbox step yet. Hub (116c68c): "
+              "nothing addressed to us.\n## Items reviewed\n")  # 2026-11-17.md's real shape
+
+
+def _daily(root, name, body, template=INBOX_TPL, commit=True, git=True):
+    """A daily report in `root`. With git, `root` becomes a repo on its first call and the report
+    (with templates/daily-audit.md = `template`, unless None) is committed if `commit`."""
     (root / "work").mkdir(exist_ok=True)  # main() lists work/; these fixtures have no items
+    if git and not (root / ".git").exists():
+        _git(root, "init", "-q", "-b", "main")
+    if template is not None:
+        (root / "templates").mkdir(exist_ok=True)
+        (root / "templates" / "daily-audit.md").write_text(template, encoding="utf-8")
     p = root / "logs" / "audit" / name
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(body, encoding="utf-8")
+    if git and commit:
+        return _commit(root)
 
 
 def _inbox(root):
-    code, out = _run(root, "check_pipeline.py", "--today", "2026-11-18")
+    """INBOX line of main(); in a repo with a commit the item-053 cutoff is HEAD, so the
+    fixture's templates/ commits are not UNTRACKED CHANGEs."""
+    head = subprocess.run(["git", "rev-parse", "--verify", "-q", "HEAD"], cwd=root, capture_output=True,
+                          text=True) if (root / ".git").exists() else None
+    extra = ["--untracked-from", head.stdout.strip()] if head is not None and head.returncode == 0 else []
+    code, out = _run(root, "check_pipeline.py", "--today", "2026-11-18", *extra)
     line = next((ln for ln in out.splitlines() if ln.startswith("INBOX: ")), None)
     return code, out, line
 
 
+@NO_GIT
 @pytest.mark.parametrize("sha", ["116c68c", "116c68c533cbd9d13bf3e81c1d833ab408102f84"])
 def test_inbox_section_with_sha_passes(tmp_path, sha):
     """(i), (i-b): a 7- and a 40-char hub SHA both pass."""
@@ -1196,6 +1217,7 @@ def test_inbox_section_with_sha_passes(tmp_path, sha):
     assert code == 0, out
 
 
+@NO_GIT
 def test_inbox_unread_channels_pass(tmp_path):
     """(ii): UNREAD is a valid line for each channel (never shown as nothing new)."""
     _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\nproject-inbox: UNREAD: not reachable (x)\n"
@@ -1205,6 +1227,7 @@ def test_inbox_unread_channels_pass(tmp_path):
     assert code == 0, out
 
 
+@NO_GIT
 def test_inbox_heading_missing_fails(tmp_path):
     """(iii)."""
     _daily(tmp_path, "2026-11-18.md", "# Daily audit - 2026-11-18\n## ESCALATED recurring issues\n")
@@ -1214,6 +1237,7 @@ def test_inbox_heading_missing_fails(tmp_path):
     assert code == 1
 
 
+@NO_GIT
 def test_inbox_hub_line_without_sha_fails(tmp_path):
     """(iv)."""
     _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\nproject-inbox: nothing new (2 seen before)\nhub: nothing new\n")
@@ -1222,6 +1246,7 @@ def test_inbox_hub_line_without_sha_fails(tmp_path):
     assert code == 1
 
 
+@NO_GIT
 def test_inbox_project_inbox_line_missing_fails(tmp_path):
     """(v)."""
     _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\nhub: 116c68c, nothing new\n")
@@ -1230,6 +1255,7 @@ def test_inbox_project_inbox_line_missing_fails(tmp_path):
     assert code == 1
 
 
+@NO_GIT
 def test_inbox_ignores_per_item_report(tmp_path):
     """(vi): per-item reports are ignored. "-" sorts before ".", so 2026-11-18-070.md is never newer
     than 2026-11-18.md; the later-dated 2026-11-19-070.md pins the name filter and
@@ -1242,11 +1268,13 @@ def test_inbox_ignores_per_item_report(tmp_path):
     assert code == 0, out
 
 
-def test_inbox_report_before_cutoff_not_checked(tmp_path):
-    """(vii): 2026-11-17.md predates the Inbox template."""
-    _daily(tmp_path, "2026-11-17.md", "# Daily audit - 2026-11-17\n## Items reviewed\n")
+@NO_GIT
+def test_inbox_report_under_old_template_not_checked(tmp_path):
+    """(vii, 069 round 2): 2026-11-17.md was added under a template without ## Inbox."""
+    sha = _daily(tmp_path, "2026-11-17.md", OLD_REPORT, template=OLD_TPL)
     code, out, line = _inbox(tmp_path)
-    assert line == "INBOX: not checked (no daily report from 2026-11-18)", out
+    assert line == (f"INBOX: not checked (2026-11-17.md added in {sha[:7]}; "
+                    "its templates/daily-audit.md has no ## Inbox)"), out
     assert code == 0, out
 
 
@@ -1265,10 +1293,11 @@ def test_inbox_no_audit_folder_not_checked(tmp_path):
     """(ix, C2): no logs/audit/ at all → not checked, no traceback, exit unchanged."""
     _item(tmp_path, "024", ALL)
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-10-31")
-    assert "INBOX: not checked (no daily report from 2026-11-18)" in out
+    assert "INBOX: not checked (no daily report)" in out
     assert code == 0, out
 
 
+@NO_GIT
 def test_inbox_hub_line_outside_section_fails(tmp_path):
     """(x, C3): a well-formed hub: line under another heading does not count."""
     _daily(tmp_path, "2026-11-18.md", "## Inbox (x)\nproject-inbox: nothing new (2 seen before)\n"
@@ -1278,6 +1307,7 @@ def test_inbox_hub_line_outside_section_fails(tmp_path):
     assert code == 1
 
 
+@NO_GIT
 def test_inbox_code_words_mid_line_fail(tmp_path):
     """(xi, RI-012, 069 round 2): `project-inbox:` and `hub:` count only at the start of a line.
     Pins the `^` anchors of INBOX_PI and INBOX_HUB (mutation m8)."""
@@ -1288,6 +1318,7 @@ def test_inbox_code_words_mid_line_fail(tmp_path):
     assert code == 1
 
 
+@NO_GIT
 def test_inbox_heading_mid_line_fails(tmp_path):
     """(xii, RI-012, 069 round 2): `## Inbox` counts only as a heading at the start of a line.
     Pins the `^` anchor of INBOX_HEAD (mutation m9)."""
@@ -1298,6 +1329,7 @@ def test_inbox_heading_mid_line_fails(tmp_path):
     assert code == 1
 
 
+@NO_GIT
 def test_inbox_unfilled_template_fails(tmp_path):
     """(xiii, 069 round 2): templates/daily-audit.md copied as-is must fail both channel lines,
     so a report whose placeholder lines were never filled in can't pass INBOX."""
@@ -1307,3 +1339,170 @@ def test_inbox_unfilled_template_fails(tmp_path):
     code, out, line = _inbox(tmp_path)
     assert line == "INBOX: 2026-11-18.md (no project-inbox: line; no hub: SHA or UNREAD line)", out
     assert code == 1
+
+
+def _old_then_template(root, name="2026-11-25.md"):
+    """(xiv history) c1 old template; c2 adds an old-format report (dated after 2026-11-18, so the
+    date is irrelevant); c3 changes the template to INBOX_TPL (the merge). Returns c2's SHA."""
+    _daily(root, "2026-11-10.md", OLD_REPORT, template=OLD_TPL)
+    c2 = _daily(root, name, OLD_REPORT, template=OLD_TPL)
+    (root / "templates" / "daily-audit.md").write_text(INBOX_TPL, encoding="utf-8")
+    _commit(root)
+    return c2
+
+
+def _not_checked(name, sha):
+    return f"INBOX: not checked ({name} added in {sha[:7]}; its templates/daily-audit.md has no ## Inbox)"
+
+
+@NO_GIT
+def test_inbox_old_report_after_template_change_not_checked(tmp_path):
+    """(xiv, A1 P1): an old-format report added before the template change stays unchecked
+    after it, on any date; the gate reads the adding commit, not HEAD."""
+    c2 = _old_then_template(tmp_path)
+    code, out, line = _inbox(tmp_path)
+    assert line == _not_checked("2026-11-25.md", c2), out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_inbox_old_report_edited_after_template_change_not_checked(tmp_path):
+    """(xiv-b): editing the old report after the merge keeps its adding commit (--diff-filter=A)."""
+    c2 = _old_then_template(tmp_path)
+    with (tmp_path / "logs" / "audit" / "2026-11-25.md").open("a", encoding="utf-8") as fh:
+        fh.write("A1 note appended later.\n")
+    _commit(tmp_path)
+    code, out, line = _inbox(tmp_path)
+    assert line == _not_checked("2026-11-25.md", c2), out
+    assert code == 0, out
+
+
+@NO_GIT
+@pytest.mark.parametrize("into", ["main", "t"])
+def test_inbox_old_report_through_real_merge_not_checked(tmp_path, into):
+    """(xiv-c): report on `main`, template change on `t`, `git merge --no-ff` either way; the
+    path-limited log follows the TREESAME parent to the report's own adding commit."""
+    _daily(tmp_path, "2026-11-10.md", OLD_REPORT, template=OLD_TPL)
+    _git(tmp_path, "branch", "t")
+    report = _daily(tmp_path, "2026-11-25.md", OLD_REPORT, template=OLD_TPL)
+    _git(tmp_path, "checkout", "-q", "t")
+    (tmp_path / "templates" / "daily-audit.md").write_text(INBOX_TPL, encoding="utf-8")
+    _commit(tmp_path)
+    if into == "main":
+        _git(tmp_path, "checkout", "-q", "main")
+        _git(tmp_path, "merge", "-q", "--no-ff", "-m", "merge t", "t")
+    else:
+        _git(tmp_path, "merge", "-q", "--no-ff", "-m", "merge main", "main")
+    assert (tmp_path / "logs" / "audit" / "2026-11-25.md").is_file()
+    assert "## Inbox (x)" in (tmp_path / "templates" / "daily-audit.md").read_text(encoding="utf-8")
+    code, out, line = _inbox(tmp_path)
+    assert line == _not_checked("2026-11-25.md", report), out
+    assert code == 0, out
+
+
+NEW_NO_HUB = "## Inbox (x)\nproject-inbox: nothing new (2 seen before)\n## Items reviewed\n"
+
+
+@NO_GIT
+def test_inbox_new_report_after_template_change_still_checked(tmp_path):
+    """(xv, A1 send-back 1): a report added under the new template is checked from day one."""
+    _old_then_template(tmp_path)
+    _daily(tmp_path, "2026-11-26.md", NEW_NO_HUB)
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-26.md (no hub: SHA or UNREAD line)", out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_inbox_uncommitted_report_uses_working_template(tmp_path):
+    """(xv-b): an uncommitted report is judged by the working-tree template (here with Inbox)."""
+    _old_then_template(tmp_path)
+    _daily(tmp_path, "2026-11-26.md", NEW_NO_HUB, commit=False)
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-26.md (no hub: SHA or UNREAD line)", out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_inbox_uncommitted_report_old_working_template_not_checked(tmp_path):
+    """(xv-c): uncommitted report, working template without ## Inbox -> not checked."""
+    _daily(tmp_path, "2026-11-10.md", OLD_REPORT, template=OLD_TPL)
+    _daily(tmp_path, "2026-11-26.md", NEW_NO_HUB, template=OLD_TPL, commit=False)
+    code, out, line = _inbox(tmp_path)
+    assert line == ("INBOX: not checked (2026-11-26.md not committed; "
+                    "its templates/daily-audit.md has no ## Inbox)"), out
+    assert code == 0, out
+
+
+@NO_GIT
+@pytest.mark.parametrize("hub", ["116c68", "2026-11-18", "116c68c533cbd9d13bf3e81c1d833ab408102f84a"])
+def test_inbox_hub_value_not_a_sha_fails(tmp_path, hub):
+    """(xvi, A1 P2, RI-001): 6 hex, a date and 41 hex are not a hub SHA; pins both ends of {7,40}."""
+    _daily(tmp_path, "2026-11-18.md", INBOX_OK.format(sha=hub))
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: 2026-11-18.md (no hub: SHA or UNREAD line)", out
+    assert code == 1, out
+
+
+def test_inbox_no_git_not_checked(tmp_path):
+    """(xvii): no git repo -> not checked, never none."""
+    _daily(tmp_path, "2026-11-18.md", INBOX_OK.format(sha="116c68c"), git=False)
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: not checked (no git)", out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_inbox_only_per_item_reports_not_checked(tmp_path):
+    """(xvii-b): a repo whose logs/audit/ holds only per-item reports."""
+    _daily(tmp_path, "2026-11-18-070.md", "# Audit 070\n## Items reviewed\n")
+    code, out, line = _inbox(tmp_path)
+    assert line == "INBOX: not checked (no daily report)", out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_inbox_shallow_clone_not_checked(tmp_path):
+    """(xviii): in a depth-1 clone every file looks added in the boundary commit (new template),
+    so the old report would fail; the shallow guard makes it not checked."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _old_then_template(repo)
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "-q", "--depth", "1", f"file://{repo}", str(clone))
+    (clone / "work").mkdir(exist_ok=True)
+    code, out, line = _inbox(clone)
+    assert line == "INBOX: not checked (shallow clone; run git fetch --unshallow)", out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_inbox_git_log_failure_fails(tmp_path, monkeypatch):
+    """(xix): a failing `git log` is a failure, not hidden as not checked."""
+    _daily(tmp_path, "2026-11-18.md", INBOX_OK.format(sha="116c68c"))
+    cp = _cp()
+    real = cp._git
+    monkeypatch.setattr(cp, "_git", lambda *args: ("", 128) if args[0] == "log" else real(*args))
+    monkeypatch.chdir(tmp_path)
+    assert cp.inbox_section() == ("2026-11-18.md (git log failed)", True)
+
+
+@NO_GIT
+def test_inbox_template_absent_at_adding_commit_not_checked(tmp_path):
+    """(xx): no templates/ at all when the report was added -> not checked."""
+    c1 = _daily(tmp_path, "2026-11-18.md", OLD_REPORT, template=None)
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "daily-audit.md").write_text(INBOX_TPL, encoding="utf-8")
+    _commit(tmp_path)
+    code, out, line = _inbox(tmp_path)
+    assert line == _not_checked("2026-11-18.md", c1), out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_inbox_repo_without_commits_checks_content(tmp_path, monkeypatch):
+    """(xxi): no HEAD yet; the uncommitted report is judged by the working template and checked."""
+    _daily(tmp_path, "2026-11-18.md", INBOX_OK.format(sha="116c68c"), commit=False)
+    cp = _cp()
+    monkeypatch.chdir(tmp_path)
+    assert cp.inbox_section() == ("none", False)

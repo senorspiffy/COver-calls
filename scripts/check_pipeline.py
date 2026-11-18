@@ -131,13 +131,19 @@ writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMP
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 INBOX (item 069, RI-010): the daily audit's Inbox step (a1-auditor job B) is a text duty, so the
-newest daily report logs/audit/<YYYY-MM-DD>.md dated on or after INBOX_FROM (the first report
-under the Inbox template) must have a `## Inbox` section holding a `project-inbox:` line
-(`nothing new`, `<n> new` or `UNREAD:`) and a `hub:` line (a 7-40 hex SHA or `UNREAD:`). Only lines
+newest daily report logs/audit/<YYYY-MM-DD>.md must have a `## Inbox` section holding a
+`project-inbox:` line (`nothing new`, `<n> new` or `UNREAD:`) and a `hub:` line (a 7-40 hex SHA or
+`UNREAD:`), if it was written under the Inbox template (never a date, 069 round 2): the report is
+checked only if INBOX_TEMPLATE at the commit that added it (`git log --diff-filter=A`) has `## Inbox`;
+an uncommitted report is judged by the working-tree template. Otherwise, and with no git or in a
+shallow clone, it prints `INBOX: not checked (...)`; a failing `git log` gives exit 1. Only lines
 between `## Inbox` and the next `## ` heading count. Per-item reports (<date>-<ID>.md) are ignored.
 A report missing any part prints `INBOX: <file> (<what is missing>)` and gives exit 1; no daily
-report from the cutoff prints `INBOX: not checked (...)`. Known gap: this proves the lines exist,
-not that A1 read the channels; I3 and A1 spot-check that.
+report prints `INBOX: not checked (no daily report)`. Known gaps: this proves the lines exist,
+not that A1 read the channels; I3 and A1 spot-check that. (u) a report written but not committed
+before a pull that brings the new template is judged by the new template: commit the daily report
+before pulling. (v) removing `## Inbox` from the template later switches the check off for reports
+added after that; this is intended, the rule follows the template.
 """
 import datetime as dt
 import re
@@ -221,7 +227,7 @@ FAST_BY_PERSON = re.compile(r"^Scope:\s*FAST\s*\(\s*person\s*,\s*\d{4}-\d{2}-\d{
 # Older than the Scope/07 rules. Never add a new item here.
 LEGACY = {"001": "RESEARCH ONLY before 07-audit-task existed (item 021)",
           **{i: "07 is combined in work/003/07-audit-task.md" for i in ("004", "005", "006", "007", "008")}}
-INBOX_FROM = "2026-11-18"  # item 069: first daily report under the Inbox template
+INBOX_TEMPLATE = "templates/daily-audit.md"  # item 069 round 2: a daily report is checked only if written under this template with ## Inbox (never a date)
 DAILY_REPORT = re.compile(r"\d{4}-\d{2}-\d{2}\.md")
 INBOX_HEAD = re.compile(r"^## Inbox\b", re.M)
 INBOX_PI = re.compile(r"^project-inbox:\s*(nothing new|\d+ new|UNREAD:)", re.M)
@@ -703,14 +709,45 @@ def next_id():
     return f"{max(ids, default=0) + 1:03d}"
 
 
+def _inbox_gate(path: Path) -> "tuple[str, bool] | None":
+    """Item 069 round 2 (RI-010): None if the daily report `path` was written under an
+    INBOX_TEMPLATE with `## Inbox` (the template at the commit that added it; the working-tree
+    template if it is not committed), else the (text, failed) INBOX result. No git or a shallow
+    clone is `not checked`; a failing `git log` is a failure, never hidden."""
+    shallow = _git("rev-parse", "--is-shallow-repository")
+    if shallow is None:
+        return "not checked (no git)", False
+    if shallow[1] == 0 and shallow[0].strip() == "true":
+        return "not checked (shallow clone; run git fetch --unshallow)", False
+    sha = ""
+    if _git("rev-parse", "--verify", "-q", "HEAD")[1] == 0:
+        added = _git("log", "--no-renames", "--diff-filter=A", "--format=%H", "-1", "--", path.as_posix())
+        if added[1] != 0:
+            return f"{path.name} (git log failed)", True
+        sha = added[0].strip()
+    if sha:
+        tpl = _git("show", f"{sha}:{INBOX_TEMPLATE}")
+        ok = tpl[1] == 0 and INBOX_HEAD.search(tpl[0]) is not None
+        where = f"added in {sha[:7]}"
+    else:
+        working = Path(INBOX_TEMPLATE)
+        ok = working.is_file() and INBOX_HEAD.search(working.read_text(encoding="utf-8")) is not None
+        where = "not committed"
+    return None if ok else (f"not checked ({path.name} {where}; its {INBOX_TEMPLATE} has no ## Inbox)", False)
+
+
 def inbox_section(audit=Path("logs/audit")) -> tuple[str, bool]:
-    """Item 069 (RI-010): (text after `INBOX: `, failed) for the newest daily report dated on or
-    after INBOX_FROM. A missing folder or no such report is `not checked`, never `none`."""
+    """Item 069 (RI-010): (text after `INBOX: `, failed) for the newest daily report, if
+    _inbox_gate says it was written under the Inbox template. A missing folder, no daily report,
+    or a report the gate does not check is `not checked`, never `none`."""
     reports = sorted(p for p in audit.iterdir() if p.is_file() and DAILY_REPORT.fullmatch(p.name)
-                     and p.stem >= INBOX_FROM) if audit.is_dir() else []
+                     ) if audit.is_dir() else []
     if not reports:
-        return f"not checked (no daily report from {INBOX_FROM})", False
+        return "not checked (no daily report)", False
     newest = reports[-1]
+    gate = _inbox_gate(newest)
+    if gate:
+        return gate
     text = newest.read_text(encoding="utf-8")
     head = INBOX_HEAD.search(text)
     if head is None:
