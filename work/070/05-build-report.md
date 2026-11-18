@@ -164,3 +164,82 @@ Recurring issues checked (item 013): RI-001, RI-002, RI-013, RI-010, RI-007, RI-
 Guardrail status lines for A1 to copy on main:
 - RI-013: guardrail built (070); the 05/06 field is now checked by check_pipeline.py from item 070. GUARDED when 067 and 070 are merged and the "file-wide TOTAL" mutation fails T5 on main.
 - RI-010: 070 adds a script check with an ID cutoff; no check weakened.
+
+## Round 2 (06 round 1 FAIL: problems 1-3)
+Tests only. No code changed: `git diff --stat` shows only `tests/test_real_data_field.py | 74 +++` (74 insertions). No test exposed a code bug.
+
+Files (commands run in /home/claude/df17, excluding work/ and logs/):
+- new: `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'` → 0
+- changed: `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'` → 1 (tests/test_real_data_field.py)
+
+New tests in tests/test_real_data_field.py:
+- T19 `test_t19_main_exits_1_when_git_log_fails` (problem 1): T1's clean fixture, `check_pipeline.main([...])` in-process, `_git("log", "--no-merges", ...)` patched to return `("", 128)`. It asserts `REAL-DATA FIELD: git log failed (item 070)`, that INCOMPLETE, SKIPPED, UNTRACKED CHANGE, RESEARCH CODE, A1 FAIL, LOG TIME and ORPHAN LOG are all `none`, and a return value of 1.
+- T20 `test_t20_main_exits_1_for_triggered_id_without_request` (problem 1): item 160 (FULL) is committed open without its 07. The next commit adds 160's 07, edits 160's 05 (filled), and adds work/162/05-build-report.md and ccbot/realtest.py; 162 has no request.md. 053 stays quiet (160 is open at the parent) and so does 062 (gap (g): 160's 05 is in the unit). So `REAL-DATA FIELD: 162 (no work/162/request.md here)` is the only failing line, and the test asserts exit 1. Unlike T16, the exit 1 does not come from 062.
+- T21 `test_t21_total_inside_prose_is_incomplete` (problem 2, RI-012), 4 cases, each a 05 section body outside any comment: `see 05: <TOTAL line> (copied)`, `TOTAL line below (<TOTAL line>)`, `TOTAL line below`, `the TOTAL: line is in the PR`. Each must give exactly `INCOMPLETE: 160 (05 Real-data effect has no diff_reports TOTAL line (<sha7> changes ccbot/realtest.py; item 070))` and exit 1.
+- T22 `test_t22_total_line_inside_a_comment_does_not_count` (found by problem 3): with each mutation now changing one thing, "comments kept" on its own survived (27 passed). T2's comment holds no full TOTAL line, so fullmatch rejects it whether or not the comment is stripped. T22 puts a whole TOTAL line inside `<!-- ... -->` and expects the same INCOMPLETE entry and exit 1.
+
+Mutations (problem 3): one change each, in a scratch `git worktree` at 7f5e345 with the new test file copied in, under /tmp/claude-0/-home-claude/4cc69c4f-899b-56b8-af6f-c0c8dcf01a44/scratchpad/wt070. A script applied each change to an exact pattern that occurs once, ran `python3 -m pytest -q -p no:cacheprovider tests/test_real_data_field.py`, and restored the original. The final check was `restored: True`. The worktree was then removed (`git worktree list | grep -c wt070` → 0). Output:
+```
+exit drops `or (real and real[2])`: 2 failed, 26 passed in 5.07s -> test_t19_main_exits_1_when_git_log_fails, test_t20_main_exits_1_for_triggered_id_without_request
+no-request sets no `failed`: 1 failed, 27 passed in 4.98s -> test_t20_main_exits_1_for_triggered_id_without_request
+"TOTAL" in line (comments still dropped): 4 failed, 24 passed in 5.06s -> test_t21_total_inside_prose_is_incomplete[quoted-total], test_t21_total_inside_prose_is_incomplete[total-colon], test_t21_total_inside_prose_is_incomplete[total-in-brackets], test_t21_total_inside_prose_is_incomplete[word-total]
+"TOTAL:" in line: 3 failed, 25 passed in 5.13s -> test_t21_total_inside_prose_is_incomplete[quoted-total], test_t21_total_inside_prose_is_incomplete[total-colon], test_t21_total_inside_prose_is_incomplete[total-in-brackets]
+TOTAL_LINE.search(line): 2 failed, 26 passed in 5.36s -> test_t21_total_inside_prose_is_incomplete[quoted-total], test_t21_total_inside_prose_is_incomplete[total-in-brackets]
+comments kept (alone): 1 failed, 27 passed in 5.37s -> test_t22_total_line_inside_a_comment_does_not_count
+first-parent units: 2 failed, 26 passed in 5.21s -> test_t19_main_exits_1_when_git_log_fails, test_t6_pr_merge_flags_only_the_item_whose_commit_triggers
+file-wide TOTAL: 1 failed, 27 passed in 5.20s -> test_t5_total_outside_the_section_does_not_count
+data/real/ removed: 2 failed, 26 passed in 5.09s -> test_t11_data_real_file_triggers, test_t9_trigger_matches_realtest_imports_and_config_reads
+ccbot/pricing.py removed: 1 failed, 27 passed in 4.91s -> test_t9_trigger_matches_realtest_imports_and_config_reads
+extra ccbot/data.py: 1 failed, 27 passed in 5.05s -> test_t9_trigger_matches_realtest_imports_and_config_reads
+## in fence ends section: 1 failed, 27 passed in 4.75s -> test_t12_fences_and_headings[fenced-heading]
+cutoff check removed: 1 failed, 27 passed in 4.11s -> test_t7_items_before_cutoff_are_not_checked
+RESEARCH ONLY skip removed: 1 failed, 27 passed in 4.44s -> test_t18_research_only_item_is_062s
+unclosed fence passes: 1 failed, 27 passed in 4.13s -> test_t12_fences_and_headings[unclosed]
+no 05 passes: 1 failed, 27 passed in 5.07s -> test_t17_trigger_with_no_05_is_incomplete
+06 not checked: 1 failed, 27 passed in 4.19s -> test_t2_comment_only_field_is_incomplete
+restored: True
+```
+How each one-change mutation was made (check_pipeline.py):
+- exit: `\` + `or (real and real[2]) else 0` became ` else 0`.
+- no-request: the `failed = True` line after the no-request.md name was removed.
+- `"TOTAL" in line`, `"TOTAL:" in line`, `TOTAL_LINE.search(line)`: each replaced `TOTAL_LINE.fullmatch(line.strip())` on its own. The comment strip was kept.
+- comments kept (alone): `re.sub(r"<!--.*?-->", "", text, flags=re.S).splitlines()` became `text.splitlines()`. The match was kept.
+- first-parent units: `"--no-merges"` became `"--first-parent", "-m"`. T19 also fails here, but only because its patch keys on `("log", "--no-merges")`. T6 is the real catch.
+- file-wide TOTAL: `for line in section` became `for line in lines`.
+- data/real/ removed: `TRIGGER_DIRS = ()`. pricing removed / extra data.py: edits to the TRIGGER tuple.
+- `## ` in fence: `elif not fence and line.startswith("## ")` became `elif line.startswith("## ")`.
+- cutoff, RESEARCH ONLY skip, no 05: each `if` became `if False:`.
+- unclosed fence: `if fence:` in the for-else became `if False:`.
+- 06 not checked: `("05", "06")` became `("05",)`.
+
+The exit mutation was also run against the full suite in the scratch worktree: `2 failed, 382 passed, 1 skipped in 59.71s` (T19 and T20). In round 1 it gave 374 passed.
+
+Test output (in /home/claude/df17):
+```
+python3 -m pytest -q -p no:cacheprovider tests/test_real_data_field.py
+28 passed in 4.74s   (scratch copy, same file)
+python3 -m pytest -q -p no:cacheprovider -rs
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items  (assert 1 == 0; output shows "A1 FAIL: 069")
+SKIPPED [1] tests/test_calendar.py:110: could not import 'exchange_calendars': No module named 'exchange_calendars'
+1 failed, 383 passed, 1 skipped in 58.86s
+python3.11 -m py_compile tests/test_real_data_field.py → ok
+```
+The one failure does not come from 070. The concurrent A1 audit committed `e75703b Item 069: A1 result FAIL` on this branch during this round. test_repo_pipeline_has_no_skipped_items runs check_pipeline on HEAD, where 069 is now A1 FAIL, so it exits 1. The script is unchanged in this round, and the failure clears when 069 gets a later A1 PASS line. 385 tests total, counted by pytest (1 failed + 383 passed + 1 skipped). 7 of them are new in this round (T19, T20, T21 x4, T22), and the rest already ran in round 1 or come from 069 round 2 in HEAD. 383 passed.
+
+`python3 scripts/check_pipeline.py` (in /home/claude/df17, exit 0): `070: in progress (FULL: next 07)`, `A1 FAIL: 069`, `INCOMPLETE: none`, `UNTRACKED CHANGE: none`, `RESEARCH CODE: none`, `REAL-DATA FIELD: none`, `ORPHAN LOG: none`, `SKIPPED: none`. It also prints `MAIN AHEAD: origin/main has 1 commits not in HEAD`. That is the orchestrator's merge, not this item's.
+
+Missing-data grep (`grep -rnE "fillna|nan_to_num|or 0|else 0|..." tests/test_real_data_field.py`): no hits (exit 1). ccbot/ and scripts/ are unchanged. No numeric dataclass defaults and no new `>`/`<` tests were added.
+
+Connectivity: T19-T22 are collected by pytest (28 in the file). Each new test feeds the INCOMPLETE line, the REAL-DATA FIELD line or the exit value of main. No TODOs and no new files. 069's INBOX code, its tests and work/069 were not touched.
+
+Recurring issues checked (round 2): RI-002, RI-012, RI-009, RI-001, RI-007, RI-008, RI-013.
+- RI-002 (ESCALATED): both exit-1 results for absent inputs (git log failed; triggered ID with no request.md) are now tested through main's exit value.
+- RI-012 (GUARDED): substring, `"TOTAL:"` substring and `search` each fail T21 on their own, and comment-keeping fails T22 on its own.
+- RI-009: mutations ran only in the scratch worktree.
+- RI-001: mutation counts and test counts above come from real runs.
+- RI-007: T20 also checks that 053 and 062 report none, so the exit 1 is REAL-DATA FIELD's alone.
+- RI-008: the 3.11 compile passes.
+- RI-013: unchanged from round 1.
+
+RI-012: GUARDED (070 round 2: T21 kills "TOTAL" in line, "TOTAL:" in line and TOTAL_LINE.search one change at a time; T22 kills dropping the comment strip)
+RI-002: ESCALATED (070 round 2: main's exit 1 for "git log failed" and "no request.md" now tested, T19/T20)

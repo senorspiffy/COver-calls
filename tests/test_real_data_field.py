@@ -268,3 +268,77 @@ def test_t18_research_only_item_is_062s(tmp_path):
     code, out, real, inc = _check(repo, cutoff)
     assert real == "REAL-DATA FIELD: none", out
     assert "RESEARCH CODE: 163" in out, out
+
+
+@NO_GIT
+def test_t19_main_exits_1_when_git_log_fails(tmp_path, monkeypatch, capsys):
+    """06 round 1, problem 1: T1's clean fixture, run through main in-process with 070's git log
+    failing; REAL-DATA FIELD is the only failing line, so main's `real[2]` exit term is tested."""
+    repo, cutoff, _ = _trigger_commit(tmp_path)
+    monkeypatch.chdir(repo)
+    cp = _cp()
+    real_git = cp._git
+    monkeypatch.setattr(cp, "_git", lambda *a: ("", 128) if a[:2] == ("log", "--no-merges") else real_git(*a))
+    code = cp.main(["--today", DATE, "--untracked-from", cutoff])
+    out = capsys.readouterr().out
+    assert "REAL-DATA FIELD: git log failed (item 070)" in out, out
+    for ok in ("INCOMPLETE: none", "SKIPPED: none", "UNTRACKED CHANGE: none", "RESEARCH CODE: none",
+               "A1 FAIL: none", "LOG TIME: none", "ORPHAN LOG: none"):
+        assert ok in out, out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_t20_main_exits_1_for_triggered_id_without_request(tmp_path):
+    """06 round 1, problem 1: unlike T16, 062 and 053 stay quiet (FULL item 160 is open before the
+    commit and its 05 is in it, 062 gap (g)), so REAL-DATA FIELD alone gives exit 1."""
+    repo, cutoff = _history(tmp_path)
+    _rd_item(repo, "160")
+    audit = repo / "work" / "160" / "07-audit-task.md"
+    a1 = audit.read_text(encoding="utf-8")
+    audit.unlink()
+    _commit(repo, "160 01-06 (open: no 07)")
+    audit.write_text(a1, encoding="utf-8")
+    report = repo / "work" / "160" / "05-build-report.md"
+    report.write_text(report.read_text(encoding="utf-8") + "round 2\n", encoding="utf-8")
+    _write(repo, "work/162/05-build-report.md")
+    _write(repo, "ccbot/realtest.py")
+    _commit(repo, "160 05 + 07, 162 05 + realtest; 162 has no request.md")
+    code, out, real, inc = _check(repo, cutoff)
+    assert real == "REAL-DATA FIELD: 162 (no work/162/request.md here)", out
+    for ok in ("INCOMPLETE: none", "SKIPPED: none", "UNTRACKED CHANGE: none", "RESEARCH CODE: none",
+               "A1 FAIL: none", "ORPHAN LOG: none"):
+        assert ok in out, out
+    assert code == 1, out
+
+
+@NO_GIT
+@pytest.mark.parametrize("prose", [
+    f"see 05: {TOTAL} (copied)",
+    f"TOTAL line below ({TOTAL})",
+    "TOTAL line below",
+    "the TOTAL: line is in the PR",
+], ids=["quoted-total", "total-in-brackets", "word-total", "total-colon"])
+def test_t21_total_inside_prose_is_incomplete(tmp_path, prose):
+    """06 round 1, problem 2 (RI-012): TOTAL text inside other text, outside any comment, is not
+    diff_reports' line; only a full-line match counts. Kills `"TOTAL" in line`, `"TOTAL:" in line`
+    and `TOTAL_LINE.search(line)`."""
+    body = f"{HEAD}\n{prose}\n"
+    repo, cutoff, sha = _trigger_commit(tmp_path, body05=body, body06=FILLED)
+    code, out, real, inc = _check(repo, cutoff)
+    assert inc == ("INCOMPLETE: 160 (05 Real-data effect has no diff_reports TOTAL line "
+                   f"({sha[:7]} changes ccbot/realtest.py; item 070))"), out
+    assert real == "REAL-DATA FIELD: 160" and code == 1, out
+
+
+@NO_GIT
+def test_t22_total_line_inside_a_comment_does_not_count(tmp_path):
+    """Round 2: the one-change "comments kept" mutation survived T2 (its comment holds no full TOTAL
+    line). A whole TOTAL line inside an HTML comment, e.g. an example left in the template, is not
+    a paste."""
+    body = f"{HEAD}\n<!-- example:\n{TOTAL}\n-->\nnot pasted yet\n"
+    repo, cutoff, sha = _trigger_commit(tmp_path, body05=body, body06=FILLED)
+    code, out, real, inc = _check(repo, cutoff)
+    assert inc == ("INCOMPLETE: 160 (05 Real-data effect has no diff_reports TOTAL line "
+                   f"({sha[:7]} changes ccbot/realtest.py; item 070))"), out
+    assert real == "REAL-DATA FIELD: 160" and code == 1, out
