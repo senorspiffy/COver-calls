@@ -36,6 +36,7 @@ Three teams of Claude Code agents that research, build, and audit your covered-c
 - `templates/` - the hand-off format for each step
 - `scripts/check_handoff.py` - `python3 scripts/check_handoff.py <ID>` checks a hand-off's counts and self-check (run by the orchestrator after R1 and R3, and by I3 and A1; item 072); `--all` checks every item (A1)
 - `scripts/check_pipeline.py` - lists each work item's missing steps for its Scope; SKIPPED exits 1, STUCK, AWAITING A1 and IN PR items are listed, plus every unmerged remote branch with its items and merge conflicts; only the person may waive 03/06 (run by A1 daily, I3 per item)
+- `scripts/probe_guardrails.py` - runs each recurring-issue mutation probe listed in its `PROBES` on a scratch worktree of `--ref`; exit 0 only if every probe's target test fails (HOLDS); run by A1 daily (item 074)
 - `work/<ID>/` - every file for one item, numbered 01 to 07
 - `logs/<team>/<date>.md` - one line per agent action, read by R2 and A1
 
