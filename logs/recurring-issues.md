@@ -147,3 +147,11 @@ Guardrail(s) added: Proposed (067): `scripts/diff_reports.py` over every summary
 **Move to GUARDED when:** 067 is merged and its fixture test fails with nested keys skipped.
 Occurrences: 1
 - 2026-11-16 | 067 | work/065/05-build-report.md, 06-verification.md, 07-audit-task.md (PR #29) | only counts_bot_rule_bid and bxm_vs_spy reported; walkforward_picks (2/10 windows), walkforward_by_ticker (11/17) and monte_carlo median also changed (logs/audit/2026-11-15-065.md)
+
+## RI-014: Checker result depends on clone depth
+Status: OPEN (1 occurrence; 2026-11-19). Fix proposed in 079.
+Root cause: `scripts/check_pipeline.py::_walk` tests shallowness only when the cutoff is unreachable; a shallow boundary on the first-parent walk makes `diff-tree c^1 c` fail and the failure is printed as an UNTRACKED CHANGE error (exit 1). Same clone, after `git fetch --unshallow`: none.
+Guardrail(s) added: Proposed (079): shallow boundary on the walk → "not checked (... run git fetch --unshallow)", never an entry; grafted-boundary fixture test + mutation; unshallow line in daily-audit.md and run-item.md.
+**Move to GUARDED when:** 079 is merged and its fixture test fails with the boundary check removed.
+Occurrences: 1
+- 2026-11-19 | 079 | daily audit first run, shallow worktree of PR #32 e69d5bd | `UNTRACKED CHANGE: a15129c (git diff-tree failed)`; reproduced with a15129c in .git/shallow (exit 1)
