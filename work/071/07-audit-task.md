@@ -21,3 +21,4 @@ What Audit should look at:
 7. RI-010: T13 pins the i3 step-5 and i2 step-3 sentences. On the first real I3 FAIL round after merge, check that its 06 lines 2-3 were updated and that check_pipeline showed `I3 FAIL: <ID>`, not `in progress (next 07)`.
 8. RI-001 counts for the record: 69 06 files at check time, 69 PASS, 0 FAIL, 0 unreadable. 03/04's 67 plus 072 and 073.
 9. Minor wording: in the check_pipeline.py docstring, the C2 parenthetical and "(logs/implementation, by file date then line order)" sit back to back. The meaning is unchanged, so this is cosmetic only.
+A1 result: PASS (2026-11-19, logs/audit/2026-11-18-071.md; suite 444 passed 1 skipped at 166e8b4, m7/m12/m15/m17 + A1 m4b each fail their named test, midnight log order probed on 071's own 2026-11-19 I3 line; follow-ups P1 branch FAIL lines, P2 gap (w), P3 shared fence helper, P4 wording)
