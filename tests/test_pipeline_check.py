@@ -612,6 +612,8 @@ I2_REFUSE = [
     "",                                                                    # R14
     "\x1b[32m411 passed\x1b[0m",                                           # colour (PY_COLORS=1)
     "===== 411 passed in 1.00s =====",                                     # padded (PYTEST_ADDOPTS=-v)
+    "411 passed1 skipped",                                                 # R15 no `, ` between parts (_END)
+    "1 failed1 passed in 1.00s",                                           # R16 same, with timing (_END)
 ]
 
 

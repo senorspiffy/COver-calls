@@ -1,8 +1,88 @@
 # 05 Build report - 076
-Base: HEAD f3521ff (075 built, I3 PASS). Built in the working tree, not committed.
+Round 2 (after I3 FAIL round 1, work/076/06-verification.md; plan updated by I1 in db3fb05). Base: HEAD db3fb05 (round 1 build 266a6a2 + 06 + 04 round 2). Built in the working tree, not committed.
 
-Status: BUILT, with one plan defect sent back to I1 (Deviation 2: mutation m1 survives; the plan's claim that it fails T2 R3/R4 is wrong). Everything else in 04 is built, and every other named test and mutation behaves as the plan says.
+Status: BUILT (round 2). The only round 2 code change in 04 is built: refuse cases R15 `411 passed1 skipped` and R16 `1 failed1 passed in 1.00s` added to `I2_REFUSE` (T2 now 19 cases). Both round 1 deviations are closed by the round 2 plan: Deviation 1 (`log_hint` guard) is now 04 change 5, unchanged in code; Deviation 2 (m1 survives) is fixed: m1 now fails R15 and R16. m8 and m9 fail their named tests. No other deviation.
 
+## Round 2 build
+Change (tests/test_pipeline_check.py, end of `I2_REFUSE`):
+```
+    "411 passed1 skipped",                                                 # R15 no `, ` between parts (_END)
+    "1 failed1 passed in 1.00s",                                           # R16 same, with timing (_END)
+```
+No change to scripts/check_pipeline.py or .claude/agents/i2-builder.md in round 2 (04: "Nothing else in the code changes in round 2"). `log_hint` already has change 5's guard (scripts/check_pipeline.py L410-415, built in 266a6a2).
+
+File counts, round 2 (working tree against HEAD db3fb05):
+```
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'
+0
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'
+1
+$ git diff --stat
+ tests/test_pipeline_check.py | 2 ++
+ 1 file changed, 2 insertions(+)
+```
+Whole item against the 075 base 068b01e (`git diff 068b01e --stat -- . ':!work' ':!logs'`): 3 files changed, 192 insertions(+), 19 deletions(-) (.claude/agents/i2-builder.md, scripts/check_pipeline.py, tests/test_pipeline_check.py), matching 04's "3 files". The round 2 log line says `1 files changed` (the command count above, this round's change).
+
+Mutations, round 2 (scratch worktree `/tmp/claude-0/-home-claude/13c4a4b3-cf85-50b9-b50f-3e762631e621/scratchpad/076-I2/wt2`, detached at db3fb05, round 2 tests/test_pipeline_check.py copied in, RI-009; `python3 -m pytest -q tests/test_pipeline_check.py`; check_pipeline.py restored from a copy after each; worktree `git status` after: only ` M tests/test_pipeline_check.py`). `test_repo_pipeline_has_no_skipped_items` fails in every run, the baseline too, because 076's committed 06 is I3 FAIL (`I3 FAIL: 076`, item 071): expected, not a defect of this build.
+```
+== baseline
+1 failed, 187 passed in 22.02s        (FAILED test_repo_pipeline_has_no_skipped_items: "076: I3 FAIL ...", "I3 FAIL: 076")
+$ python3 -m pytest -q tests/test_pipeline_check.py -k summary_line_refused
+19 passed, 169 deselected in 1.79s
+== m1 _END -> (?:, )?
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_i2_summary_line_refused[411 passed1 skipped]
+FAILED tests/test_pipeline_check.py::test_i2_summary_line_refused[1 failed1 passed in 1.00s]
+3 failed, 185 passed in 22.11s
+== m8 failed/passed swapped
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_i2_summary_line_accepted[1 failed, 383 passed, 1 skipped in 58.86s]
+FAILED tests/test_pipeline_check.py::test_i2_summary_line_accepted[1 failed, 1 passed, 2 skipped, 1 xfailed, 1 xpassed in 0.07 seconds]
+FAILED tests/test_pipeline_check.py::test_i2_summary_line_refused[411 passed, 1 failed]
+4 failed, 184 passed in 23.51s
+== m9 guard removed from log_hint
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_log_refuses_non_numeric_id_without_crash
+2 failed, 186 passed in 22.13s
+```
+m1 fails R15 and R16 (plan: "m1 fails R15 and R16"), m8 fails R3 and A3/A13, m9 fails T6. m2-m7 were not re-run: their code and tests are unchanged since round 1 (results below).
+
+Full suite, round 2 (repo root):
+```
+$ env | grep -E "PYTEST_ADDOPTS|PY_COLORS|FORCE_COLOR"
+(no output)
+$ python3 -m pytest --version
+pytest 9.1.1
+$ python3 -m pytest -q
+...
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 525 passed, 1 skipped in 81.91s (0:01:21)
+```
+The one failure is the expected item-071 case: 076's 06 is committed as I3 FAIL.
+
+Repo check, round 2:
+```
+$ python3 scripts/check_pipeline.py ; echo exit $?
+076: I3 FAIL (FULL; sent back to I1 I2, needs a later PASS round in 06 (item 071))
+077: in progress (FULL: next 05)
+078: in progress (FULL: next 05)
+079: in progress (FULL: next 05)
+...
+I3 FAIL: 076
+A1 FAIL: none
+INCOMPLETE: none
+LOG TIME: none (not checked: 048: built before 045's --log rule reached main; times typed by hand, not recoverable (item 049))
+UNTRACKED CHANGE: none
+RESEARCH CODE: none
+ORPHAN LOG: none
+SKIPPED: none
+exit 1
+```
+The only failing line is `I3 FAIL: 076`, the item sent back (item 071): expected. `INCOMPLETE: none`. It should go to exit 0 once I3 writes a PASS round.
+
+Connectivity (round 2): R15/R16 are read by T2 through `I2_REFUSE`; no new function. `git diff | grep -cE "TODO|FIXME"` → 0. Missing-data grep over ccbot/ → 37 hits, ccbot/ unchanged, none new. No dataclass field or `<`/`>` test added in round 2.
+
+# Round 1 report (kept as written, 266a6a2)
 ## Changes made (file: what changed)
 - `scripts/check_pipeline.py`:
   - Next to `LOG_CHECK_FROM`: `TESTS_FORMAT_FROM = 76`, `_N`, `_END`, `_STATS_PARTS`, `_STATS`, `_TAIL` (03's code block, verbatim) and `I2_BEFORE`.
@@ -141,11 +221,12 @@ not required (.claude/agents/i2-builder.md, scripts/check_pipeline.py, tests/tes
 
 Follow-up (from 04, not built): option C, or an I3 duty that compares I2's log field with 05 Test output using a fixed `Suite:` label.
 
-Recurring issues checked (step 0; `logs/recurring-issues.md` read first; RI-014 is the only OPEN entry, and none are ESCALATED in a way that touches this item):
+Recurring issues checked (round 2: `logs/recurring-issues.md` re-read first. RI-014 is the only OPEN entry; RI-001 is the only ESCALATED one and has no rule window here. Each line below re-checked against the round 2 change):
 RI-014: OPEN, not touched. `_walk` and clone depth are unchanged, and the new tests use tmp dirs without git.
 RI-006: guardrail built (076). From item 076 the I2 tests field is pytest's line as printed (no hand count), and before 076 pass > total is refused. GUARDED when merged and mutation m2 (or m3) fails `test_i2_tests_field_cutoff` on main.
 RI-012: checked. Full-line `re.fullmatch` only, with no substring tests.
 RI-002: checked. An absent, empty or `no tests ran` field is refused, never defaulted (T2).
 RI-010: checked. The i2 text is pinned by T4. It claims no I3/A1 cross-check that no agent runs.
-RI-009: checked. Mutations ran only in the scratch worktree. The repo tree has only the 3 built files modified.
-RI-001: checked. Feasibility re-counted with commands (36/36 above).
+RI-009: checked. Mutations ran only in scratch worktrees (round 1 `076-I2/wt`, round 2 `076-I2/wt2`). The repo tree has only tests/test_pipeline_check.py modified in round 2 (3 files over the whole item).
+RI-001: ESCALATED, checked. No rule window in this item; feasibility re-counted with commands in round 1 (36/36 above); round 2 adds only refuse cases, which match none of the real lines (all have `, ` between parts).
+RI-006 (round 2): the m1 gap is closed: m1 now fails R15 and R16 in scratch.
