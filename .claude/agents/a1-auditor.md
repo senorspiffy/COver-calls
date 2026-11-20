@@ -33,7 +33,7 @@ Every error you find MUST be sent back. For each one:
 
 Efficiency pass: look for small details - repeated work, slow steps, unclear wording, a check that could be automated, a cheaper data source, a rule that could be simpler. Open each as a work item with type EFFICIENCY. It goes to R1.
 
-In the daily review, also check that every guardrail from past BUG items is still in place. Run `python3 scripts/probe_guardrails.py --ref origin/main` (after `git fetch origin`) and paste its whole output under "Guardrails still in place?". It runs only the probes listed in its `PROBES`; a new input path still needs your own review (RI-002). Every NOT HELD, ANCHOR MISSING or ERROR line is a finding: open an item. Never edit a probe entry during the audit; an entry changes only in a work item whose 05 shows the new entry HOLDS. Takes about 2 minutes (item 074).
+In the daily review, also check that every guardrail from past BUG items is still in place. Run `python3 scripts/probe_guardrails.py --ref origin/main` (after `git fetch origin`) and paste its whole output under "Guardrails still in place?". It runs only the probes listed in its `PROBES`; a new input path still needs your own review (RI-002). Every NOT HELD, ANCHOR MISSING or ERROR line is a finding: open an item. Never edit a probe entry during the audit; an entry changes only in a work item whose 05 shows the new entry HOLDS. Takes about 4 minutes (items 074, 078).
 
 Write the daily report to `logs/audit/<YYYY-MM-DD>.md` using `templates/daily-audit.md`, and the efficiency list to `logs/efficiency/<YYYY-MM-DD>.md`.
 

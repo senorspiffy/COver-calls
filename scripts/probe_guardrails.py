@@ -11,6 +11,7 @@ Results come from pytest's exit code and junit XML only, never from its text out
     python3 scripts/probe_guardrails.py [--ref HEAD] [--repo <root>] [--timeout 600]
 """
 import argparse
+import json
 import os
 import re
 import shutil
@@ -21,7 +22,12 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# Strings copied byte for byte from A1's 2026-11-18 probes (03 step 1). `recorded` is printed only.
+# Strings copied byte for byte from 074/03 step 1 and 078/03 step 5. `recorded` is printed only.
+# An entry with no `module` names in `no_module_reason` how its test reaches the file (078).
+_CP_REASON = ("tests/test_pipeline_check.py runs scripts/check_pipeline.py as"
+              " REPO/scripts/check_pipeline.py (_run) and imports check_pipeline after"
+              " sys.path.insert(0, REPO/scripts) (_cp), REPO from tests/conftest.py")
+
 PROBES = [
     {"id": "RI-002-063-leading-edge", "ri": "RI-002", "file": "ccbot/realtest.py",
      "anchor": 'if i == 0:\n        return "before_first"',
@@ -41,7 +47,49 @@ PROBES = [
                     " else [])\n        return out",
      "test_file": "tests/test_diff_reports.py",
      "target": "tests/test_diff_reports.py::test_a_nested_key_and_list_in_dict",
+     "no_module_reason": "tests/test_diff_reports.py runs scripts/diff_reports.py as"
+                         " REPO/scripts/diff_reports.py (SCRIPT), REPO from tests/conftest.py",
      "recorded": "2026-11-18: 1 failed, 16 passed"},
+    {"id": "RI-002-046-tickers-key", "ri": "RI-002", "file": "config/tickers.json",
+     "anchor": '"F": {\n    "asset_type": "stock",',
+     "replacement": '"F": {\n    "foo_date": null,\n    "asset_type": "stock",',
+     "test_file": "tests/test_missing_inputs.py",
+     "target": "tests/test_missing_inputs.py::test_ticker_fields_cover_file_and_code",
+     "no_module_reason": "config/tickers.json is data: tests/test_missing_inputs.py"
+                         " test_ticker_fields_cover_file_and_code reads tickers.json from"
+                         " Path(__file__).resolve().parents[1]",
+     "recorded": "2026-11-20 (078/05): 1 failed, 22 passed"},
+    {"id": "RI-007-064-work-py", "ri": "RI-007", "file": "scripts/check_pipeline.py",
+     "anchor": "    return f.startswith(paths) or WORK_CODE.fullmatch(f) is not None",
+     "replacement": "    return f.startswith(paths)",
+     "test_file": "tests/test_pipeline_check.py",
+     "target": "tests/test_pipeline_check.py::test_research_only_work_py_is_research_code",
+     "no_module_reason": _CP_REASON, "recorded": "2026-11-20 (078/05): 8 failed, 82 passed"},
+    {"id": "RI-009-037-clash-line", "ri": "RI-009", "file": "scripts/check_pipeline.py",
+     "anchor": "                clashes.append(item)",
+     "replacement": "                pass",
+     "test_file": "tests/test_pipeline_check.py",
+     "target": "tests/test_pipeline_check.py::test_same_id_on_main_and_open_branch_is_a_clash",
+     "no_module_reason": _CP_REASON, "recorded": "2026-11-20 (078/05): 1 failed, 89 passed"},
+    {"id": "RI-010-049-rules-line", "ri": "RI-010", "file": "scripts/check_pipeline.py",
+     "anchor": "        rules = changed(*RULE_PATHS)",
+     "replacement": "        rules = []",
+     "test_file": "tests/test_pipeline_check.py",
+     "target": "tests/test_pipeline_check.py::test_rules_branch_is_reported",
+     "no_module_reason": _CP_REASON, "recorded": "2026-11-20 (078/05): 1 failed, 89 passed"},
+    {"id": "RI-011-052-merge-tree", "ri": "RI-011", "file": "scripts/check_pipeline.py",
+     "anchor": "        tree = merge[0].split()[0] if conflicts is not None and merge[0].strip() else None",
+     "replacement": "        tree = None",
+     "test_file": "tests/test_pipeline_check.py",
+     "target": "tests/test_pipeline_check.py::test_criss_cross_branch_lists_only_its_own_changes",
+     "no_module_reason": _CP_REASON, "recorded": "2026-11-20 (078/05): 1 failed, 89 passed"},
+    {"id": "RI-012-059-bare-429", "ri": "RI-012", "file": "ccbot/broker/webull_sandbox.py",
+     "anchor": '    return bool(_HTTP_429.search(low)) or "too many requests" in low'
+               ' or "too_many_requests" in low',
+     "replacement": '    return "429" in low or "too many requests" in low or "too_many_requests" in low',
+     "test_file": "tests/test_webull_sandbox.py",
+     "target": "tests/test_webull_sandbox.py::test_429_inside_other_text_is_not_retried",
+     "module": "ccbot.broker.webull_sandbox", "recorded": "2026-11-20 (078/05): 1 failed, 17 passed"},
 ]
 
 REQUIRED = ("id", "ri", "file", "anchor", "replacement", "test_file", "target")
@@ -191,8 +239,7 @@ def _run_probe(p, wt, scratch, sha, n, timeout, baselines, modules):
     if p.get("module"):
         code = f"code check: {p['module']} not checked"
     else:
-        code = (f"code check: n/a (no module; tests run {p['file']} by path via "
-                "tests/conftest.py REPO, conftest L7)")
+        code = f"code check: n/a ({p['no_module_reason']})"
     path = wt / p["file"]
     if not path.is_file():
         return f"ANCHOR MISSING (file not in {sha})", None, code, False
@@ -209,6 +256,12 @@ def _run_probe(p, wt, scratch, sha, n, timeout, baselines, modules):
             compile(mutated, str(path), "exec")
         except SyntaxError as e:
             return f"ERROR (mutation does not compile: {e.msg}, line {e.lineno})", None, code, False
+    if p["file"].endswith(".json"):
+        try:
+            json.loads(mutated)
+        except ValueError as e:
+            msg, line = getattr(e, "msg", str(e)), getattr(e, "lineno", "?")
+            return f"ERROR (mutation is not valid JSON: {msg}, line {line})", None, code, False
     if p.get("module"):
         mkey = (p["module"], p["file"])
         if mkey not in modules:
@@ -288,6 +341,9 @@ def _probe_all(probes, args, wt, scratch, sha, t_start):
         t0 = time.monotonic()
         if missing:
             verdict, results, code, wrote = f"ERROR (probe entry lacks {', '.join(missing)})", None, "", False
+        elif not p.get("module") and not p.get("no_module_reason"):
+            verdict, results, code, wrote = ("ERROR (probe entry lacks module or no_module_reason)",
+                                             None, "", False)
         else:
             verdict, results, code, wrote = _run_probe(p, wt, scratch, sha, n, args.timeout,
                                                        baselines, modules)

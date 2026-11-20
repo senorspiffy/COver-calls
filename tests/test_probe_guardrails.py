@@ -1,12 +1,14 @@
-"""scripts/probe_guardrails.py (item 074; RI-002, RI-009, RI-010, RI-012, RI-013).
+"""scripts/probe_guardrails.py (items 074, 078; RI-002, RI-007, RI-009, RI-010, RI-011, RI-012, RI-013).
 
-Every test but the last runs main() on a small committed fixture repo. The real probes
-(about 2 minutes) are never run here: scripts/ is not collected (pyproject testpaths)."""
+Every test but the git-free ones runs main() on a small committed fixture repo. The real probes
+(about 4 minutes, 226.7 s on origin/main in 078/05) are never run here: scripts/ is not collected (pyproject testpaths)."""
 import hashlib
 import importlib.util
+import json
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -26,6 +28,11 @@ FILES = {
                          "def test_g():\n    assert mod.G == 1\n",
     "tests/test_red.py": "def test_ok():\n    assert True\n\n\ndef test_bad():\n    assert False\n",
     "tests/test_slow.py": "import time\n\n\ndef test_sleep():\n    time.sleep(5)\n",
+    "tests/test_skip.py": 'import pytest\n\n\n@pytest.mark.skip(reason="x")\ndef test_s():\n    pass\n\n\n'
+                          'def test_ok():\n    assert True\n',
+    "tests/test_xfail.py": 'import pytest\n\n\n@pytest.mark.xfail(strict=True, reason="x")\ndef test_x():\n'
+                           '    pass\n\n\ndef test_ok():\n    assert True\n',
+    "pkg/data.json": '{"a": 1}\n',
 }
 
 
@@ -52,6 +59,8 @@ def _probe(pid, **kw):
     p = {"id": pid, "ri": "RI-T", "file": "pkg/mod.py", "anchor": "return 1",
          "replacement": "return 2", "test_file": "tests/test_mod.py",
          "target": "tests/test_mod.py::test_f"}
+    if "module" not in kw:
+        p["no_module_reason"] = "fixture: tests/test_mod.py imports pkg/mod.py from the worktree root"
     p.update(kw)
     return {k: v for k, v in p.items() if v is not None}
 
@@ -116,7 +125,7 @@ def test_mixed_run_reports_every_probe(tmp_path, capsys):
     assert "ANCHOR MISSING (count 0)" in _line(out, "c1") and "pytest not run" in _line(out, "c1")
     assert "HOLDS" in _line(out, "a")
     assert "NOT HELD" in _line(out, "b") and "recorded: none" in _line(out, "b")
-    assert "code check: n/a" in _line(out, "b")
+    assert "code check: n/a (fixture: tests/test_mod.py imports pkg/mod.py" in _line(out, "b")
     assert "NOT HELD" in _line(out, "b2") and "    FAILED tests.test_mod::test_g" in out
     assert "ANCHOR MISSING (count 2)" in _line(out, "c2")
     assert "ERROR (mutation does not compile" in _line(out, "d")
@@ -133,6 +142,33 @@ def test_mixed_run_reports_every_probe(tmp_path, capsys):
     # (g) the repo is never written and no worktree is left
     assert _hashes(root) == before
     assert _git(root, "status", "--porcelain").stdout == ""
+    assert _worktrees(root) == 1
+
+
+@NO_GIT
+def test_skip_entry_and_json_cases(tmp_path, capsys):
+    """078: a skipped target never HOLDS (s1, s2), a strict XPASS is a failed baseline (s3),
+    an entry needs module or no_module_reason (r0), invalid JSON never runs pytest (j1)."""
+    root = _fixture(tmp_path)
+    probes = [
+        _probe("s1", replacement='import pytest; pytest.skip("x")'),
+        _probe("s2", test_file="tests/test_skip.py", target="tests/test_skip.py::test_s"),
+        _probe("s3", test_file="tests/test_xfail.py", target="tests/test_xfail.py::test_x"),
+        _probe("r0", no_module_reason=None),
+        _probe("j1", file="pkg/data.json", anchor='"a": 1', replacement='"a": '),
+    ]
+    code, out = _main(root, capsys, probes)
+    s1 = _line(out, "s1")
+    assert "0 failed, 1 passed, 0 errors, 1 skipped" in s1, out
+    assert "target tests/test_mod.py::test_f failed: no" in s1 and "NOT HELD" in s1
+    assert "ERROR (baseline: target skipped)" in _line(out, "s2")
+    assert "ERROR (baseline: exit 1, 1 failed, 1 passed, 0 errors, 0 skipped)" in _line(out, "s3")
+    r0 = _line(out, "r0")
+    assert "ERROR (probe entry lacks module or no_module_reason)" in r0 and "pytest not run" in r0
+    j1 = _line(out, "j1")
+    assert "ERROR (mutation is not valid JSON: Expecting value, line 1)" in j1 and "pytest not run" in j1
+    assert "TOTAL: 5 probes, 0 hold, 1 not held, 0 anchor missing, 4 error" in out
+    assert code == 1
     assert _worktrees(root) == 1
 
 
@@ -185,6 +221,15 @@ def test_classify_missing_or_bad_junit(tmp_path):
     assert pg.classify(1, err, t, None)[0] == "ERROR (1 errors)"
     assert pg.classify(3, other, t, None)[0] == "ERROR (pytest exit 3)"
     assert pg.classify(None, other, t, 7)[0] == "ERROR (timeout 7 s)"
+    skip = tmp_path / "skip.xml"
+    skip.write_bytes(b'<testsuites><testsuite><testcase classname="tests.test_mod" name="test_f">'
+                     b'<skipped type="pytest.skip" message="x"/></testcase></testsuite></testsuites>')
+    assert pg.classify(0, skip, t, None)[0] == "NOT HELD"
+    wasx = tmp_path / "wasxfail.xml"
+    wasx.write_bytes(b'<testsuites><testsuite><testcase classname="tests.test_mod" name="test_f">'
+                     b'<skipped message="xfail-marked test passes unexpectedly"/></testcase>'
+                     b"</testsuite></testsuites>")
+    assert pg.classify(1, wasx, t, None)[0] == "NOT HELD"
     assert pg.junit_key("tests/test_x.py::test_y[1-a]") == ("tests.test_x", "test_y[1-a]")
 
 
@@ -201,9 +246,10 @@ def test_unrestored_worktree_stops(tmp_path, capsys, monkeypatch):
 
 
 def test_shipped_probes_well_formed():
-    """C12: every shipped anchor occurs once in the working tree and every target def exists."""
-    assert len(pg.PROBES) == 3
-    assert len({p["id"] for p in pg.PROBES}) == 3
+    """C12, 078: every shipped anchor occurs once in the working tree, every target def exists,
+    and every entry has exactly one of module / no_module_reason."""
+    assert len(pg.PROBES) == 9
+    assert len({p["id"] for p in pg.PROBES}) == 9
     for p in pg.PROBES:
         assert all(p.get(k) for k in pg.REQUIRED), p["id"]
         text = (REPO / p["file"]).read_bytes().decode("utf-8")
@@ -211,7 +257,20 @@ def test_shipped_probes_well_formed():
         name = p["target"].split("::")[-1]
         tests = (REPO / p["test_file"]).read_bytes().decode("utf-8")
         assert f"def {name}(" in tests, p["id"]
+        assert bool(p.get("module")) != bool(p.get("no_module_reason")), p["id"]
+        if p.get("no_module_reason"):
+            base = Path(p["file"]).name
+            assert base in p["no_module_reason"], p["id"]
+            assert base in tests, p["id"]
+        if p["file"].endswith(".json"):
+            json.loads(text.replace(p["anchor"], p["replacement"], 1))
     assert [p["target"] for p in pg.PROBES] == [
         "tests/test_realtest.py::test_leading_edge_100_days_blocks",
         "tests/test_realtest.py::test_interior_gap_180_blocks",
-        "tests/test_diff_reports.py::test_a_nested_key_and_list_in_dict"]
+        "tests/test_diff_reports.py::test_a_nested_key_and_list_in_dict",
+        "tests/test_missing_inputs.py::test_ticker_fields_cover_file_and_code",
+        "tests/test_pipeline_check.py::test_research_only_work_py_is_research_code",
+        "tests/test_pipeline_check.py::test_same_id_on_main_and_open_branch_is_a_clash",
+        "tests/test_pipeline_check.py::test_rules_branch_is_reported",
+        "tests/test_pipeline_check.py::test_criss_cross_branch_lists_only_its_own_changes",
+        "tests/test_webull_sandbox.py::test_429_inside_other_text_is_not_retried"]
