@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -1420,7 +1421,258 @@ def test_failed_diff_tree_is_an_entry_not_none(tmp_path, monkeypatch):
     text, failed = cp.untracked_changes(cutoff, walked)
     assert text.startswith("abababa (git diff-tree failed) (item 053:")
     assert failed is True
-    assert cp.research_code(cutoff, walked)[0] == "none"
+    assert cp.research_code(cutoff, walked)[0] == "not checked (see UNTRACKED CHANGE)"   # item 079
+    assert cp.research_code(cutoff, ([("ab" * 20, ["ccbot/x.py"])], None))[0] == "none"   # 2-tuple (C2)
+
+
+# Item 079 (RI-014): a shallow boundary on or below the walk gives "not checked", never an entry.
+def _shallow(repo, *shas):
+    """Write `shas` as the shallow file of `repo` (in its --git-common-dir) and check git sees it."""
+    common = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=repo, capture_output=True,
+                            text=True, check=True).stdout.strip()
+    (Path(repo) / common / "shallow").write_text("".join(s + "\n" for s in shas), encoding="utf-8")
+    flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=repo, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    assert flag == "true"
+
+
+def _unshallow(repo):
+    common = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=repo, capture_output=True,
+                            text=True, check=True).stdout.strip()
+    (Path(repo) / common / "shallow").unlink()
+
+
+def _graph(tmp_path, shape):
+    """Fixture graphs on `_history` (C = cutoff); non-code files under notes/. Returns (repo, C, {name: sha}).
+    a: C -> P -> B on main, D (parent C) on side, M = merge(B, D).
+    b: C -> T on main, C -> Q -> B2 on side, M = merge(T, B2)."""
+    repo, c = _history(tmp_path)
+    sha = {"C": c}
+    if shape == "a":
+        _write(repo, "notes/p.md"); sha["P"] = _commit(repo, "P")
+        _write(repo, "notes/b.md"); sha["B"] = _commit(repo, "B")
+        _git(repo, "checkout", "-q", "-b", "side", c)
+        _write(repo, "notes/d.md"); sha["D"] = _commit(repo, "D")
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", "side")
+    else:
+        _write(repo, "notes/t.md"); sha["T"] = _commit(repo, "T")
+        _git(repo, "checkout", "-q", "-b", "side", c)
+        _write(repo, "notes/q.md"); sha["Q"] = _commit(repo, "Q")
+        _write(repo, "notes/b2.md"); sha["B2"] = _commit(repo, "B2")
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", "side")
+    sha["M"] = _commit_sha(repo)
+    return repo, c, sha
+
+
+def _lines(repo, cutoff, cwd=None):
+    code, out = _run(cwd or repo, "check_pipeline.py", "--today", "2026-11-11", "--untracked-from", cutoff)
+    pick = lambda p: [l for l in out.splitlines() if l.startswith(p)][0]
+    return code, out, pick("UNTRACKED CHANGE:"), pick("RESEARCH CODE:"), pick("REAL-DATA FIELD:")
+
+
+def _shallow_text(b, cutoff):
+    return (f"UNTRACKED CHANGE: not checked (shallow boundary {b[:7]}; run git fetch --unshallow)"
+            f" (cutoff {cutoff[:7]} from --untracked-from)")
+
+
+@NO_GIT
+def test_shallow_boundary_inside_walk_not_checked(tmp_path):
+    """(a) S n R = {B}: P is hidden behind B, so the answer is not checked, never none or an entry."""
+    repo, c, sha = _graph(tmp_path, "a")
+    _shallow(repo, sha["B"])
+    code, out, untracked, research, real = _lines(repo, c)
+    assert untracked == _shallow_text(sha["B"], c), out
+    assert research == "RESEARCH CODE: not checked (see UNTRACKED CHANGE)", out
+    assert real == "REAL-DATA FIELD: not checked (see UNTRACKED CHANGE)", out
+    assert code == 0, out
+    _unshallow(repo)                                            # control: the full answer
+    code, out, untracked, _, _ = _lines(repo, c)
+    assert untracked == f"UNTRACKED CHANGE: none (cutoff {c[:7]} from --untracked-from)", out
+
+
+@NO_GIT
+def test_shallow_boundary_on_second_parent_not_checked(tmp_path):
+    """(b) B2 is off the first-parent walk: only the whole-range check (cutoff..HEAD) sees it."""
+    repo, c, sha = _graph(tmp_path, "b")
+    _shallow(repo, sha["B2"])
+    code, out, untracked, _, _ = _lines(repo, c)
+    assert untracked == _shallow_text(sha["B2"], c), out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_full_clone_same_graph_unchanged(tmp_path):
+    """(c1) graph (a) with no shallow file: today's answer."""
+    repo, c, _ = _graph(tmp_path, "a")
+    code, out, untracked, research, _ = _lines(repo, c)
+    assert untracked == f"UNTRACKED CHANGE: none (cutoff {c[:7]} from --untracked-from)", out
+    assert research == "RESEARCH CODE: none", out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_unrelated_root_in_full_clone_stays_loud(tmp_path):
+    """(c2) a real root U after the cutoff in a full clone stays a 053 entry (exit 1)."""
+    repo, c = _history(tmp_path)
+    _git(repo, "checkout", "-q", "--orphan", "u")
+    _git(repo, "rm", "-rq", "--cached", ".")
+    shutil.rmtree(repo / "work"); shutil.rmtree(repo / "config")
+    _write(repo, "notes/u.md"); u = _commit(repo, "U")
+    _git(repo, "merge", "-q", "--allow-unrelated-histories", "--no-edit", "main")
+    m = _commit_sha(repo)
+    _git(repo, "branch", "-f", "main", "u")
+    _git(repo, "checkout", "-q", "main")
+    assert _commit_sha(repo) == m
+    flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=repo, capture_output=True,
+                          text=True).stdout.strip()
+    assert flag == "false"
+    code, out, untracked, _, _ = _lines(repo, c)
+    assert f"{u[:7]} (git diff-tree failed)" in untracked, out
+    assert code == 1, out
+
+
+def _below_graph(tmp_path):
+    """(d) Z (root) -> Y (scripts/y.py) -> b' -> C (cutoff) -> T; M = merge --no-ff of T into a
+    branch at Y, so M's first parent is Y. Returns (repo, C, {name: sha})."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    sha = {}
+    _write(repo, "notes/z.md"); sha["Z"] = _commit(repo, "Z")
+    _write(repo, "scripts/y.py"); sha["Y"] = _commit(repo, "Y")
+    _write(repo, "notes/b.md"); sha["b"] = _commit(repo, "b'")
+    _item(repo, "150", ALL)
+    _write(repo, "config/x.json", "{}\n")
+    sha["C"] = _commit(repo, "cutoff")
+    _write(repo, "notes/t.md"); sha["T"] = _commit(repo, "T")
+    _git(repo, "checkout", "-q", "-b", "m", sha["Y"])
+    _git(repo, "merge", "-q", "--no-ff", "--no-edit", "main")
+    sha["M"] = _commit_sha(repo)
+    _git(repo, "branch", "-f", "main", "m")
+    _git(repo, "checkout", "-q", "main")
+    return repo, sha["C"], sha
+
+
+@NO_GIT
+def test_shallow_boundary_below_cutoff_entries_unconfirmed(tmp_path):
+    """(d) S n R = 0 of 1, b' below the cutoff: the shallow walk finds Y and Z (2 entries) that a
+    full clone never walks, so they are unconfirmed; the full view gives none."""
+    repo, c, sha = _below_graph(tmp_path)
+    _shallow(repo, sha["b"])
+    code, out, untracked, research, _ = _lines(repo, c)
+    assert untracked == (f"UNTRACKED CHANGE: not checked (shallow boundary {sha['b'][:7]} below the cutoff;"
+                         f" 2 unconfirmed entries; run git fetch --unshallow) (cutoff {c[:7]} from --untracked-from)"), out
+    assert research == "RESEARCH CODE: not checked (see UNTRACKED CHANGE)", out
+    assert code == 0, out
+    _unshallow(repo)                                            # control: the full answer
+    code, out, untracked, _, _ = _lines(repo, c)
+    assert untracked == f"UNTRACKED CHANGE: none (cutoff {c[:7]} from --untracked-from)", out
+
+
+@NO_GIT
+def test_shallow_boundary_in_linked_worktree(tmp_path):
+    """(e) a linked worktree reads the shallow file of its common dir, never `.git/shallow`."""
+    repo, c, sha = _graph(tmp_path, "a")
+    _shallow(repo, sha["B"])
+    wt = tmp_path / "wt"
+    _git(repo, "worktree", "add", "-q", "--detach", str(wt), sha["M"])
+    assert (wt / ".git").is_file()
+    code, out, untracked, _, _ = _lines(repo, c, cwd=wt)
+    assert untracked == _shallow_text(sha["B"], c), out
+    assert code == 0, out
+
+
+def _patched_git(monkeypatch, cp, table):
+    """Wrap cp._git: an args tuple in `table` returns its value, the rest run git."""
+    real = cp._git
+    monkeypatch.setattr(cp, "_git", lambda *a: table[a] if a in table else real(*a))
+
+
+@NO_GIT
+def test_shallow_flag_unknown_no_file_is_full(tmp_path, monkeypatch):
+    """Missing input: --is-shallow-repository unknown (exit 129) and no file is a full clone; a file is read."""
+    cp = _cp()
+    repo, c = _history(tmp_path)
+    monkeypatch.chdir(repo)
+    _patched_git(monkeypatch, cp, {("rev-parse", "--is-shallow-repository"): ("", 129)})
+    assert cp._shallow_boundaries() == "full"
+    (repo / ".git" / "shallow").write_text(c + "\n", encoding="utf-8")
+    assert cp._shallow_boundaries() == [c]
+
+
+@NO_GIT
+def test_shallow_file_unreadable_not_checked(tmp_path, monkeypatch):
+    """Missing input: the flag says true but the file is missing, or holds a malformed line (C3)."""
+    cp = _cp()
+    repo, c = _history(tmp_path)
+    monkeypatch.chdir(repo)
+    _patched_git(monkeypatch, cp, {("rev-parse", "--is-shallow-repository"): ("true\n", 0)})
+    want = (None, (f"not checked (shallow clone; run git fetch --unshallow) (cutoff {c[:7]} from --untracked-from)",
+                   False), None)
+    assert cp._shallow_boundaries() == "unreadable"
+    assert cp._walk(c) == want
+    (repo / ".git" / "shallow").write_text(c + "\nzz\n", encoding="utf-8")
+    assert cp._shallow_boundaries() == "unreadable"
+    # git itself dies on the bad line (shallow.c "bad shallow line"), so 053's shallow branch
+    # answers before 079's: still not checked, never none or an error.
+    text, failed = cp._walk(c)[1]
+    assert text.startswith("not checked (") and "run git fetch --unshallow" in text and failed is False
+
+
+@NO_GIT
+def test_empty_shallow_file_is_today_path(tmp_path, monkeypatch):
+    """Missing input: an empty shallow file is S = [], so the walk is today's."""
+    cp = _cp()
+    repo, c = _history(tmp_path)
+    _shallow(repo)
+    monkeypatch.chdir(repo)
+    _patched_git(monkeypatch, cp, {("rev-parse", "--is-shallow-repository"): ("true\n", 0)})
+    assert cp._shallow_boundaries() == []
+    assert cp.untracked_changes(c) == (f"none (cutoff {c[:7]} from --untracked-from)", False)
+
+
+@NO_GIT
+def test_shallow_rev_list_failure_is_loud(tmp_path, monkeypatch):
+    """Missing input: the whole-range rev-list (no --first-parent) fails -> an error, never none."""
+    cp = _cp()
+    repo, c, sha = _graph(tmp_path, "a")
+    _shallow(repo, sha["B"])
+    monkeypatch.chdir(repo)
+    _patched_git(monkeypatch, cp, {("rev-list", f"{c}..HEAD"): ("", 128)})
+    assert cp._walk(c) == (None, (f"cutoff {c[:7]}: git rev-list failed (cutoff {c[:7]} from --untracked-from)",
+                                  True), None)
+
+
+@NO_GIT
+def test_merge_base_failure_is_loud(tmp_path, monkeypatch):
+    """Missing input: merge-base --is-ancestor <b'> <C> exits 128 -> an error (exit 1), never below."""
+    cp = _cp()
+    repo, c, sha = _below_graph(tmp_path)
+    _shallow(repo, sha["b"])
+    monkeypatch.chdir(repo)
+    _patched_git(monkeypatch, cp, {("merge-base", "--is-ancestor", sha["b"], c): ("", 128)})
+    want = f"cutoff {c[:7]}: git merge-base failed (cutoff {c[:7]} from --untracked-from)"
+    assert cp._walk(c) == (None, (want, True), None)
+    assert cp.untracked_changes(c) == (want, True)
+
+
+@NO_GIT
+def test_below_rule_real_data_entries(tmp_path, monkeypatch):
+    """Step 5: with a boundary below the cutoff, REAL-DATA FIELD entries become the unconfirmed text
+    and no INCOMPLETE entry is passed on."""
+    cp = _cp()
+    repo, c = _history(tmp_path)
+    _item(repo, "160", [], date="2026-11-11")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(cp, "_item_triggers", lambda cutoff: ({"160": ("abc1234", ["ccbot/realtest.py"])}, None))
+    b = "cd" * 20
+    assert cp.real_data_field(c, ([], None, None))[1] == {"160": ["no 05 for abc1234 changes ccbot/realtest.py"
+                                                                  " (item 070)"]}       # control
+    assert cp.real_data_field(c, ([], None, b)) == (cp._below_text(b, 1, c), {}, False)
+    assert cp._below_text(b, 1, c) == (f"not checked (shallow boundary cdcdcdc below the cutoff; 1 unconfirmed"
+                                       f" entries; run git fetch --unshallow) (cutoff {c[:7]} from --untracked-from)")
 
 
 def test_work_code_without_git(tmp_path):

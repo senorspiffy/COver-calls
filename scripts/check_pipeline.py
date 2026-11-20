@@ -102,6 +102,13 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   A follow-up to a completed item is a new item. "not checked (no git)" without git;
                   "not checked (... shallow clone ...)" when the cutoff is missing from a shallow
                   clone (exit unchanged); a cutoff missing from a full clone is an error (exit 1).
+                  Item 079 (RI-014): in a shallow clone (S = the lines of `<git rev-parse
+                  --git-common-dir>/shallow`), a boundary in `cutoff..HEAD` gives `not checked (shallow
+                  boundary <b7>; run git fetch --unshallow)`; a boundary that is an ancestor of the
+                  cutoff keeps none but turns entries into `not checked (shallow boundary <b7> below the
+                  cutoff; <n> unconfirmed entries; ...)`, exit unchanged; an unreadable shallow file
+                  gives `not checked (shallow clone; ...)`. A diff-tree failure on a commit not in S
+                  stays an entry (exit 1).
                   Known gaps: (a) one open item's 01-06 file covers unrelated code in the same unit;
                   (b) on a branch each direct commit is its own unit, so commit code together with
                   your 05; (c) PRs must land as merge commits (squash or rebase drops the cutoff ->
@@ -118,9 +125,11 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   the cutoff (as 053, against its first parent) or one open branch as a whole. On
                   HEAD the item's line becomes `<ID>: SKIPPED (<sha7> RESEARCH ONLY: changes <files>
                   ...)` (exit 1) and the line lists the IDs, or none, "not checked (no git)", or
-                  "not checked (see UNTRACKED CHANGE)" when the cutoff can't be used. On a branch it
-                  is `BRANCH SKIPPED: <ID> (<ref>: RESEARCH ONLY: changes <files> ...)`, joined to the
-                  item's classify detail when that is SKIPPED too (exit unchanged). Scope and waiver
+                  "not checked (see UNTRACKED CHANGE)" when the cutoff can't be used; a failed
+                  diff-tree in the walk gives not checked (see UNTRACKED CHANGE), never none (079).
+                  On a branch it is `BRANCH SKIPPED: <ID> (<ref>: RESEARCH ONLY: changes <files>
+                  ...)`, joined to the item's classify detail when that is SKIPPED too (exit
+                  unchanged). Scope and waiver
                   are read from request.md at the tip; a missing request.md is flagged, never passed.
                   Only `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)` excuses it. Known gaps:
                   (g) a FULL/FAST item's 04 or 05 in the same unit covers the research item's code;
@@ -146,9 +155,10 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   inside a fence does not end the section.
                   A missing section, no TOTAL line, an unclosed fence or a missing 05 is INCOMPLETE
                   (exit 1). The line lists the IDs with an entry, or none; "not checked (no git)";
-                  "not checked (see UNTRACKED CHANGE)" when the cutoff can't be used; "git log failed
-                  (item 070)" (exit 1); a triggered ID with no request.md is named as `<ID> (no
-                  work/<ID>/request.md here)` (exit 1). Known gaps: (m) conflict-only trigger edits in a
+                  "not checked (see UNTRACKED CHANGE)" when the cutoff can't be used; the 079
+                  below-cutoff text replaces entries; "git log failed (item 070)" (exit 1); a
+                  triggered ID with no request.md is named as `<ID> (no work/<ID>/request.md here)`
+                  (exit 1). Known gaps: (m) conflict-only trigger edits in a
                   merge are not seen; (n) a committed-then-reverted change still triggers; (o) a TOTAL
                   line proves a paste, not that it is current, and does not prove 06's TOTAL equals 05's
                   (I3 still compares, templates/verification.md); (p) a data/real/ commit with no step
@@ -252,6 +262,8 @@ RULE_PATHS = (".claude/", "templates/", "scripts/check_pipeline.py", "scripts/ch
 CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/", ".claude/", "templates/")
 # item 053: HEAD of daily-fixes/2026-11-11 just before I2's first code commit; never move it forward
 UNTRACKED_FROM = "694bf4d0038e25bb82bd111018fbd67a94bbc74d"
+# Item 079 (RI-014): one line of the shallow file, a full SHA-1 (40) or SHA-256 (64) hex name.
+SHALLOW_LINE = re.compile(r"[0-9a-f]{40}([0-9a-f]{24})?")
 # Item 062: a RESEARCH ONLY item may not change these unless I1-I3 ran or the person waived them.
 # .claude/ and templates/ are left to 053 (gap h).
 RESEARCH_CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/")
@@ -718,26 +730,87 @@ def _open_at(parent, item):
     return not verdicts or verdicts[-1].upper() == "FAIL"
 
 
+def _note(cutoff):
+    """The cutoff note on UNTRACKED CHANGE lines when --untracked-from moved it (item 053)."""
+    return f" (cutoff {cutoff[:7]} from --untracked-from)" if cutoff != UNTRACKED_FROM else ""
+
+
+def _shallow_boundaries():
+    """Item 079 (RI-014): "full", "unreadable", or the shallow boundaries S (file order, no
+    duplicates; may be empty) from `<git rev-parse --git-common-dir>/shallow`, so a linked
+    worktree reads its main repo's file. A flag git can't give and no file is "full"; a true flag
+    with a missing, unreadable or malformed file (SHALLOW_LINE) is "unreadable", never skipped."""
+    r = _git("rev-parse", "--is-shallow-repository")
+    if r is None or (r[1] == 0 and r[0].strip() == "false"):
+        return "full"
+    sure = r[1] == 0 and r[0].strip() == "true"
+    d = _git("rev-parse", "--git-common-dir")
+    try:
+        if d is None or d[1] != 0:
+            raise OSError("git rev-parse --git-common-dir failed")
+        text = (Path.cwd() / d[0].strip() / "shallow").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return "unreadable" if sure else "full"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if any(SHALLOW_LINE.fullmatch(line) is None for line in lines):
+        return "unreadable"
+    return list(dict.fromkeys(lines))
+
+
 def _walk(cutoff):
-    """Items 053/062: HEAD's first-parent commits after `cutoff`, each with the files it changes
-    against its first parent: ([(sha, files or None if diff-tree failed)], None), or
-    (None, (text, failed)) when the cutoff can't be used. Needs git."""
-    note = f" (cutoff {cutoff[:7]} from --untracked-from)" if cutoff != UNTRACKED_FROM else ""
+    """Items 053/062/079: HEAD's first-parent commits after `cutoff`, each with the files it
+    changes against its first parent: ([(sha, files or None if diff-tree failed)], None, below),
+    or (None, (text, failed), None) when the cutoff can't be used or a shallow boundary is in
+    `cutoff..HEAD` (item 079). `below` is a shallow boundary that is an ancestor of the cutoff
+    (entries may then be extras), else None. Needs git."""
+    note = _note(cutoff)
     known = _git("rev-parse", "--verify", "-q", f"{cutoff}^{{commit}}")
     if known[1] != 0 or _git("merge-base", "--is-ancestor", cutoff, "HEAD")[1] != 0:
         shallow = _git("rev-parse", "--is-shallow-repository")
         if shallow[1] == 0 and shallow[0].strip() == "true":
             return None, (f"not checked (cutoff {cutoff[:7]} not in this shallow clone; run git fetch --unshallow)"
-                          + note, False)
-        return None, (f"cutoff {cutoff[:7]} not in HEAD's history (squash/rebase or wrong SHA)" + note, True)
+                          + note, False), None
+        return None, (f"cutoff {cutoff[:7]} not in HEAD's history (squash/rebase or wrong SHA)" + note, True), None
+    shallow_s = _shallow_boundaries()                       # item 079 (RI-014)
+    if shallow_s == "unreadable":
+        return None, ("not checked (shallow clone; run git fetch --unshallow)" + note, False), None
+    below = None
+    if shallow_s and shallow_s != "full":
+        all_ = _git("rev-list", f"{cutoff}..HEAD")
+        if all_[1] != 0:
+            return None, (f"cutoff {cutoff[:7]}: git rev-list failed" + note, True), None
+        boundaries = set(shallow_s)
+        inside = [c for c in all_[0].split() if c in boundaries]
+        if inside:
+            return None, (f"not checked (shallow boundary {inside[0][:7]}; run git fetch --unshallow)" + note,
+                          False), None
+        for b in shallow_s:
+            m = _git("merge-base", "--is-ancestor", b, cutoff)
+            if m[1] == 0:
+                below = b
+                break
+            if m[1] != 1:
+                return None, (f"cutoff {cutoff[:7]}: git merge-base failed" + note, True), None
     walk = _git("rev-list", "--first-parent", "--reverse", f"{cutoff}..HEAD")
     if walk[1] != 0:
-        return None, (f"cutoff {cutoff[:7]}: git rev-list failed" + note, True)
+        return None, (f"cutoff {cutoff[:7]}: git rev-list failed" + note, True), None
     units = []
     for c in walk[0].split():
         diff = _git("diff-tree", "-r", "--name-only", "--no-renames", f"{c}^1", c)
         units.append((c, diff[0].split("\n") if diff[1] == 0 else None))
-    return units, None
+    return units, None, below
+
+
+def _parts(walked):
+    """Item 079: (units, error, below) of a _walk result; a 2-tuple (older callers) has no below."""
+    return walked[0], walked[1], (walked[2] if len(walked) > 2 else None)
+
+
+def _below_text(below, n, cutoff):
+    """Item 079: the text that replaces `n` entries when shallow boundary `below` is an ancestor of
+    the cutoff, so the entries may be commits a full clone would not walk."""
+    return (f"not checked (shallow boundary {below[:7]} below the cutoff; {n} unconfirmed entries; "
+            "run git fetch --unshallow)" + _note(cutoff))
 
 
 def untracked_changes(cutoff=UNTRACKED_FROM, walked=None):
@@ -745,8 +818,8 @@ def untracked_changes(cutoff=UNTRACKED_FROM, walked=None):
     `walked` is _walk(cutoff) when main() already has it."""
     if _git("rev-parse", "HEAD") is None:
         return None
-    note = f" (cutoff {cutoff[:7]} from --untracked-from)" if cutoff != UNTRACKED_FROM else ""
-    units, error = walked or _walk(cutoff)
+    note = _note(cutoff)
+    units, error, below = _parts(walked or _walk(cutoff))
     if error:
         return error
     entries = []
@@ -762,6 +835,8 @@ def untracked_changes(cutoff=UNTRACKED_FROM, walked=None):
             entries.append(f"{c[:7]} {' '.join(code)}")
     if not entries:
         return "none" + note, False
+    if below:                                               # item 079: may be extras
+        return _below_text(below, len(entries), cutoff), False
     return ("; ".join(entries) + " (item 053: code, config, tests or rules changed with no step file of an "
             "open work item; a follow-up to a completed item is a new item)" + note, True)
 
@@ -773,8 +848,10 @@ def research_code(cutoff=UNTRACKED_FROM, walked=None):
     UNTRACKED CHANGE's (053) and is not reported twice; a diff-tree failure is 053's entry."""
     if _git("rev-parse", "HEAD") is None:
         return None
-    units, error = walked or _walk(cutoff)
+    units, error, below = _parts(walked or _walk(cutoff))
     if error:
+        return "not checked (see UNTRACKED CHANGE)", {}
+    if any(files is None for _, files in units):            # item 079: never "none" on a failed diff
         return "not checked (see UNTRACKED CHANGE)", {}
 
     def request_text_of(item):
@@ -783,12 +860,14 @@ def research_code(cutoff=UNTRACKED_FROM, walked=None):
 
     flagged = {}
     for c, files in units:
-        for item, detail in _research_code(files or [], request_text_of):
+        for item, detail in _research_code(files, request_text_of):
             if item in flagged:
                 sha, old = flagged[item]
                 flagged[item] = (sha, f"{old}; {c[:7]} {detail}")
             else:
                 flagged[item] = (c[:7], detail)
+    if flagged and below:                                   # item 079: no SKIPPED from 062
+        return _below_text(below, len(flagged), cutoff), {}
     return ", ".join(sorted(flagged)) or "none", flagged
 
 
@@ -853,6 +932,7 @@ def real_data_field(cutoff=UNTRACKED_FROM, walked=None):
         walked = _walk(cutoff)
     if walked[1]:
         return "not checked (see UNTRACKED CHANGE)", {}, False
+    below = _parts(walked)[2]
     found, error = _item_triggers(cutoff)
     if error:
         return error, {}, True
@@ -878,6 +958,8 @@ def real_data_field(cutoff=UNTRACKED_FROM, walked=None):
         if gaps:
             names.append(item)
             entries[item] = gaps
+    if names and below:                                     # item 079: no INCOMPLETE from 070
+        return _below_text(below, len(names), cutoff), {}, False
     return ", ".join(names) or "none", entries, failed
 
 
