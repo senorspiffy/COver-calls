@@ -9,3 +9,4 @@ What Audit should look at:
 5. RULES change: .claude/agents/a1-auditor.md (two clauses for the new lines) needs the person's OK in PR review.
 6. RI-014 (OPEN): 077 does not touch `_walk`. Its fix is 079. Confirm that 079 builds on 077's `uncommitted_steps` and `_md_lines` code.
 7. Re-run the whole suite (I3 at f765ca5: 1 failed, 554 passed, 1 skipped; the failure is `test_repo_pipeline_has_no_skipped_items`, because round 1's 06 FAIL was the committed 06. With this PASS 06 committed it should pass) and `python3.11 -m py_compile scripts/check_pipeline.py`.
+A1 result: PASS (2026-11-20, logs/audit/2026-11-19-077.md; worktree 62f0cc0: suite 555 passed 1 skipped, py_compile ok, 3 RI-012 probes and 7 round-1 mutations each fail their named test, UNCOMMITTED STEP live probe exit 1; follow-ups P1 longer-closer test (EFFICIENCY), P2 _logged left-pipe test (EFFICIENCY))
