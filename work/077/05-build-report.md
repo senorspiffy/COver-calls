@@ -1,4 +1,82 @@
 # 05 Build report - 077
+
+# Round 2 (I3 FAIL round 1 -> I2, tests only)
+Base: HEAD d703779 (`Item 077: I3 verification FAIL (round 1), sent back to I2`), on top of the round-1 build 3006b73. Not committed.
+
+Status: BUILT (round 2). 06 problem 1 is fixed with the two negative tests I3 named. scripts/check_pipeline.py is not changed (06: "No change to scripts/check_pipeline.py is needed"). The three RI-012 probe mutations that survived round 1 now each fail a new test. The full suite has one failure, `test_repo_pipeline_has_no_skipped_items`, and it is expected (item 071, see below).
+
+## Changes made, round 2
+```
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'
+0
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'
+1
+$ git diff --stat
+ tests/test_pipeline_check.py | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+```
+1. **tests/test_pipeline_check.py**, 2 new tests (211 -> 213 in this file):
+   - (06 1a) `test_i3_fail_with_a1_pass_only_inside_text_keeps_old_detail` (T-P3c). Item 186's 07 is `x\nsee A1 result: PASS (quoted)\n` and item 187's 07 is `x\n  A1 result: PASS (indented)\n`, both with 06 FAIL. Each line must equal `<ID>: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))` and `I3 FAIL: 186, 187` must be printed with exit 1.
+   - (06 1b) `test_uncommitted_step_with_lookalike_log_lines_is_listed` (P5a2). It is P5a (151 01-research.md, `logged=False`) plus logs/research/2026-11-11.md with `12:00 | R1 | 1510 | x`, `12:00 | R2 | 151 | see R1 notes` and `12:00 | I2 | 151 | R1 x`. The line must equal `P5A` and exit 1.
+
+## Connectivity check, round 2
+- The two new tests are collected by pytest (they are in the full run below). No new function, file or rule. No TODO.
+- Missing-data grep on ccbot/: `grep -rnE "fillna|...|\.get\([^)]*, 0\)" ccbot/ | wc -l` gives 37. Round 2 changes no ccbot/ file (diff above), so there are no new or changed hits. There is no new dataclass field and no new `>`/`<` test.
+- No feasibility test is named in the plan for round 2.
+
+## Mutations, round 2 (scratch worktree)
+They ran in a detached worktree of HEAD d703779 at `scratchpad/077-I2/wt`, with the new tests/test_pipeline_check.py copied in. Each mutation was applied alone to scripts/check_pipeline.py and restored after its run (`scratchpad/077-I2/mut.py`). Selection: `-k "lookalike or inside_text or uncommitted or i3_fail"`. Output:
+```
+_a1_results unanchored | 1 failed, 20 passed, 192 deselected in 6.55s
+   ['FAILED tests/test_pipeline_check.py::test_i3_fail_with_a1_pass_only_inside_text_keeps_old_detail']
+_logged substring | 1 failed, 20 passed, 192 deselected in 5.05s
+   ['FAILED tests/test_pipeline_check.py::test_uncommitted_step_with_lookalike_log_lines_is_listed']
+_logged no trailing pipe | 1 failed, 20 passed, 192 deselected in 3.46s
+   ['FAILED tests/test_pipeline_check.py::test_uncommitted_step_with_lookalike_log_lines_is_listed']
+```
+The mutations are 06's three probes:
+- `re.findall(r"A1 result:\s*(\w+)", text)`;
+- `return item in text and agent in text`;
+- `rf"\|\s*{agent}\s*\|\s*{item}"`.
+
+All three are now killed. On the unmutated code both new tests pass (`-k "lookalike or inside_text"`: `2 passed, 211 deselected in 3.80s`). `git -C wt status --short` afterwards shows only the copied test file (` M tests/test_pipeline_check.py`).
+
+## Test output, round 2 (pasted)
+`python3 -m pytest -q` from the repo root:
+```
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 554 passed, 1 skipped in 91.97s (0:01:31)
+```
+Expected, not a defect of this build (item 071). 06 round 1 (FAIL, sent back to I2) is committed in d703779, so `check_pipeline.py` exits 1. The assertion's only failing lines are:
+```
+077: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))
+I3 FAIL: 077
+A1 FAIL: none
+INCOMPLETE: none
+UNCOMMITTED STEP: none
+SKIPPED: none
+```
+Round 1 had 553 passed + 1 skipped. Round 2 has 554 passed + 1 failed (the expected one) + 1 skipped, which is 556, i.e. 553 + 1 + 2 new tests. The skip is the same exchange_calendars import.
+
+## Real-data effect, round 2
+Not required: only tests/test_pipeline_check.py changes, so there is no TRIGGER path and no ccbot/realtest.py change.
+
+## Recurring issues checked, round 2
+- RI-012: guardrail extended (077 round 2). Both shared text readers now have a negative test with the pattern inside other text, and the three probe mutations each fail one.
+- RI-001 (ESCALATED): the new fixtures have non-zero counts (2 items, 3 lookalike lines). No trading window.
+- RI-014 (OPEN): `_walk` is not touched. The new P5a2 uses a full (non-shallow) repo, as P5a does.
+- RI-002: the new tests assert that lookalike text never counts as logged or as A1 PASS (no default pass).
+- RI-009: mutations ran only in the scratch worktree.
+- RI-007, RI-008, RI-010, RI-013: unchanged from round 1 (no checker, Python-version or diff-report change).
+- RI-003 to RI-006, RI-011: not applicable.
+
+RI-012: guardrail extended (077 round 2); negative tests for `_a1_results` and `_logged`, 3 probe mutations killed.
+
+## Deviations from plan, round 2
+None. Only the two tests that 06 named were added.
+
+# Round 1
 Base: HEAD 1a925b0 (076 I3 PASS round 2). While I built, the orchestrator committed f96aa5e (`Item 076: A1 result PASS`). It changes only logs/audit/2026-11-19-076.md and work/076/07-audit-task.md (`git diff --stat 1a925b0 HEAD`: 2 files, 103 insertions), and none of this build's files. Built in the working tree, not committed. Every anchor in 04 was re-read on 076's tree. 076's `log_fields_ok`/`log_hint` lines in `incomplete()` are unchanged. `_walk` is neither called nor changed.
 
 Status: BUILT. Every change in 04 is made. All 31 planned mutations fail their named tests. The full suite is green. The real-tree check output differs from the old checker only by the new `UNCOMMITTED STEP: none` line, and the exit code is 0 for both.

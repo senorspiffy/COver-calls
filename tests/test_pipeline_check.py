@@ -865,6 +865,21 @@ def test_uncommitted_unlogged_step_is_listed(tmp_path):
 
 
 @NO_GIT
+def test_uncommitted_step_with_lookalike_log_lines_is_listed(tmp_path):
+    """P5a2 (item 077 round 2, RI-012): log lines holding the agent and ID only inside other text
+    (another ID, another agent's column, a field) are not the step's `| R1 | 151 |` line."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "151", ["01-research.md"], logged=False)
+    log = repo / "logs" / "research" / "2026-11-11.md"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("12:00 | R1 | 1510 | x\n12:00 | R2 | 151 | see R1 notes\n12:00 | I2 | 151 | R1 x\n",
+                   encoding="utf-8")
+    code, out, line, _ = _uncommitted(repo, cutoff)
+    assert line == P5A, out
+    assert code == 1, out
+
+
+@NO_GIT
 def test_uncommitted_step_without_logs_folder_is_listed(tmp_path):
     """P5b: no logs/ folder means no file is logged; item 040 is below CHECKLIST_FROM, so this check
     alone gives exit 1."""
@@ -1946,6 +1961,19 @@ def test_i3_fail_with_no_a1_line_keeps_old_detail(tmp_path):
     assert code == 1, out
     for i in ("184", "017"):
         assert f"{i}: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))" in out, out
+
+
+def test_i3_fail_with_a1_pass_only_inside_text_keeps_old_detail(tmp_path):
+    """Item 077 round 2 (T-P3c, RI-012): an `A1 result: PASS` that is not at column 0 (inside a sentence,
+    or indented) is not an A1 line, so the old detail stays."""
+    _item(tmp_path, "186", ALL, verdict="FAIL", a1="see A1 result: PASS (quoted)")
+    _item(tmp_path, "187", ALL, verdict="FAIL", a1="  A1 result: PASS (indented)")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    for i in ("186", "187"):
+        line = [l for l in out.splitlines() if l.startswith(f"{i}: ")][0]
+        assert line == f"{i}: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))", out
+    assert "I3 FAIL: 186, 187" in out
 
 
 def test_i3_fail_target_not_stated(tmp_path):
