@@ -22,16 +22,21 @@ TRADE_COLUMNS = ["date", "variant", "ticker", "action", "reason", "contract", "q
 
 class BrokerMarket(Market):
     """Expiries from the business-day calendar; chains read through the Broker interface.
-    Every quote read is appended to `log` (state/paper_snapshots.csv)."""
+    Every quote read is appended to `log` (state/paper_snapshots.csv).
+    `held`: the ticker's open short option, if any. Its strike is always inside the strike window
+    read for its expiry, so a stock that moved more than 30% away from the strike still gets a
+    quote to mark and manage it (item 083: VALE 13C at $9.83 had no quote, equity went NaN)."""
 
-    def __init__(self, broker, ticker, asof, log):
+    def __init__(self, broker, ticker, asof, log, held=None):
         cal = broker.calendar(asof)
         super().__init__(expiries.third_fridays(cal), expiries.fridays(cal))
-        self.broker, self.ticker, self.log, self._cache = broker, ticker, log, {}
+        self.broker, self.ticker, self.log, self._cache, self.held = broker, ticker, log, {}, held
 
     def chain(self, day, expiry, kind):
         if (expiry, kind) not in self._cache:
             lo, hi = day.close * 0.7, day.close * 1.3
+            if self.held is not None and self.held.expiry == expiry:
+                lo, hi = min(lo, self.held.strike), max(hi, self.held.strike)
             symbols = self.broker.list_option_contracts(self.ticker, expiry, expiry, lo, hi)
             quotes = [q for part in chunk(symbols, 20) for q in self.broker.get_option_snapshots(part)]
             for q in quotes:
@@ -213,7 +218,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
             day = broker.get_underlying_quote(t)
         except NoQuote:
             continue
-        days[t], markets[t] = day, BrokerMarket(broker, t, date, log)
+        days[t], markets[t] = day, BrokerMarket(broker, t, date, log, start.get(t).option)
         log.append(_snap_row(day, t))
         pick = markets[t].pick(date, "monthly", for_ticker(cfg, t)["monthly_dte"], cfg["monthly_slack_days"])
         if pick:
@@ -222,7 +227,7 @@ def run_daily(date, broker, cfg, variant="V0", weekly=False, state_dir="state", 
     for t in held:
         if t not in days:
             days[t] = broker.get_underlying_quote(t)  # NoQuote: no silent skip
-            markets[t] = BrokerMarket(broker, t, date, log)
+            markets[t] = BrokerMarket(broker, t, date, log, start.get(t).option)
     capital = _capital(start, days, markets, cfg)
     snaps = pd.DataFrame(log, columns=SNAPSHOT_COLUMNS)
     passing, rejects = feasible_universe(cfg, snaps, capital, date, calendar, broker.quotes_have_oi)
