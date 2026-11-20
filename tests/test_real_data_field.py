@@ -156,9 +156,12 @@ def test_t7d_cutoff_constant_matches_template_comment(tpl):
 
 @pytest.mark.parametrize("path, must, must_not", [
     (".claude/agents/i3-verifier.md",
-     ["Your head run is always your own", "never use the head run made for 05", "(item 073)"], []),
+     ["Your head run is always your own", "never use the head run made for 05", "(item 073)",
+      "never use the head run made for 05, whoever made it (I2 or the orchestrator), even if the same-inputs check passes;"],
+     []),
     (".claude/commands/run-item.md",
-     ["I3's head run is always its own full run", "never give I3 the head run made for 05", "(item 073)"], []),
+     ["I3's head run is always its own full run", "never give I3 the head run made for 05", "(item 073)",
+      "never give I3 the head run made for 05, even when the same-inputs check passes,"], []),
     ("templates/verification.md",
      ["never 05's head dir (item 073)", "same `--max-rows` as 05"], ["same dirs"]),
 ], ids=["i3", "run-item", "template"])
@@ -255,7 +258,12 @@ def test_t11_data_real_file_triggers(tmp_path):
     (f"{HEAD}\n```\n## x\n{TOTAL}\n```\n## Deviations from plan\n", None),
     ("## Test output\nok\n", f"05 has no '{HEAD}' section ("),
     (f"{HEAD}\n```\n{TOTAL}\n", "05 Real-data effect has an unclosed ``` fence ("),
-], ids=["fenced-heading", "no-heading", "unclosed"])
+    # item 077: CommonMark 0.31.2 §4.5 fences (_md_lines)
+    (f"{HEAD}\n~~~\n## x\n{TOTAL}\n~~~\n## Deviations from plan\n", None),
+    (f"{HEAD}\n````\n```\n## x\n{TOTAL}\n````\n## Deviations from plan\n", None),
+    (f"{HEAD}\n    ```\n## x\n{TOTAL}\n", "05 Real-data effect has no diff_reports TOTAL line ("),
+    (f"{HEAD}\n```\n```py\n## x\n{TOTAL}\n```\n## Deviations from plan\n", None),
+], ids=["fenced-heading", "no-heading", "unclosed", "tilde", "longer", "4-space", "info"])
 def test_t12_fences_and_headings(tmp_path, body05, want):
     repo, cutoff, _ = _trigger_commit(tmp_path, body05=body05)
     code, out, real, inc = _check(repo, cutoff)

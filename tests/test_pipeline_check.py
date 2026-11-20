@@ -174,6 +174,7 @@ def test_repo_pipeline_has_no_skipped_items(tmp_path):
     assert "RESEARCH CODE: none" in out                 # item 062
     assert "061: complete" in out                      # item 064: 061 stays complete with work/ .py as code
     assert "I3 FAIL: none" in out  # item 071
+    assert "UNCOMMITTED STEP: none" in out             # item 077
 
 
 def test_no_tracked_pycache():
@@ -256,9 +257,10 @@ def test_open_branch_conflict_is_reported(tmp_path):
     assert "  origin/fix: items 040; CONFLICTS: logs/recurring-issues.md; edits" in out
 
 
-def _branch_adds(repo, branch, item, files, request_text=None, extra=()):
+def _branch_adds(repo, branch, item, files, request_text=None, extra=(), bodies=None):
     """Push branch `branch` off main that adds work/<item> with `files` (item 037/038 tests),
-    plus the paths in `extra` (item 062)."""
+    plus the paths in `extra` (item 062). `bodies` {file name: text} replaces a file's default
+    body (item 077)."""
     _git(repo, "checkout", "-q", "-b", branch, "main")
     for path in extra:
         _write(repo, path)
@@ -267,7 +269,7 @@ def _branch_adds(repo, branch, item, files, request_text=None, extra=()):
     (d / "request.md").write_text(request_text or f"# Work item {item}\nScope: FULL\nDate: 2026-10-31\n",
                                   encoding="utf-8")
     for f in files:
-        (d / f).write_text("x\nA1 result: PASS (test)\n", encoding="utf-8")
+        (d / f).write_text((bodies or {}).get(f, "x\nA1 result: PASS (test)\n"), encoding="utf-8")
     _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", branch)
     _git(repo, "push", "-q", "origin", branch)
     _git(repo, "checkout", "-q", "main")
@@ -306,6 +308,42 @@ def test_open_branch_item_that_skips_steps_is_reported(tmp_path):
     assert "BRANCH SKIPPED: 060 (origin/short: FULL: missing 01 02 03 04 before 05)" in out
     assert "BRANCH SKIPPED: 040" not in out        # origin/fix has 01-07 for 040
     assert "SKIPPED: none" in out
+    assert "BRANCH FAIL: 060" not in out and "BRANCH FAIL: 040" not in out   # item 077
+
+
+@NO_GIT
+def test_branch_i3_fail_is_listed(tmp_path):
+    """Item 077 (BF1): an open-branch item whose 06 is FAIL is listed; the exit code is unchanged."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "i3fail", "181", ALL[:6],
+                 bodies={"06-verification.md": "Verdict: FAIL (round 1)\nSent back to: I2\nx\n"})
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-03")
+    assert ("BRANCH FAIL: 181 (origin/i3fail: I3 FAIL; FULL; sent back to I2, needs a later PASS round in 06 "
+            "(item 071))") in out, out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_branch_a1_fail_is_listed(tmp_path):
+    """Item 077 (BF2): an open-branch item whose last A1 line is FAIL is listed. Its 06 has no
+    `Verdict:` line, so it is not an I3 FAIL (an unreadable branch verdict is never a FAIL)."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "a1fail", "182", ALL, bodies={"07-audit-task.md": "x\nA1 result: FAIL (test)\n"})
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-03")
+    assert "BRANCH FAIL: 182 (origin/a1fail: A1 FAIL; FULL; sent back, needs a later A1 PASS line (item 042))" in out, out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_branch_skipped_wins_over_branch_fail(tmp_path):
+    """Item 077 (BF3, 03 H2): an A1 FAIL item the 062 merge adds to BRANCH SKIPPED is not listed twice."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "rofail", "183", ["01-research.md", "02-improvements.md", "03-handoff.md", "07-audit-task.md"],
+                 "# Work item 183\nScope: RESEARCH ONLY\nDate: 2026-10-31\n", extra=("ccbot/x.py",),
+                 bodies={"07-audit-task.md": "x\nA1 result: FAIL (test)\n"})
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-03")
+    assert "BRANCH SKIPPED: 183 (" in out, out
+    assert "BRANCH FAIL: 183" not in out, out
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
@@ -796,11 +834,133 @@ def test_head_run_ignores_uncommitted_item(tmp_path):
     args = ("--today", "2026-11-11", "--untracked-from", cutoff)
     code, out = _run(repo, "check_pipeline.py", *args)
     assert code == 1 and "INCOMPLETE: 151" in out, out          # control: the tree run sees it
+    assert "UNCOMMITTED STEP: 151 01-research.md (" in out, out  # item 077
     code, out = _run_head(repo, tmp_path, "check_pipeline.py", *args)
     assert "INCOMPLETE: none" in out, out
+    assert "UNCOMMITTED STEP: none" in out, out
     assert code == 0, out
     wl = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout
     assert str(tmp_path / "head") not in wl
+
+
+# Item 077 (RI-010): a step file neither in HEAD nor logged is a cut-off run.
+P5A = "UNCOMMITTED STEP: 151 01-research.md (not in HEAD, no R1 log line; a cut-off run? item 077)"
+
+
+def _uncommitted(repo, cutoff=None):
+    args = ("--today", "2026-11-11") + (("--untracked-from", cutoff) if cutoff else ())
+    code, out = _run(repo, "check_pipeline.py", *args)
+    pick = lambda p: [l for l in out.splitlines() if l.startswith(p)][0]
+    return code, out, pick("UNCOMMITTED STEP:"), pick("INCOMPLETE:")
+
+
+@NO_GIT
+def test_uncommitted_unlogged_step_is_listed(tmp_path):
+    """P5a: an uncommitted 01 with no R1 line is listed (exit 1)."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "151", ["01-research.md"], logged=False)
+    code, out, line, _ = _uncommitted(repo, cutoff)
+    assert line == P5A, out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_uncommitted_step_without_logs_folder_is_listed(tmp_path):
+    """P5b: no logs/ folder means no file is logged; item 040 is below CHECKLIST_FROM, so this check
+    alone gives exit 1."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "config/x.json", "{}\n")
+    cutoff = _commit(repo, "cutoff")
+    _item(repo, "040", ["01-research.md"], logged=False)
+    assert not (repo / "logs").exists()
+    code, out, line, inc = _uncommitted(repo, cutoff)
+    assert line == ("UNCOMMITTED STEP: 040 01-research.md (not in HEAD, no R1 log line; a cut-off run? "
+                    "item 077)"), out
+    assert inc == "INCOMPLETE: none", out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_uncommitted_but_logged_steps_are_quiet(tmp_path):
+    """P5c: uncommitted 01-06 that each have their log line are not listed (exit 0)."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "152", ALL[:6])
+    code, out, line, inc = _uncommitted(repo, cutoff)
+    assert line == "UNCOMMITTED STEP: none" and inc == "INCOMPLETE: none", out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_committed_unlogged_step_is_incomplete_not_uncommitted(tmp_path):
+    """P5d: a committed step with no log line is 043's INCOMPLETE, not an uncommitted step."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "153", ["01-research.md"], logged=False)
+    _commit(repo, "153 R1")
+    code, out, line, inc = _uncommitted(repo, cutoff)
+    assert inc == "INCOMPLETE: 153 (no log line for R1)", out
+    assert line == "UNCOMMITTED STEP: none", out
+
+
+@NO_GIT
+def test_staged_step_is_still_uncommitted(tmp_path):
+    """P5e: `git add` is not a commit: HEAD's tree decides, never the index."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "151", ["01-research.md"], logged=False)
+    _git(repo, "add", "work/151/01-research.md")
+    code, out, line, _ = _uncommitted(repo, cutoff)
+    assert line == P5A, out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_uncommitted_step_in_shallow_clone(tmp_path):
+    """P5f (03 F39): ls-tree HEAD sees the whole tip tree in a shallow clone. The clone's committed
+    039 01 has no log line (below CHECKLIST_FROM, so not INCOMPLETE): listed only if ls-tree missed it."""
+    repo, cutoff = _history(tmp_path)
+    _item(repo, "039", ["01-research.md"], logged=False)
+    _commit(repo, "039 R1")
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "-q", "--depth", "1", f"file://{repo}", str(clone))
+    shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=clone,
+                             capture_output=True, text=True).stdout.strip()
+    assert shallow == "true"
+    _item(clone, "152", ALL[:6])
+    code, out, line, _ = _uncommitted(clone, cutoff)
+    assert line == "UNCOMMITTED STEP: none", out
+    assert "UNTRACKED CHANGE: not checked (cutoff " in out, out
+    assert code == 0, out
+    _item(clone, "151", ["01-research.md"], logged=False)
+    code, out, line, _ = _uncommitted(clone, cutoff)
+    assert line == P5A, out
+    assert code == 1, out
+
+
+def test_uncommitted_step_without_git(tmp_path):
+    """P5g: outside git the check says so, never none."""
+    _item(tmp_path, "151", ["01-research.md"], logged=False)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-11")
+    assert "UNCOMMITTED STEP: not checked (no git)" in out, out
+
+
+@NO_GIT
+def test_uncommitted_step_ls_tree_failure_fails(tmp_path):
+    """P5h: unborn HEAD: ls-tree HEAD fails, which is an error (exit 1), never none (RI-002)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _item(repo, "154", ["01-research.md"])
+    code, out, line, _ = _uncommitted(repo)
+    assert line == "UNCOMMITTED STEP: git ls-tree HEAD failed (item 077)", out
+    assert code == 1, out
+
+
+def test_a1_text_names_077_lines():
+    """Item 077 (RI-010): A1's job B names both new lines, so they have a reader."""
+    text = (REPO / ".claude" / "agents" / "a1-auditor.md").read_text(encoding="utf-8")
+    assert "`UNCOMMITTED STEP:` entry" in text
+    assert "`BRANCH FAIL:` line" in text
 
 
 def _untracked(repo, cutoff):
@@ -1725,6 +1885,18 @@ UNFILLED = "Verdict: PASS | FAIL (round <n>; earlier rounds: <verdicts>)\n"
     ("```\nVerdict: PASS (round 1)\n", (None, None)),                     # unclosed fence (C6)
     # skipped text: fences and HTML comments
     ("```\nVerdict: FAIL (pasted)\n```\nVerdict: PASS (round 1)\n", ("PASS", None)),
+    # item 077: CommonMark 0.31.2 §4.5 fences (_md_lines)
+    pytest.param("~~~\nVerdict: FAIL (pasted)\n~~~\nVerdict: PASS (round 1)\n", ("PASS", None), id="tilde"),
+    pytest.param("````\n```\nVerdict: FAIL (pasted)\n````\nVerdict: PASS (round 1)\n", ("PASS", None), id="longer"),
+    pytest.param("    ```\nVerdict: PASS (round 1)\n    ```\n", ("PASS", None), id="4-space"),
+    pytest.param("\t```\nVerdict: PASS (round 1)\n", ("PASS", None), id="tab"),
+    pytest.param("```\n```py\nVerdict: FAIL (pasted)\n```\nVerdict: PASS (round 1)\n", ("PASS", None), id="info"),
+    pytest.param("```\nVerdict: FAIL (pasted)\n    ```\nVerdict: FAIL (inside)\n```\nVerdict: PASS (round 1)\n",
+                 ("PASS", None), id="4-space-close"),
+    pytest.param("```x`y\nVerdict: PASS (round 1)\n", ("PASS", None), id="backtick-info"),
+    pytest.param("~~~x`y\nVerdict: FAIL (pasted)\n~~~\nVerdict: PASS (round 1)\n", ("PASS", None), id="tilde-info"),
+    pytest.param("~~~\nVerdict: FAIL (pasted)\n```\nVerdict: FAIL (inside)\n~~~\nVerdict: PASS (round 1)\n",
+                 ("PASS", None), id="mixed"),
     ("<!--\nVerdict: FAIL (old)\n-->\nVerdict: PASS (round 1)\n", ("PASS", None)),
     # targets: full-line match only
     ("Verdict: FAIL (round 1)\nSent back to: I1 I2\n", ("FAIL", "I1 I2")),
@@ -1745,6 +1917,35 @@ def test_i3_fail_beats_older_a1_fail(tmp_path):
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
     assert code == 1, out
     assert "174: I3 FAIL (" in out and "I3 FAIL: 174" in out and "A1 FAIL: none" in out
+    assert "174: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))" in out   # item 077
+
+
+NEW_ITEM = ("I3 FAIL (FULL; sent back to I2; 06 FAIL after A1 PASS in 07: a follow-up to a completed item is a "
+            "new item (run-item, items 053, 077))")
+
+
+def test_i3_fail_after_a1_pass_is_a_new_item(tmp_path):
+    """Item 077 (T-P3): a 06 FAIL whose 07 ends in A1 PASS names the new-item rule (the last A1 line decides)."""
+    _item(tmp_path, "180", ALL, verdict="FAIL")
+    _item(tmp_path, "185", ALL, verdict="FAIL", a1="A1 result: FAIL (r1)\nA1 result: PASS (r2)")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    for i in ("180", "185"):
+        line = [l for l in out.splitlines() if l.startswith(f"{i}: ")][0]
+        assert line == f"{i}: {NEW_ITEM}", out
+        assert "needs a later PASS round" not in line
+    assert "I3 FAIL: 180, 185" in out
+
+
+def test_i3_fail_with_no_a1_line_keeps_old_detail(tmp_path):
+    """Item 077 (T-P3b): a 07 with no `A1 result:` line keeps the old detail, PRE_A1_LINE items too
+    (known gap: _open_at calls 017 closed)."""
+    _item(tmp_path, "184", ALL, verdict="FAIL", a1=None)
+    _item(tmp_path, "017", ALL, verdict="FAIL", a1=None)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-18")
+    assert code == 1, out
+    for i in ("184", "017"):
+        assert f"{i}: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))" in out, out
 
 
 def test_i3_fail_target_not_stated(tmp_path):
@@ -1788,6 +1989,7 @@ def test_i3_fail_with_more_steps_on_branch_is_in_pr(tmp_path):
     code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-18")
     assert "177: IN PR (origin/fix has " in out and "; was I3 FAIL here)" in out
     assert "I3 FAIL: none" in out and "IN PR: 177" in out
+    assert "BRANCH FAIL: 177 (origin/fix: I3 FAIL; " in out          # item 077
 
 
 def test_verification_template_lines_unfilled(tmp_path):

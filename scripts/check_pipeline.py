@@ -46,10 +46,11 @@ with no `Sent back to: I1|I2|I1 I2` line, or a PASS with no `Sent back to: none`
 field), is INCOMPLETE. From CHECKLIST_FROM on, a readable verdict that differs from the first word
 of the item's last well-formed `| I3 |` log line (a malformed last line is 045's, never replaced by
 an earlier one) (logs/implementation, by file date then line order) is INCOMPLETE; the log never
-fills in a missing verdict. Known gaps: (w) a 06 FAIL with a 07 whose last A1 line is PASS shows I3
-FAIL, but _open_at (053) treats the item as closed (a re-opened completed item is a new item,
-run-item.md); (x) open branches report only SKIPPED, so a branch's I3 FAIL (like its A1 FAIL) is not
-listed; (y) below VERDICT_FROM an unreadable verdict is not checked; (z) the line proves what I3
+fills in a missing verdict. Known gaps: (w) a 06 FAIL with a 07 whose last A1 line is not FAIL is
+I3 FAIL with that detail; _open_at (053) still treats the item as closed, so a code commit for it is
+an UNTRACKED CHANGE. Both report an error (item 077). classify reads 07 alone: a PRE_A1_LINE or
+LEGACY item with a 06 FAIL and no A1 PASS line keeps the old detail while _open_at calls it closed
+(known gap, 0 items 2026-11-19); (y) below VERDICT_FROM an unreadable verdict is not checked; (z) the line proves what I3
 wrote, not that I3 ran (the log cross-check is the second source).
 
 When run inside a git repo, it also prints OPEN BRANCHES: every remote branch not merged into
@@ -57,12 +58,16 @@ HEAD, the work items it carries (what merging it into HEAD would change, from th
 `git merge-tree` result, so a branch with two merge bases is not credited with work already in
 HEAD; item 052), whether it merges cleanly into HEAD (`git merge-tree`), and
 whether it edits logs/recurring-issues.md, which only A1's daily commit on main should (036),
-and its last commit date and age (039). Two more lines come from the branches:
+and its last commit date and age (039). Three more lines come from the branches:
   ID CLASH        HEAD and an open branch each added work/<ID>/request.md since their merge
                   base, with different text: two items share one ID (item 037). Rename one.
   BRANCH SKIPPED  an item the open branch changes skips a step by the rules above, using the
                   branch's own files (item 038). An error for A1 (RI-007); exit code unchanged,
                   since the branch is not part of HEAD.
+  BRANCH FAIL     an item the open branch changes is I3 FAIL or A1 FAIL by the rules above, using the
+                  branch's own files (item 077). Listed for A1; exit code unchanged, since the branch
+                  is not part of HEAD. An item that is BRANCH SKIPPED is not also listed here. A branch
+                  file git cannot show is read as empty, so its I3 FAIL is not listed.
 --log <agent> <ID> "<fields>" (item 045) appends `HH:MM | <agent> | <ID> | <fields>` with the
 current UTC time to logs/research or logs/implementation/<UTC date>.md, and refuses (exit 2)
 fields that don't match the agent's format (LOG_FORMAT). Every step logs this way, right after
@@ -137,7 +142,8 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   path or a file under TRIGGER_DIRS (realtest's decision path), its 05, and its 06 once
                   that exists, must hold diff_reports' TOTAL line (TOTAL_LINE, a full-line match) in the
                   `## Real-data effect (diff_reports output, pasted)` section. HTML comments are dropped;
-                  lines inside ``` fences are read, and a `## ` inside a fence does not end the section.
+                  lines inside code fences (``` or ~~~, CommonMark 0.31.2 §4.5) are read, and a `## `
+                  inside a fence does not end the section.
                   A missing section, no TOTAL line, an unclosed fence or a missing 05 is INCOMPLETE
                   (exit 1). The line lists the IDs with an entry, or none; "not checked (no git)";
                   "not checked (see UNTRACKED CHANGE)" when the cutoff can't be used; "git log failed
@@ -150,7 +156,18 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   dir outside the repo is not seen; (q) one commit holding two items' step files triggers
                   both; (r) RESEARCH ONLY items are 062's and are skipped here; (s) uncommitted trigger
                   edits are not seen; (t) tests/test_real_data_field.py keeps TRIGGER in step with
-                  realtest's imports and only literal `"config" / "<name>"` paths.
+                  realtest's imports and only literal `"config" / "<name>"` paths. Fences (item 077):
+                  fences inside list items or blockquotes are read line by line; comments are dropped
+                  before fences are tracked, so a `<!--` inside a fence with no `-->` on its line hides
+                  text to the next `-->`.
+  UNCOMMITTED STEP (item 077, RI-010, exit 1) a step file 01-06 in the working tree that is not in
+                  `git ls-tree -r HEAD -- work/` and has no `| <agent> | <ID> |` log line, for every
+                  item number: a step whose run was cut off before it logged or was committed. Finish or
+                  redo that step. "not checked (no git)" without git; "git ls-tree HEAD failed (item
+                  077)" when HEAD's tree can't be listed (exit 1, never none). This is the first check
+                  of the working tree against HEAD's commit state. Known gaps: (a) a file and its log
+                  line written but not committed is not listed; (b) a modified tracked step file (e.g.
+                  a round-2 06) is not listed; (c) 07 and other files outside 01-06 are not checked.
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 INBOX (item 069, RI-010): the daily audit's Inbox step (a1-auditor job B) is a text duty, so the
@@ -300,18 +317,48 @@ def _build_waived(text):
     return WAIVE_BUILD <= set(steps) and who == "person" and bool(WAIVE_BUILD_BY_PERSON.search(waived_line))
 
 
+# Item 077: a CommonMark 0.31.2 §4.5 code fence opener (.fullmatch): 0-3 spaces, 3+ ` or ~, info string.
+FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
+
+
+def _md_lines(text):
+    """Item 077: ([(line, state)], open_at_end) for a markdown text with HTML comments dropped first.
+    state is "out", "mark" (an opening or closing fence line) or "in" (inside a fence). Fences are
+    CommonMark 0.31.2 §4.5 code fences: an opener is 0-3 spaces then 3+ backticks or tildes (a
+    backtick opener's info string may not hold a backtick); the closer is 0-3 spaces, the same
+    char at least as many times, then only spaces or tabs. open_at_end: a fence is still open."""
+    rows, char, n = [], None, 0
+    for line in re.sub(r"<!--.*?-->", "", text, flags=re.S).splitlines():
+        if char is None:
+            m = FENCE_OPEN.fullmatch(line)
+            if m and not (m[1][0] == "`" and "`" in m[2]):
+                char, n = m[1][0], len(m[1])
+                rows.append((line, "mark"))
+            else:
+                rows.append((line, "out"))
+        elif re.fullmatch(rf" {{0,3}}{re.escape(char)}{{{n},}}[ \t]*", line):
+            char = None
+            rows.append((line, "mark"))
+        else:
+            rows.append((line, "in"))
+    return rows, char is not None
+
+
+def _a1_results(text):
+    """Items 042, 053, 077: every `A1 result:` word in a 07 text, in order (one reader for classify
+    and _open_at)."""
+    return re.findall(r"^A1 result:\s*(\w+)", text, re.M)
+
+
 def i3_verdict(path):
-    """Item 071: (verdict, target) from 06; the first column-0 line of each, outside ``` fences and
-    HTML comments, decides, never a later one; None = unreadable. Fences as in _field_gap: ``` only
-    (~~~ is not tracked, 0 in 06 files 2026-11-18)."""
-    text = re.sub(r"<!--.*?-->", "", path.read_text(encoding="utf-8"), flags=re.S)
+    """Item 071: (verdict, target) from 06; the first column-0 line of each, outside code fences and
+    HTML comments, decides, never a later one; None = unreadable. Fences are CommonMark 0.31.2 §4.5
+    code fences (``` or ~~~, _md_lines; item 077)."""
+    rows, _ = _md_lines(path.read_text(encoding="utf-8"))
     verdict = target = None
-    seen_verdict = seen_target = fence = False
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fence = not fence
-            continue
-        if fence:
+    seen_verdict = seen_target = False
+    for line, state in rows:
+        if state != "out":
             continue
         if not seen_verdict and line.startswith("Verdict:"):
             seen_verdict = True
@@ -385,11 +432,15 @@ def classify(item_dir, today):
         verdict, target = i3_verdict(item_dir / STEPS["06"])
         if verdict == "FAIL":
             where = f"sent back to {target}" if target in ("I1", "I2", "I1 I2") else "sent back to: not stated"
+            audit = item_dir / STEPS["07"]
+            a1 = _a1_results(audit.read_text(encoding="utf-8")) if audit.exists() else []
+            if a1 and a1[-1].upper() != "FAIL":             # item 077: the item was completed
+                return "I3 FAIL", (f"{scope}; {where}; 06 FAIL after A1 PASS in 07: a follow-up to a completed "
+                                   f"item is a new item (run-item, items 053, 077){extra}")
             return "I3 FAIL", f"{scope}; {where}, needs a later PASS round in 06 (item 071){extra}"
     if len(have) == len(need):
         audit = item_dir / STEPS["07"]
-        verdicts = re.findall(r"^A1 result:\s*(\w+)", audit.read_text(encoding="utf-8"), re.M) \
-            if audit.exists() else []
+        verdicts = _a1_results(audit.read_text(encoding="utf-8")) if audit.exists() else []
         if item_dir.name not in PRE_A1_LINE and not verdicts:
             return "awaiting A1", f"{scope}{extra}"
         if verdicts and verdicts[-1].upper() == "FAIL":
@@ -415,6 +466,41 @@ def log_hint(agent, item) -> str:
     return LOG_HINT[agent][0]
 
 
+def _log_text(logs):
+    """Items 043, 077: every research and implementation log file under `logs`, joined in file order
+    ("" when the folders are absent)."""
+    return "".join(f.read_text(encoding="utf-8") for sub in ("research", "implementation")
+                   for f in sorted((logs / sub).glob("*.md")) if (logs / sub).is_dir())
+
+
+def _logged(text, agent, item):
+    """Items 043, 077: whether the log text holds a `| <agent> | <ID> |` line (its fields are not read)."""
+    return re.search(rf"\|\s*{agent}\s*\|\s*{item}\s*\|", text) is not None
+
+
+def uncommitted_steps(logs=Path("logs")):
+    """Item 077 (RI-010): None without git, else (text after `UNCOMMITTED STEP: `, failed). A step file
+    01-06 in the working tree that is not in `git ls-tree -r HEAD -- work/` and has no `| <agent> | <ID> |`
+    log line is a cut-off run. Every item number is checked. A failing ls-tree is an error, never none."""
+    if _git("rev-parse", "HEAD") is None:
+        return None
+    tree = _git("ls-tree", "-r", "--name-only", "HEAD", "--", "work/")
+    if tree[1] != 0:
+        return "git ls-tree HEAD failed (item 077)", True
+    committed = set(tree[0].splitlines())
+    text = _log_text(logs)
+    entries = []
+    for d in sorted(Path("work").glob("[0-9][0-9][0-9]")):
+        if not d.is_dir():
+            continue
+        for s in sorted(AGENT):
+            name = STEPS[s]
+            if (d / name).exists() and f"work/{d.name}/{name}" not in committed \
+                    and not _logged(text, AGENT[s], d.name):
+                entries.append(f"{d.name} {name} (not in HEAD, no {AGENT[s]} log line; a cut-off run? item 077)")
+    return "; ".join(entries) or "none", bool(entries)
+
+
 def incomplete(item_dir, logs=Path("logs")):
     """Item 043: what is missing from a step's own checklist ([] = nothing)."""
     if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
@@ -423,10 +509,9 @@ def incomplete(item_dir, logs=Path("logs")):
     ver = item_dir / STEPS["06"]
     if ver.exists() and not re.search(r"^.*Recurring issues checked:.*RI-\d", ver.read_text(encoding="utf-8"), re.M):
         missing.append("06 has no 'Recurring issues checked: RI-...' line")
-    text = "".join(f.read_text(encoding="utf-8") for sub in ("research", "implementation")
-                   for f in sorted((logs / sub).glob("*.md")) if (logs / sub).is_dir())
+    text = _log_text(logs)
     unlogged = [AGENT[s] for s in sorted(AGENT) if (item_dir / STEPS[s]).exists()
-                and not re.search(rf"\|\s*{AGENT[s]}\s*\|\s*{item_dir.name}\s*\|", text)]
+                and not _logged(text, AGENT[s], item_dir.name)]
     if unlogged:
         missing.append(f"no log line for {' '.join(unlogged)}")
     if int(item_dir.name) >= LOG_CHECK_FROM:
@@ -535,7 +620,8 @@ def _git(*args):
 
 def open_branches(today=None):
     """One dict per remote branch not merged into HEAD (items 034, 037, 038, 039): ref, items
-    {item: set of step codes}, conflicts, recurring, clashes, skipped [(item, detail)], last."""
+    {item: set of step codes}, conflicts, recurring, clashes, skipped [(item, detail)],
+    failed [(item, status, detail)] (item 077: I3 FAIL or A1 FAIL, never an item in skipped), last."""
     out = _git("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
     if out is None or out[1] != 0:
         return []
@@ -577,7 +663,7 @@ def open_branches(today=None):
         rules = changed(*RULE_PATHS)
         bases = _git("merge-base", "--all", "HEAD", ref)
         bases = bases[0].split() if bases and bases[1] == 0 else []
-        clashes, skipped, requests = [], [], {}
+        clashes, skipped, failed, requests = [], [], [], {}
         for item in sorted(touched):
             req = f"work/{item}/request.md"
             theirs = _git("show", f"{ref}:{req}")
@@ -597,6 +683,8 @@ def open_branches(today=None):
                     status, detail = classify(d, today)
                 if status == "SKIPPED":
                     skipped.append((item, detail))
+                if status in ("I3 FAIL", "A1 FAIL"):         # item 077
+                    failed.append((item, status, detail))
         # item 062: the branch is one unit; its RESEARCH ONLY items may not change code
         # item 064: plus the work/ .py files the branch changes; the tip's other files count
         # only as step files, so an unchanged .py at the tip is not the branch's code
@@ -608,11 +696,12 @@ def open_branches(today=None):
                 skipped[have[0]] = (item, f"{skipped[have[0]][1]}; {detail}")
             else:
                 skipped.append((item, detail))
+        failed = [f for f in failed if f[0] not in {i for i, _ in skipped}]   # item 077: SKIPPED wins
         when = _git("log", "-1", "--format=%cs", ref)
         last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
         found.append({"ref": ref, "items": items, "conflicts": conflicts,
                       "recurring": recurring, "clashes": clashes,
-                      "skipped": skipped, "last": last, "rules": rules})
+                      "skipped": skipped, "failed": failed, "last": last, "rules": rules})
     return found
 
 
@@ -625,7 +714,7 @@ def _open_at(parent, item):
     audit = _git("show", f"{parent}:work/{item}/07-audit-task.md")
     if audit is None or audit[1] != 0:
         return True
-    verdicts = re.findall(r"^A1 result:\s*(\w+)", audit[0], re.M)
+    verdicts = _a1_results(audit[0])
     return not verdicts or verdicts[-1].upper() == "FAIL"
 
 
@@ -710,27 +799,21 @@ def _triggers(files):
 
 def _field_gap(text):
     """Item 070: None when the Real-data effect section of a 05/06 text holds diff_reports' TOTAL
-    line, else the reason. Comments are dropped; ``` fences are tracked from the top, lines inside
-    them are read, and only a `## ` outside a fence ends the section. An unclosed fence fails."""
-    lines = re.sub(r"<!--.*?-->", "", text, flags=re.S).splitlines()
-    fence, start = False, None
-    for k, line in enumerate(lines):
-        if line.lstrip().startswith("```"):
-            fence = not fence
-        elif not fence and line.rstrip() == f"## {REAL_DATA_FIELD}":
-            start = k
-            break
+    line, else the reason. Comments are dropped; code fences (``` or ~~~, CommonMark 0.31.2 §4.5,
+    _md_lines; item 077) are tracked from the top, lines inside them are read, and only a `## `
+    outside a fence ends the section. A fence still open at the end of the file fails."""
+    rows, open_at_end = _md_lines(text)
+    start = next((k for k, (line, state) in enumerate(rows)
+                  if state == "out" and line.rstrip() == f"## {REAL_DATA_FIELD}"), None)
     if start is None:
         return f"has no '## {REAL_DATA_FIELD}' section"
     section = []
-    for line in lines[start + 1:]:
-        if line.lstrip().startswith("```"):
-            fence = not fence
-        elif not fence and line.startswith("## "):
+    for line, state in rows[start + 1:]:
+        if state == "out" and line.startswith("## "):
             break
         section.append(line)
     else:
-        if fence:
+        if open_at_end:
             return "Real-data effect has an unclosed ``` fence"
     if any(TOTAL_LINE.fullmatch(line.strip()) for line in section):
         return None
@@ -896,6 +979,7 @@ def main(argv):
     untracked = untracked_changes(cutoff, walked)
     research = research_code(cutoff, walked)
     real = real_data_field(cutoff, walked)                  # item 070
+    uncommitted = uncommitted_steps()                       # item 077
     flagged = research[1] if research else {}
     listed = sorted(p for p in work.iterdir() if (p / "request.md").exists())
     for d in listed:
@@ -951,6 +1035,9 @@ def main(argv):
     for b in branches:
         for item, detail in b["skipped"]:
             print(f"BRANCH SKIPPED: {item} ({b['ref']}: {detail})")
+    for b in branches:                                      # item 077: information, exit unchanged
+        for item, status, detail in b["failed"]:
+            print(f"BRANCH FAIL: {item} ({b['ref']}: {status}; {detail})")
     print(f"I3 FAIL: {', '.join(i3_failed) or 'none'}")
     print(f"A1 FAIL: {', '.join(failed) or 'none'}")
     print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
@@ -962,6 +1049,7 @@ def main(argv):
     print(f"UNTRACKED CHANGE: {'not checked (no git)' if untracked is None else untracked[0]}")
     print(f"RESEARCH CODE: {'not checked (no git)' if research is None else research[0]}")
     print(f"REAL-DATA FIELD: {'not checked (no git)' if real is None else real[0]}")
+    print(f"UNCOMMITTED STEP: {'not checked (no git)' if uncommitted is None else uncommitted[0]}")
     orphans = orphan_log_lines()
     print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
     inbox, inbox_bad = inbox_section()  # item 069
@@ -971,7 +1059,7 @@ def main(argv):
         return 1
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped or failed or i3_failed or unfinished or late or orphans or (untracked and untracked[1]) \
-        or (real and real[2]) else 0
+        or (real and real[2]) or (uncommitted and uncommitted[1]) else 0
 
 
 if __name__ == "__main__":
