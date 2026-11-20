@@ -66,7 +66,14 @@ and its last commit date and age (039). Two more lines come from the branches:
 --log <agent> <ID> "<fields>" (item 045) appends `HH:MM | <agent> | <ID> | <fields>` with the
 current UTC time to logs/research or logs/implementation/<UTC date>.md, and refuses (exit 2)
 fields that don't match the agent's format (LOG_FORMAT). Every step logs this way, right after
-writing its file. From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
+writing its file. From TESTS_FORMAT_FROM (item 076) the I2 tests field is the last line of
+`python3 -m pytest -q` run from the repo root, as printed: its parts in pytest's KNOWN_TYPES order,
+each at most once; `deselected` and unknown parts are refused. Before it (I2_BEFORE) the field is
+`<pass>/<total>`, with total = passed + failed + skipped + errors + xfailed + xpassed (deselected
+and warnings are not tests) and pass <= total. Known limit: a trailing ` (<note>)` is free text
+and could hold e.g. `(1 failed)`; the stats part before the note is still checked in full, so no
+failure can be dropped from it.
+From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
   LOG TIME        a committed log line timed after the commit that added it (git blame): it was
                   not written when its step ran (exit 1; RI-010).
                   Items in LOG_TIME_EXCEPT are not checked and are named with their reason
@@ -188,6 +195,17 @@ AGENT = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"}
 # Item 045: from this ID on, each log line must match its agent's format, and a committed line
 # may not be timed after the commit that added it. Lines are written with --log, never by hand.
 LOG_CHECK_FROM = 45
+TESTS_FORMAT_FROM = 76   # item 076: from this ID on the I2 tests field is pytest's summary line as printed
+# Item 076: the parts of pytest's summary line, in KNOWN_TYPES order (pytest main/9.0.x terminal.py),
+# each at most once. "deselected" left out on purpose: a full-suite run has none.
+_N = r"[1-9]\d*"
+_END = r"(?:, (?=[1-9])|(?=$| in | \())"          # a part is followed by ", <next part>" or the end of the stats
+_STATS_PARTS = (rf"{_N} failed", rf"{_N} passed", rf"{_N} skipped", rf"{_N} xfailed", rf"{_N} xpassed",
+                rf"(?:1 warning|(?!1 ){_N} warnings)", rf"(?:1 error|(?!1 ){_N} errors)",
+                rf"{_N} subtests passed", rf"{_N} subtests failed", rf"{_N} subtests skipped")
+_STATS = r"(?=[1-9])" + "".join(f"(?:{p}{_END})?" for p in _STATS_PARTS)
+_TAIL = r"(?: in \d+\.\d+(?:s| seconds)(?: \(\d+:\d{2}:\d{2}\))?)?(?: \(.*\))?"
+I2_BEFORE = r"\d+ files? changed \| tests (\d+)/(\d+)\b.*"    # items LOG_CHECK_FROM..TESTS_FORMAT_FROM-1
 # Item 049: items whose log times can't be checked, with why. 048 was built on a branch cut
 # before 045 merged; its six lines were typed by hand with a time after their commit, and the
 # real times are lost. Never add a new item here.
@@ -231,7 +249,7 @@ LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*
     "R2": r"3 for / 3 against \| languages: \S.*",
     "R3": r"\d+ (verified|as-is), \d+ fixed, \d+ removed \| (READY|BLOCKED)\b.*",
     "I1": r"(FIT|FIT WITH CHANGES|NOT A FIT) \| \d+ files planned\b.*",
-    "I2": r"\d+ files? changed \| tests \d+/\d+\b.*",
+    "I2": rf"\d+ files? changed \| tests {_STATS}{_TAIL}",   # items >= TESTS_FORMAT_FROM; earlier: I2_BEFORE
     "I3": r"(PASS|FAIL) \| sent to audit: (yes|no)\b.*",
 }
 # Item 050: the same formats in plain words (as the agent files write them), with an example
@@ -241,9 +259,12 @@ LOG_HINT = {
     "R2": ("3 for / 3 against | languages: <list or N/A>", "3 for / 3 against | languages: N/A"),
     "R3": ("<n> verified, <n> fixed, <n> removed | READY or BLOCKED", "5 verified, 1 fixed, 0 removed | READY"),
     "I1": ("FIT or FIT WITH CHANGES or NOT A FIT | <n> files planned", "FIT | 2 files planned"),
-    "I2": ("<n> files changed | tests <pass>/<total>", "2 files changed | tests 9/9"),
+    "I2": ("<n> files changed | tests <last line of python3 -m pytest -q, as printed>",
+           "2 files changed | tests 9 passed, 1 skipped in 3.21s"),
     "I3": ("PASS or FAIL | sent to audit: yes or no", "PASS | sent to audit: yes"),
 }
+# Item 076: the I2 hint for items before TESTS_FORMAT_FROM (read through log_hint).
+LOG_HINT_BEFORE = {"I2": ("<n> files changed | tests <pass>/<total> (pass <= total)", "2 files changed | tests 9/9")}
 LOG_LINE = re.compile(r"^(\d{2}):(\d{2}) \| (R1|R2|R3|I1|I2|I3) \| (\d{3}) \| (.*)$")
 FAST_BY_PERSON = re.compile(r"^Scope:\s*FAST\s*\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*\)", re.M)
 # Older than the Scope/07 rules. Never add a new item here.
@@ -377,6 +398,23 @@ def classify(item_dir, today):
     return "in progress", f"{scope}: next {need[len(have)]}{extra}"
 
 
+def log_fields_ok(agent, item, fields) -> bool:
+    """Item 076: whether a log line's fields fit its agent's format for this item. I2 lines of items
+    before TESTS_FORMAT_FROM use I2_BEFORE and need pass <= total; every other line LOG_FORMAT."""
+    if agent == "I2" and int(item) < TESTS_FORMAT_FROM:
+        m = re.fullmatch(I2_BEFORE, fields.strip())
+        return bool(m) and int(m[1]) <= int(m[2])
+    return bool(re.fullmatch(LOG_FORMAT[agent], fields.strip()))
+
+
+def log_hint(agent, item) -> str:
+    """Item 076: the plain-words format that applies to this agent and item (LOG_HINT_BEFORE first).
+    An ID that is not 3 digits (refused by write_log) gets the current form, never a traceback."""
+    if agent in LOG_HINT_BEFORE and re.fullmatch(r"\d{3}", item) and int(item) < TESTS_FORMAT_FROM:
+        return LOG_HINT_BEFORE[agent][0]
+    return LOG_HINT[agent][0]
+
+
 def incomplete(item_dir, logs=Path("logs")):
     """Item 043: what is missing from a step's own checklist ([] = nothing)."""
     if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
@@ -393,9 +431,9 @@ def incomplete(item_dir, logs=Path("logs")):
         missing.append(f"no log line for {' '.join(unlogged)}")
     if int(item_dir.name) >= LOG_CHECK_FROM:
         bad = sorted({m[3] for m in (LOG_LINE.match(l) for l in text.splitlines())
-                      if m and m[4] == item_dir.name and not re.fullmatch(LOG_FORMAT[m[3]], m[5].strip())})
+                      if m and m[4] == item_dir.name and not log_fields_ok(m[3], m[4], m[5])})
         if bad:
-            wants = "; ".join(f'{a} wants "{LOG_HINT[a][0]}"' for a in bad)
+            wants = "; ".join(f'{a} wants "{log_hint(a, item_dir.name)}"' for a in bad)
             missing.append(f"log line for {' '.join(bad)} does not match its format (item 045): {wants}")
     if ver.exists():                                        # item 071 (a)-(d)
         verdict, target = i3_verdict(ver)
@@ -424,9 +462,9 @@ def write_log(agent, item, fields, now=None):
     """Item 045: append `HH:MM | agent | ID | fields` (UTC) to today's research or implementation
     log. Exit code 2 and nothing written when the agent, ID or fields are not in the format."""
     if agent not in LOG_FORMAT or not re.fullmatch(r"\d{3}", item) \
-            or not re.fullmatch(LOG_FORMAT[agent], fields.strip()):
+            or not log_fields_ok(agent, item, fields):   # order matters: the ID check runs before int(item)
         print(f"--log refused: {agent} | {item} | {fields} does not match "
-              f"{chr(34) + LOG_HINT[agent][0] + chr(34) if agent in LOG_HINT else 'an agent R1 R2 R3 I1 I2 I3'}",
+              f"{chr(34) + log_hint(agent, item) + chr(34) if agent in LOG_HINT else 'an agent R1 R2 R3 I1 I2 I3'}",
               file=sys.stderr)
         return 2
     if not (Path("work") / item / "request.md").exists():

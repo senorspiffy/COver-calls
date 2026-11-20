@@ -13,7 +13,14 @@ AGENTS = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"
 # One well-formed field set per agent (item 045, LOG_FORMAT).
 FIELDS = {"R1": "brief written | 0", "R2": "3 for / 3 against | languages: N/A",
           "R3": "1 verified, 0 fixed, 0 removed | READY", "I1": "FIT | 1 files planned",
-          "I2": "1 files changed | tests 1/1", "I3": "PASS | sent to audit: yes"}
+          "I2": "1 files changed | tests 1 passed", "I3": "PASS | sent to audit: yes"}
+# Item 076: items before TESTS_FORMAT_FROM (76) keep the old I2 form `<pass>/<total>`.
+I2_BEFORE_FIELD = "1 files changed | tests 1/1"
+
+
+def _field(agent, item):
+    """The well-formed log field for this agent and item (item 076: old I2 form below 76)."""
+    return I2_BEFORE_FIELD if agent == "I2" and int(item) < 76 else FIELDS[agent]
 
 
 def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A1 result: PASS (test)",
@@ -41,7 +48,7 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
             log = root / "logs" / ("research" if agent[0] == "R" else "implementation") / f"{date}.md"
             log.parent.mkdir(parents=True, exist_ok=True)
             with log.open("a", encoding="utf-8") as fh:
-                field = "FAIL | sent to audit: no" if agent == "I3" and verdict == "FAIL" else FIELDS[agent]
+                field = "FAIL | sent to audit: no" if agent == "I3" and verdict == "FAIL" else _field(agent, item)
                 fh.write(f"12:00 | {agent} | {item} | {field}\n")
 
 
@@ -377,7 +384,8 @@ def test_log_writes_utc_line(tmp_path):
     (tmp_path / "work" / "150").mkdir(parents=True)
     (tmp_path / "work" / "150" / "request.md").write_text("# Work item 150\n", encoding="utf-8")
     before = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
-    code, out = _run(tmp_path, "check_pipeline.py", "--log", "I2", "150", "2 files changed | tests 9/9")
+    code, out = _run(tmp_path, "check_pipeline.py", "--log", "I2", "150",
+                     "2 files changed | tests 9 passed, 1 skipped in 3.21s")
     after = dt.datetime.now(dt.timezone.utc)
     assert code == 0
     logs = list((tmp_path / "logs" / "implementation").glob("*.md"))
@@ -387,7 +395,7 @@ def test_log_writes_utc_line(tmp_path):
     line = text.splitlines()[-1]
     stamp = dt.datetime.fromisoformat(f"{logs[0].stem}T{line[:5]}+00:00")
     assert before <= stamp <= after
-    assert line[5:] == " | I2 | 150 | 2 files changed | tests 9/9"
+    assert line[5:] == " | I2 | 150 | 2 files changed | tests 9 passed, 1 skipped in 3.21s"
 
 
 @pytest.mark.parametrize("agent, fields", [("I2", "see 05"), ("I1", "FIT | see 04"), ("R9", "x"),
@@ -401,7 +409,7 @@ def test_log_refuses_bad_fields(tmp_path, agent, fields):
 def test_log_refuses_item_without_request(tmp_path):
     """047: a well-formed line for an ID with no work/<ID>/request.md is refused, nothing written."""
     (tmp_path / "work" / "999").mkdir(parents=True)   # folder alone is not enough
-    code, _ = _run(tmp_path, "check_pipeline.py", "--log", "I2", "999", "1 file changed | tests 1/1")
+    code, _ = _run(tmp_path, "check_pipeline.py", "--log", "I2", "999", "1 file changed | tests 1 passed")
     assert code == 2 and not (tmp_path / "logs").exists()
 
 
@@ -409,7 +417,7 @@ def test_orphan_log_line_is_reported(tmp_path):
     """047: a log line for an item with no work folder is ORPHAN LOG (exit 1); real items are not."""
     _item(tmp_path, "150", ALL)
     with (tmp_path / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
-        fh.write("12:05 | I2 | 999 | 1 file changed | tests 1/1\n")
+        fh.write("12:05 | I2 | 999 | 1 file changed | tests 1 passed\n")
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
     line = [l for l in out.splitlines() if l.startswith("ORPHAN LOG:")][0]
     assert code == 1
@@ -439,7 +447,7 @@ def test_log_line_after_its_commit_is_flagged(tmp_path):
     _item(tmp_path, "150", ALL, logged=False)
     log = tmp_path / "logs" / "implementation" / "2026-11-04.md"
     log.parent.mkdir(parents=True)
-    log.write_text("22:24 | I1 | 150 | FIT | 1 files planned\n23:10 | I2 | 150 | 1 files changed | tests 1/1\n"
+    log.write_text("22:24 | I1 | 150 | FIT | 1 files planned\n23:10 | I2 | 150 | 1 files changed | tests 1 passed\n"
                    "23:10 | I2 | 044 | see 05 | tests 182/184\n", encoding="utf-8")
     research = tmp_path / "logs" / "research" / "2026-11-04.md"
     research.parent.mkdir(parents=True)
@@ -513,7 +521,7 @@ def test_log_time_exception_is_named_and_closed(tmp_path):
         with research.open("a", encoding="utf-8") as fh:
             fh.write("".join(f"20:00 | {a} | {item} | {FIELDS[a]}\n" for a in ("R1", "R2", "R3")))
         with log.open("a", encoding="utf-8") as fh:
-            fh.write("".join(f"20:00 | {a} | {item} | {FIELDS[a]}\n" for a in ("I1", "I2")))
+            fh.write("".join(f"20:00 | {a} | {item} | {_field(a, item)}\n" for a in ("I1", "I2")))
     _commit_all(tmp_path, "2026-11-07T20:20:51+00:00")
     code, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-08")
     line = [l for l in out.splitlines() if l.startswith("LOG TIME:")][0]
@@ -534,7 +542,7 @@ def test_recommitted_log_line_is_checked_against_new_commit(tmp_path):
     _commit_all(tmp_path, "2026-11-07T20:20:00+00:00")
     _, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-08")
     assert "LOG TIME: 150 I2" in out
-    log.write_text("20:40 | I2 | 150 | 1 files changed | tests 1/1\n", encoding="utf-8")
+    log.write_text("20:40 | I2 | 150 | 1 files changed | tests 1 passed\n", encoding="utf-8")
     _commit_all(tmp_path, "2026-11-07T22:00:00+00:00")
     _, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-08")
     assert "LOG TIME: none" in out
@@ -559,11 +567,136 @@ def test_malformed_log_line_names_expected_format(tmp_path):
     assert code == 1
     assert ('150 (log line for I1 I2 does not match its format (item 045): '
             'I1 wants "FIT or FIT WITH CHANGES or NOT A FIT | <n> files planned"; '
-            'I2 wants "<n> files changed | tests <pass>/<total>")') in out
+            'I2 wants "<n> files changed | tests <last line of python3 -m pytest -q, as printed>")') in out
     r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), "--log", "I2", "150", "see 05"],
                        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 2
-    assert r.stderr.strip() == '--log refused: I2 | 150 | see 05 does not match "<n> files changed | tests <pass>/<total>"'
+    assert r.stderr.strip() == ('--log refused: I2 | 150 | see 05 does not match '
+                                '"<n> files changed | tests <last line of python3 -m pytest -q, as printed>"')
+
+
+# Item 076: the I2 tests field from TESTS_FORMAT_FROM on is pytest's summary line as printed
+# (03 Self-check A1-A14 accept, R1-R14 refuse; A1-A3 are the real 072, 074 and 070 lines).
+I2_ACCEPT = [
+    "411 passed, 1 skipped in 64.87s",                                     # A1
+    "453 passed, 1 skipped in 68.26s (0:01:08)",                           # A2
+    "1 failed, 383 passed, 1 skipped in 58.86s",                           # A3
+    "2 failed in 0.05s",                                                   # A4
+    "411 passed, 1 skipped",                                               # A5
+    "255 passed, 1 skipped (round 2: test case added)",                    # A6
+    "411 passed, 1 skipped, 3 warnings in 60.00s",                         # A7
+    "1 passed, 1 warning in 0.10s",                                        # A8
+    "1 error in 1.00s",                                                    # A9
+    "2 errors in 1.00s",                                                   # A10
+    "21 warnings in 1.00s",                                                # A11
+    "3 failed, 3 subtests passed in 0.12s",                                # A12
+    "1 failed, 1 passed, 2 skipped, 1 xfailed, 1 xpassed in 0.07 seconds",  # A13
+    "9 passed, 1 skipped in 3.21s",                                        # A14 (hint example)
+    "1 passed",                                                            # FIELDS["I2"]
+]
+I2_REFUSE = [
+    "no tests ran",                                                        # R1
+    "411/412",                                                             # R2
+    "411 passed, 1 failed",                                                # R3
+    "1 skipped, 411 passed",                                               # R4
+    "411 passed, 1 skipped, 1 skipped",                                    # R5
+    "1 errors",                                                            # R6
+    "2 error",                                                             # R7
+    "1 warnings",                                                          # R8
+    "3 passed, 1 deselected in 0.12s",                                     # R9
+    "0 passed",                                                            # R10
+    "411 passed,",                                                         # R11
+    "411 passed, ",                                                        # R11 (trailing space)
+    "411 passed in 64.87s extra",                                          # R12
+    "411 passed garbage",                                                  # R13
+    "",                                                                    # R14
+    "\x1b[32m411 passed\x1b[0m",                                           # colour (PY_COLORS=1)
+    "===== 411 passed in 1.00s =====",                                     # padded (PYTEST_ADDOPTS=-v)
+]
+
+
+def _request(root, item):
+    (root / "work" / item).mkdir(parents=True, exist_ok=True)
+    (root / "work" / item / "request.md").write_text(f"# Work item {item}\n", encoding="utf-8")
+
+
+def _log(root, agent, item, fields):
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), "--log", agent, item, fields],
+                       cwd=root, capture_output=True, text=True, encoding="utf-8")
+    return r.returncode, r.stderr
+
+
+@pytest.mark.parametrize("case", I2_ACCEPT)
+def test_i2_summary_line_accepted(tmp_path, case):
+    """076 T1: from item 076 on, pytest's summary line as printed is accepted and written."""
+    _request(tmp_path, "150")
+    code, err = _log(tmp_path, "I2", "150", f"1 files changed | tests {case}")
+    assert code == 0, err
+    text = next((tmp_path / "logs" / "implementation").glob("*.md")).read_text(encoding="utf-8")
+    assert text.splitlines()[-1][5:] == f" | I2 | 150 | 1 files changed | tests {case}"
+
+
+@pytest.mark.parametrize("case", I2_REFUSE)
+def test_i2_summary_line_refused(tmp_path, case):
+    """076 T2: a line that is not pytest -q's summary line (order, plurals, deselected, colour,
+    padding, absent) is refused, exit 2, nothing written."""
+    _request(tmp_path, "150")
+    code, _ = _log(tmp_path, "I2", "150", f"1 files changed | tests {case}")
+    assert code == 2 and not (tmp_path / "logs").exists()
+
+
+def test_i2_tests_field_cutoff(tmp_path):
+    """076 T3: items before 76 keep `<pass>/<total>` with pass <= total; 76 on the summary line.
+    --log and INCOMPLETE apply the same rule per item."""
+    for item in ("075", "076"):
+        _request(tmp_path, item)
+    assert _log(tmp_path, "I2", "075", "1 files changed | tests 9/9")[0] == 0
+    code, err = _log(tmp_path, "I2", "075", "1 files changed | tests 10/9")
+    assert code == 2 and '"<n> files changed | tests <pass>/<total> (pass <= total)"' in err
+    code, err = _log(tmp_path, "I2", "076", "1 files changed | tests 9/9")
+    assert code == 2 and "as printed" in err
+    assert _log(tmp_path, "I2", "076", "1 files changed | tests 9 passed")[0] == 0
+
+    root = tmp_path / "inc"
+    for item in ("074", "075", "076", "077"):
+        _item(root, item, ALL)
+    code, out = _run(root, "check_pipeline.py", "--today", "2026-11-05")
+    assert "INCOMPLETE: none" in out, out
+    with (root / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+        fh.write("12:01 | I2 | 075 | 1 files changed | tests 10/9\n12:01 | I2 | 076 | 1 files changed | tests 9/9\n")
+    code, out = _run(root, "check_pipeline.py", "--today", "2026-11-05")
+    inc = [l for l in out.splitlines() if l.startswith("INCOMPLETE:")][0]
+    assert code == 1
+    assert "075 (log line for I2" in inc and "076 (log line for I2" in inc, inc
+    assert "074 (" not in inc and "077 (" not in inc, inc
+    assert 'I2 wants "<n> files changed | tests <pass>/<total> (pass <= total)"' in inc
+    assert 'I2 wants "<n> files changed | tests <last line of python3 -m pytest -q, as printed>"' in inc
+
+
+def test_i2_text_defines_tests_field():
+    """076 T4 (RI-010): the i2 text says what the tests field is."""
+    text = (REPO / ".claude" / "agents" / "i2-builder.md").read_text(encoding="utf-8")
+    assert "python3 -m pytest -q" in text and "as printed" in text and "(item 076)" in text
+    assert "<pass>/<total>" not in text
+
+
+def test_old_i2_hint_fits_old_format():
+    """076 T5: the hint for items before 76 has an example that fits I2_BEFORE."""
+    import re
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_pipeline
+    example = check_pipeline.LOG_HINT_BEFORE["I2"][1]
+    assert re.fullmatch(check_pipeline.I2_BEFORE, example)
+    assert check_pipeline.log_fields_ok("I2", "075", example)
+    assert check_pipeline.log_hint("I2", "075") == check_pipeline.LOG_HINT_BEFORE["I2"][0]
+    assert check_pipeline.log_hint("I2", "076") == check_pipeline.LOG_HINT["I2"][0]
+
+
+def test_log_refuses_non_numeric_id_without_crash(tmp_path):
+    """076 T6: the ID check runs before log_fields_ok's int(item): a refusal, not a traceback."""
+    code, err = _log(tmp_path, "I2", "abc", "1 files changed | tests 1 passed")
+    assert code == 2 and "--log refused" in err and "Traceback" not in err
+    assert not (tmp_path / "logs").exists()
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
