@@ -7,3 +7,4 @@ A1, please check:
 - D5 follow-up, not in 080: open `[`/`{` on other keys, and whether PyYAML or Claude Code accept `tools:\tRead` (p11 is kept positive; 04 research 3, UNVERIFIED). I3 checked that `tools: ["Read, Bash"]` and `tools: ["Read, Bash]` fail closed via the 075 path. The optional manual probe is `claude plugin validate .claude/agents` (04 research 4).
 - Known fail-closed false errors are named in the docstring: a tab at the start of block-scalar content, and a whitespace-only line containing a tab. 0 occurrences today.
 - Full suite at 42b0378 (I3, scratch worktree): `1 failed, 589 passed, 1 skipped`. The failure is the known 083 INCOMPLETE (fixed by 084).
+A1 result: PASS (2026-11-20, logs/audit/2026-11-20-080.md)
