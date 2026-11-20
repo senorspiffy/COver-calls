@@ -11,3 +11,4 @@ What Audit should look at:
 7. RULES change: .claude/agents/a1-auditor.md runtime sentence. Needs the person's OK in PR review.
 8. Copy the guardrail status lines in 05 (RI-002, RI-007, RI-009, RI-010, RI-011, RI-012) to recurring-issues.md on main (item 036). RI-014 stays OPEN (079). 079 must keep the N1/N4/N5/N6 anchors at count 1, or update the entries with a HOLDS in its own 05.
 9. Re-run the whole suite (I3 at e4c19dd: 556 passed, 1 skipped) and the python3.11 compile test.
+A1 result: PASS (2026-11-20, logs/audit/2026-11-19-078.md; worktree 32b16fb: suite 556 passed 1 skipped, python3.11 compile ok, probe_guardrails --ref origin/main 9 of 9 HOLDS exit 0, 074 surviving mutant A and mutants B-E, G plus 3 own each fail their named test; follow-up P1 recorded-label check (EFFICIENCY))
