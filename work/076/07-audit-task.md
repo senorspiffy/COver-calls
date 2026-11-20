@@ -10,3 +10,4 @@ What Audit should look at:
 6. RULES change: .claude/agents/i2-builder.md L25 (round 1) needs the person's OK in PR review.
 7. 077 and 079 build on this checker code. Confirm that any new reader of I2 lines calls `log_fields_ok` and not `re.fullmatch(LOG_FORMAT["I2"], ...)`, and that 077/079's own I2 lines use the new form.
 8. Re-run the whole suite (I3 at e813e1f: 1 failed, 525 passed, 1 skipped; the failure is `test_repo_pipeline_has_no_skipped_items` because 06 was FAIL there. With this PASS 06 it should pass) and `python3.11 -m py_compile scripts/check_pipeline.py`.
+A1 result: PASS (2026-11-20, logs/audit/2026-11-19-076.md; worktree 1a925b0: suite 526 passed 1 skipped, py_compile ok, m1/m2/m3/m8/m9 each fail their named test, real pytest 9.1.1 all-types line accepted; follow-ups P1 Suite-label cross-check (EFFICIENCY), P2 commit-subject wording (BUG, minor))
