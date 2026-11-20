@@ -1615,10 +1615,24 @@ def test_shallow_file_unreadable_not_checked(tmp_path, monkeypatch):
     assert cp._walk(c) == want
     (repo / ".git" / "shallow").write_text(c + "\nzz\n", encoding="utf-8")
     assert cp._shallow_boundaries() == "unreadable"
-    # git itself dies on the bad line (shallow.c "bad shallow line"), so 053's shallow branch
-    # answers before 079's: still not checked, never none or an error.
-    text, failed = cp._walk(c)[1]
-    assert text.startswith("not checked (") and "run git fetch --unshallow" in text and failed is False
+    # the malformed line's _walk result is pinned with real git, unpatched, in the next test
+
+
+@NO_GIT
+def test_malformed_shallow_line_real_git_not_checked(tmp_path):
+    """Missing input, real git, no patching (I3 round 1 P1): a bad S line makes git die (exit 128)
+    on --is-shallow-repository, --verify and --is-ancestor alike. The 053 block must not call that
+    a squash/rebase: it is not checked (shallow clone). Other checks may still exit 1 (git died)."""
+    repo, c = _history(tmp_path)
+    (repo / ".git" / "shallow").write_text(c + "\nzz\n", encoding="utf-8")
+    flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=repo,
+                          capture_output=True, text=True)
+    assert flag.returncode != 0 and "bad shallow line" in flag.stderr
+    code, out, untracked, research, real = _lines(repo, c)
+    assert untracked == (f"UNTRACKED CHANGE: not checked (shallow clone; run git fetch --unshallow)"
+                         f" (cutoff {c[:7]} from --untracked-from)"), out
+    assert research == "RESEARCH CODE: not checked (see UNTRACKED CHANGE)", out
+    assert real == "REAL-DATA FIELD: not checked (see UNTRACKED CHANGE)", out
 
 
 @NO_GIT

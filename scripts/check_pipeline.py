@@ -770,6 +770,8 @@ def _walk(cutoff):
         if shallow[1] == 0 and shallow[0].strip() == "true":
             return None, (f"not checked (cutoff {cutoff[:7]} not in this shallow clone; run git fetch --unshallow)"
                           + note, False), None
+        if shallow[1] != 0 and _shallow_boundaries() == "unreadable":   # item 079: git died on a bad S line
+            return None, ("not checked (shallow clone; run git fetch --unshallow)" + note, False), None
         return None, (f"cutoff {cutoff[:7]} not in HEAD's history (squash/rebase or wrong SHA)" + note, True), None
     shallow_s = _shallow_boundaries()                       # item 079 (RI-014)
     if shallow_s == "unreadable":
