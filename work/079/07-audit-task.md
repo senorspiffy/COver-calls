@@ -11,3 +11,4 @@ What Audit should look at:
 7. Process lines (RULES change, needs the person's OK in PR review): the `git fetch --unshallow` sentence in .claude/commands/daily-audit.md (step 8) and .claude/commands/run-item.md. Additions only.
 8. Copy the RI-014 status line from 05/06 to recurring-issues.md on main (item 036).
 9. Re-run the whole suite (I3 at bff5839: 568 passed, 1 skipped, plus the then-expected `test_repo_pipeline_has_no_skipped_items` failure from 079's round 1 FAIL, which this PASS clears) and the python3.11 compile test (python3.10 absent).
+A1 result: PASS (2026-11-20, logs/audit/2026-11-19-079.md)
