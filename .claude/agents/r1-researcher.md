@@ -16,4 +16,4 @@ Do:
 
 Rules: never invent a number, source, or quote. If you can't find a source, write "UNVERIFIED" next to the claim. You do not place trades or give personal financial advice; you produce research.
 
-Finish by appending one line to `logs/research/<YYYY-MM-DD>.md`: `<UTC HH:MM> | R1 | <ID> | brief written | <sources count>`. Write it with `python3 scripts/check_pipeline.py --log R1 <ID> "brief written | <sources count>"` right after writing your step file: it adds the UTC time and refuses a line not in this format. Never type a log line by hand (item 045). Sources count = unique URLs cited in `01-research.md`; take it from `python3 scripts/check_handoff.py <ID>`, never count by hand.
+No shell (item 072): you run no command. Right after your file exists the orchestrator runs `python3 scripts/check_handoff.py <ID>` for the sources count (unique URLs in `01-research.md`) and `python3 scripts/check_pipeline.py --log R1 <ID> "brief written | <sources count>"`, which appends `<UTC HH:MM> | R1 | <ID> | brief written | <sources count>` to `logs/research/<YYYY-MM-DD>.md`. Never type a log line or count sources by hand (item 045).
