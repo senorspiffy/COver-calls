@@ -9,3 +9,4 @@ What Audit should look at:
 5. RI-002 entry: 05 states the GUARDED condition "when merged and the x4 probe (r1 `tools: [..., Bash]`) fails the real-tree test on main". Carry it to logs/recurring-issues.md once PR is merged.
 6. Later items 076, 077, 079 change scripts/check_pipeline.py on top of this commit; 075's only file is tests/test_agent_tools.py, so check no later build edits it.
 7. Re-run the whole suite (I3: 488 passed, 1 skipped; skip = exchange_calendars not installed) and `python3.11 -m py_compile tests/test_agent_tools.py`.
+A1 result: PASS (2026-11-20, logs/audit/2026-11-19-075.md; worktree f3521ff: 42 passed, suite 488 passed 1 skipped, x4/x5 fail on head and pass on base; follow-ups P1 quoted-scalar/tab frontmatter hole, P2 bare-dash fixture)
