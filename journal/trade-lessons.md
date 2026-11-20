@@ -3,6 +3,10 @@
 Lessons from the paper bot's real trades, newest first. Each line: date, lesson, evidence. UNCONFIRMED = seen once; CONFIRMED = seen 3+ times.
 Paper only, research, not financial advice. Lessons are notes only: no setting is tuned from paper results; any change waits for the Sunday review.
 
+## 2026-11-19
+- **BUG: one missing option quote froze the whole bot.** The VALE 13C dropped out of the quote chain once it was far out of the money (stock $9.83). The open call couldn't be priced, equity became NaN, and every ticker failed CAPITAL_UNKNOWN. A far-OTM call that is near zero should fall back to its last mark (or $0.01), not block trading. Sent to the bug pipeline.
+- **The drawdown keeps growing.** Shares -$532, calls ~+$50. VALE is -18% from its basis. Repeats the CONFIRMED lesson.
+
 ## 2026-11-18
 - **The run took 19 minutes instead of ~20 seconds.** Exit 0 and the results look normal, so the cause is unknown (slow broker API? VPS load?). If a run ever runs past the close, the quotes are stale. Watch run times. UNCONFIRMED.
 - **The drawdown keeps growing; premium can't keep up.** Shares -$486, calls +$49.50 (10%). VALE is -16% from its basis. Repeats the CONFIRMED lesson.
