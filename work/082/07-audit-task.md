@@ -14,3 +14,4 @@ What Audit should look at:
 6. probe_guardrails.py `recorded` markers: they are information, never a verdict (a1-auditor.md text). The test_pipeline_check `recorded` values from 078 (`89 passed`) differ from live totals (303/304) in their passed count only, so no marker is printed. Confirm that the failed counts still match on main.
 7. RI-006 status: 05 says "RI-006: guardrail built (082); the Suite compare is probed by RI-006-082-suite (HOLDS, run 2)." Copy it to logs/recurring-issues.md on main (item 036) once the probe holds on main. RI-012: no new occurrence. The 082 gap was caught by I3 before merge, so it is a near miss and not counted.
 8. Re-run the whole suite. I3 at 85bf4c4: `1 failed, 672 passed, 1 skipped`, where the 1 is `test_repo_pipeline_has_no_skipped_items` from 082's then-open FAIL, which this PASS clears. Also re-run the python3.11 compile test (python3.10 absent).
+A1 result: PASS (2026-11-21, logs/audit/2026-11-21-082.md)
