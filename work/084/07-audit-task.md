@@ -11,3 +11,4 @@ What Audit should look at:
 7. The GIT_CENSUS total is 41 -> 46 (Deviation 3, as 081's census comment asks). Check that it still agrees after 081 round 2 lands in the same tree, because 081's I2 is editing scripts/check_pipeline.py now.
 8. Process line (a RULES change, which needs the person's OK in PR review): the added run-item.md line after the RULES BRANCH line.
 9. Re-run the whole suite. I3 got 4 failed, 637 passed, 1 skipped at 0583289. The 4 failures are pre-existing and not 084's: 3 come from 086's not-computable text, and 1 is repo_pipeline. Also re-run the python3.11 compile test (python3.10 is absent). Copy the RI-010 / RI-012 status notes from 05/06 into recurring-issues.md (item 036).
+A1 result: PASS (2026-11-21, logs/audit/2026-11-21-084.md)
