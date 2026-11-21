@@ -102,7 +102,8 @@ RI-010: 082 turns two text duties into checks (Suite, recorded); 4b and 5 are te
 RI-014: unshallow sentence pinned in three files (082).
 
 ## Test output (pasted, not summarized)
-Suite: 672 passed, 1 skipped in 90.14s (0:01:30)
+Suite: 1 failed, 672 passed, 1 skipped in 88.54s (0:01:28)
+(Round 2 line. Round 1's line was `672 passed, 1 skipped in 90.14s (0:01:30)`. See Round 2 below for the one failure.)
 
 The line above is the last line of the final full run below, copied as printed. 082 < SUITE_FROM, so this is voluntary; it shows the rule in use.
 
@@ -421,3 +422,65 @@ Known limits (from the plan):
 - Points 4b (the a1 unshallow sentence) and 5 (the commit-subject rule) are text pins only, which is a partial guard. No check reads commit text (062, RI-012).
 - The unshallow sentence's list (UNTRACKED CHANGE, RESEARCH CODE, REAL-DATA FIELD) does not name 084's `RULE NOT SEEN` "not checked" form. Changing it would mean changing all three copies, so that is a separate item if wanted.
 - No real item reaches the Suite rule before ID 87, so on this branch only the fixtures prove it.
+
+## Round 2 (sent back by I3, 06 finding 1)
+### Changes made (file: what changed)
+- `tests/test_pipeline_check.py`: new `test_suite_inside_other_text_is_not_read` (S14), placed after S11/S12. Its 05 holds the column-0 line `Suite: 1 passed` plus a prose line ``the `Suite:` line above is copied as printed``, a list item ``- `Suite: 2 passed` was round 1`` and an indented line `   Suite: 2 passed`. The I2 field is `tests 1 passed` (the `_suite_item` default). The test expects `INCOMPLETE: none` and exit 0. This round changes no code and no other file.
+
+File counts (this round's working tree, vs HEAD 8a9f32a):
+```
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'
+0
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'
+1
+```
+
+### Mutation probes (scratch copies, python3 -B, never the repo)
+I made three full copies of the repo with `cp -a` (made after the S14 edit), named `/tmp/claude-0/-home-claude/8f94cbd2-523d-52d1-8971-85df3e672dc0/scratchpad/i2-082r2-full-{ctl,in,lstrip}`. In `scripts/check_pipeline.py` `_suite_lines`, I replaced `if state == "out" and line.startswith("Suite:")]` with one mutant per copy (each replacement count asserted to be 1). The ctl copy is left unmutated.
+Command in each copy: `python3 -B -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py | tail -4`
+```
+== ctl
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 304 passed in 33.67s
+== in            ("Suite:" in line)
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_suite_inside_other_text_is_not_read
+2 failed, 303 passed in 34.68s
+== lstrip        (line.lstrip().startswith("Suite:"))
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_suite_inside_other_text_is_not_read
+2 failed, 303 passed in 35.58s
+```
+S14 kills both mutants, and in each copy it is the only test that the mutant alone breaks (compare ctl). In round 1, both mutants survived the whole file (06: `304 passed`).
+
+An earlier try copied only scripts/tests/templates/.claude/config. It also failed `test_work_code_counts_repo_diagnostics` and `test_batch_083_flagged_on_repo_data`, because those tests need work/ and logs/. I discarded it and used the full copies above.
+
+### The one failure in the suite (repo state, not this change)
+`test_repo_pipeline_has_no_skipped_items` fails in the repo and in the unmutated copy. It runs check_pipeline on the repo, and 082 is now `I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))` until I3 re-verifies. The first line of the pytest message is `001: LEGACY (...)`, which is the start of check_pipeline's output, and the test asserts `code == 0`. Round 1's `672 passed` ran before the FAIL 06 existed. Earlier sent-back rounds logged this failure as printed in the same way (076, 077, 079, 080, 085 in logs/implementation/2026-11-20.md).
+
+### Tests re-run (output)
+```
+$ python3 -B -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py -k suite | tail -1
+16 passed, 289 deselected in 3.07s
+$ python3 -m pytest -q | tail -4
+tests/test_pipeline_check.py:181: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 672 passed, 1 skipped in 88.54s (0:01:28)
+```
+The column-0 `Suite:` line above (Test output section) is this last line, as printed.
+
+### Connectivity / missing-data
+- S14 runs under pytest (it is in the `-k suite` run above) and checks `_suite_lines` via `incomplete()`. No new function and no new branch in code.
+- Missing-data grep (`grep -rnE "fillna|...|\.get\([^)]*, 0\)" ccbot/`): 38 hits, all unchanged. `git diff --stat HEAD -- ccbot/ config/` is empty, so there are no new or changed hits. No dataclass fields or `>`/`<` tests were added. The plan names no feasibility test. ccbot/realtest.py is unchanged, so no real-data run is needed.
+
+### Recurring issues checked (step 0)
+RI-001 (ESCALATED): n/a. No rule or window, tests only.
+RI-010 (ESCALATED): this round's own checklist is followed. The step file is written first, then `--log`, then check_pipeline is confirmed.
+RI-014 (OPEN): S14 uses `_suite_item` (no git) and does not depend on clone depth.
+RI-006: the Suite line and the I2 field are copied from the printed pytest line, not counted by hand. File counts come from commands.
+RI-012: S14 is the missing negative fixture for the column-0 line reader. Both substring/lstrip mutants are shown killed.
+RI-009: probes ran in scratch copies only. The repo tree is untouched except the test file and this 05.
+RI-002, RI-007, RI-008: no change in scope (no data handling, no use before steps, no new syntax).
+RI-006: GUARDED (unchanged by this round; 082 extends it)
+RI-012: GUARDED (S14 closes 06 finding 1)

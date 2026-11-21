@@ -3408,6 +3408,17 @@ def test_suite_compared_with_last_i2_line(tmp_path):
     assert _inc(tmp_path / "b")[1] == f"INCOMPLETE: 151 ({_mismatch('1 passed', '2 passed')})"
 
 
+def test_suite_inside_other_text_is_not_read(tmp_path):
+    """S14: only the column-0 `Suite:` line is read. `Suite:` inline in backticks, in a list item and
+    indented is not (kills `"Suite:" in line` and `line.lstrip().startswith("Suite:")`)."""
+    _suite_item(tmp_path, "x\nSuite: 1 passed\n"
+                          "the `Suite:` line above is copied as printed\n"
+                          "- `Suite: 2 passed` was round 1\n"
+                          "   Suite: 2 passed\n")
+    code, inc = _inc(tmp_path)
+    assert inc == "INCOMPLETE: none" and code == 0
+
+
 @NO_GIT
 @pytest.mark.parametrize("rules, seen", [
     ("TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\n", False),
