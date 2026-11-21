@@ -185,6 +185,7 @@ def test_repo_pipeline_has_no_skipped_items(tmp_path):
         "RULE NOT SEEN: 083 (05 added in cfc0634 without TESTS_FORMAT_FROM (076): judged by I2_BEFORE; "
         "06 added in cfc0634 without VERDICT_FROM (071): judged by no Sent-back check; item 084)"], out
     assert "INCOMPLETE: none" in lines, out
+    assert ("LOG BATCH: none (not checked: 083: six lines written in one batch" in out), out   # item 086 (c)
 
 
 def test_no_tracked_pycache():
@@ -2774,3 +2775,331 @@ def test_write_log_stays_numeric(tmp_path):
     code, err = _log(tmp_path, "I2", "083", "2 files changed | tests 344/344")
     assert code == 2 and "as printed" in err, err
     assert not (tmp_path / "logs").exists()
+
+
+# Item 086 (RI-010): rule C (LOG BATCH) and rule D (--log refuses while a later step file exists).
+I2_083 = "2 files changed | tests 344 passed, 1 skipped in 48.51s"
+
+
+def _batch_item(root, item, research=(), impl=(), t05=None, t06=None, full=False):
+    """A rule-C fixture: request.md, log lines (research / implementation: (date, HH:MM, agent, fields)),
+    05 with a `## Test output` section and 06 with a `## Tests re-run` section holding the given text
+    (None = no file). full=True also writes 01-04 and a complete 06/07, so check_pipeline's other checks
+    pass and its exit code is LOG BATCH's."""
+    d = root / "work" / item
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "request.md").write_text(f"# Work item {item}\nScope: FULL\nDate: 2026-11-20\n", encoding="utf-8")
+    for team, rows in (("research", research), ("implementation", impl)):
+        for date, hhmm, agent, fields in rows:
+            log = root / "logs" / team / f"{date}.md"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with log.open("a", encoding="utf-8") as fh:
+                fh.write(f"{hhmm} | {agent} | {item} | {fields}\n")
+    if t05 is not None:
+        (d / "05-build-report.md").write_text(f"# 05\n## Test output (pasted, not summarized)\n{t05}\n"
+                                              f"## Deviations from plan\n", encoding="utf-8")
+    if t06 is not None:
+        head = "Verdict: PASS (round 1)\nSent back to: none\nRecurring issues checked: RI-010\n" if full else ""
+        (d / "06-verification.md").write_text(f"{head}## Tests re-run (output)\n{t06}\n## Findings\n",
+                                              encoding="utf-8")
+    if full:
+        for s in ("01", "02", "03", "04"):
+            (d / STEP_NAMES[s]).write_text("x\n", encoding="utf-8")
+        (d / "07-audit-task.md").write_text("x\nA1 result: PASS (test)\n", encoding="utf-8")
+
+
+STEP_NAMES = {"01": "01-research.md", "02": "02-improvements.md", "03": "03-handoff.md",
+              "04": "04-build-plan.md", "05": "05-build-report.md", "06": "06-verification.md"}
+BATCH_DAY = "2026-11-20"
+
+
+def _six(t, i2=I2_083, i3="PASS | sent to audit: yes"):
+    """083's six lines, all at minute t (research R1-R3, implementation I1, I2, I3)."""
+    return ([(BATCH_DAY, t, "R1", "brief written | 0"), (BATCH_DAY, t, "R2", "3 for / 3 against | languages: N/A"),
+             (BATCH_DAY, t, "R3", "4 verified, 0 fixed, 0 removed | READY")],
+            [(BATCH_DAY, t, "I1", "FIT | 2 files planned"), (BATCH_DAY, t, "I2", i2), (BATCH_DAY, t, "I3", i3)])
+
+
+def _impl(i1, i2, i3, item_i2="1 files changed | tests 1 passed"):
+    return [(BATCH_DAY, i1, "I1", "FIT | 1 files planned"), (BATCH_DAY, i2, "I2", item_i2), (BATCH_DAY, i3, "I3", "PASS | sent to audit: yes")]
+
+
+def _bl(root, excepted=None):
+    cp = _cp()
+    return cp.batch_log_items(root / "work", root / "logs", excepted={} if excepted is None else excepted)
+
+
+def test_batch_083_shape_is_flagged(tmp_path):
+    """086 (a): 083's batch (six lines in one minute, 48.51 + 47.57 s of pytest runs) is flagged, and
+    check_pipeline exits 1 on it; the same item with spaced lines prints none and exits 0."""
+    r, i = _six("10:15")
+    _batch_item(tmp_path, "999", r, i, "```\n344 passed, 1 skipped in 48.51s\n```", "344 passed, 1 skipped in 47.57s",
+                full=True)
+    res = _bl(tmp_path)
+    assert res["flagged_ids"] == ["999"] and res["checked"] == 1, res
+    assert res["flagged"] == ["999 (96.08 s of pytest runs between 2026-11-20 10:15 and 10:15 UTC, limit 60 s; "
+                              "impossible under the run-item order, item 086)"]
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
+    assert "LOG BATCH: 999 (" in out and code == 1, out
+    spaced = tmp_path / "spaced"
+    r, _ = _six("10:15")
+    _batch_item(spaced, "999", r, _impl("10:20", "10:30", "10:40", I2_083), "344 passed, 1 skipped in 48.51s",
+                "344 passed, 1 skipped in 47.57s", full=True)
+    code, out = _run(spaced, "check_pipeline.py", "--today", "2026-11-21")
+    assert "LOG BATCH: none" in out.splitlines() and code == 0, out
+
+
+@NO_GIT
+def test_batch_083_flagged_on_repo_data():
+    """086 (b), RI-010's condition: on this repo's own work/ and logs/, with the exception emptied, 083
+    is flagged."""
+    cp = _cp()
+    res = cp.batch_log_items(REPO / "work", REPO / "logs", excepted={})
+    assert "083" in res["flagged_ids"], res
+
+
+def test_log_batch_except_is_pinned():
+    """086: the exception is exactly {083}, and 083 is not in LOG_TIME_EXCEPT (its lines are not after
+    their commit). Never add a new item here (M8)."""
+    cp = _cp()
+    assert set(cp.LOG_BATCH_EXCEPT) == {"083"}
+    assert "083" not in cp.LOG_TIME_EXCEPT
+
+
+def test_batch_079_real_lines_not_flagged(tmp_path):
+    """086 N1: 079's real lines (two I rounds over 11-19/11-20), 05 90.93, 06 90.21: not flagged."""
+    research = [("2026-11-19", "23:25", "R1", "brief written | 9"),
+                ("2026-11-19", "23:28", "R2", "3 for / 3 against | languages: N/A"),
+                ("2026-11-19", "23:35", "R3", "32 verified, 4 fixed, 1 removed | READY")]
+    impl = [("2026-11-19", "23:39", "I1", "FIT WITH CHANGES | 4 files planned"),
+            ("2026-11-20", "02:02", "I2", "4 files changed | tests 568 passed, 1 skipped in 90.93s (0:01:30)"),
+            ("2026-11-20", "02:10", "I3", "FAIL | sent to audit: no"),
+            ("2026-11-20", "02:15", "I2", "2 files changed | tests 1 failed, 568 passed, 1 skipped in 87.19s (0:01:27)"),
+            ("2026-11-20", "02:22", "I3", "PASS | sent to audit: yes")]
+    _batch_item(tmp_path, "999", research, impl, "568 passed, 1 skipped in 90.93s (0:01:30)",
+                "568 passed, 1 skipped in 90.21s (0:01:30)")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["checked"] == 1 and res["not_computable"] == [], res
+
+
+@pytest.mark.parametrize("t05, t06, flagged", [("30.00", "30.01", True), ("29.99", "30.01", False)])
+def test_batch_boundary_delta0(tmp_path, t05, t06, flagged):
+    """086 N2 (M1): Δ0, limit 60 s, k = 2: 30.00 + 30.01 - 0.01 = 60.00 >= 60 is flagged;
+    29.99 + 30.01 - 0.01 = 59.99 is not. (Two distinct values: equal ones are a copy, N4.)"""
+    _batch_item(tmp_path, "999", impl=_impl("10:00", "10:00", "10:00"),
+                t05=f"1 passed in {t05}s", t06=f"1 passed in {t06}s")
+    assert (_bl(tmp_path)["flagged_ids"] == ["999"]) is flagged
+
+
+def test_batch_delta1_limit_is_120(tmp_path):
+    """086 N3 (M1b): Δ1 (I1 10:00, I2/I3 10:01) gives limit (1+1)*60 = 120 s: 45.00 + 45.01 - 0.01 = 90.00
+    is not flagged (with the +1 dropped, 90.00 >= 60 would be)."""
+    _batch_item(tmp_path, "999", impl=_impl("10:00", "10:01", "10:01"), t05="1 passed in 45.00s",
+                t06="1 passed in 45.01s")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["checked"] == 1 and res["not_computable"] == [], res
+
+
+def test_batch_copy_of_05_in_06_is_dropped(tmp_path):
+    """086 N4 (M3): 06 quotes only 05's 40.00 s: a copy, dropped, k = 1: 39.995 < 60, not flagged."""
+    _batch_item(tmp_path, "999", impl=_impl("10:00", "10:00", "10:00"), t05="1 passed in 40.00s",
+                t06="05 had:\n1 passed in 40.00s")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["checked"] == 1 and res["not_computable"] == [], res
+
+
+def test_batch_untimed_item_is_not_computable(tmp_path):
+    """086 N5 (M4): six lines in one minute but no pytest time anywhere: listed not computable, never
+    flagged, never read as 0 or 60 s; check_pipeline exits 0."""
+    r, i = _six("10:15", i2="2 files changed | tests 3 passed")
+    _batch_item(tmp_path, "999", r, i, "3 passed", "3 passed", full=True)
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["not_computable"] == [("999", "no pytest time in 05/06/I2 line")], res
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
+    assert "LOG BATCH: none; not computable: 999 (no pytest time in 05/06/I2 line)" in out.splitlines(), out
+    assert code == 0, out
+
+
+def test_batch_interleaved_items_not_flagged(tmp_path):
+    """086 N6: three items' lines interleaved in one minute (the 23:27 pattern), each item's own
+    I1 -> I3 at least 5 minutes, 30 s runs: none flagged (C is per item)."""
+    for n, item in enumerate(("997", "998", "999")):
+        _batch_item(tmp_path, item, [(BATCH_DAY, "23:27", "R1", "brief written | 1")],
+                    _impl("23:27", f"23:3{n}", f"23:3{n + 2}"), "1 passed in 30.00s", "1 passed in 30.50s")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["checked"] == 3 and res["not_computable"] == [], res
+
+
+def test_batch_sections_and_largest_value(tmp_path):
+    """086 N7 (M11): a level-1 `# Round 1` heading ends the round-2 `## Tests re-run` section; the 80.00 s
+    under it is outside both sections. t06 is the largest in-section value (50.00, not the last 10.00):
+    Σ = 20.00 + 50.00 = 70.00, flagged (69.99 >= 60)."""
+    t06 = ("1 passed in 50.00s\n# Round 1 (kept as written)\n1 passed in 80.00s\n"
+           "## Tests re-run (output)\n1 passed in 10.00s")
+    _batch_item(tmp_path, "999", impl=_impl("10:00", "10:00", "10:00"), t05="1 passed in 20.00s", t06=t06)
+    res = _bl(tmp_path)
+    assert res["flagged_ids"] == ["999"] and res["flagged"][0].startswith("999 (70.00 s of"), res
+
+
+def test_batch_summary_in_test_id_is_not_a_run(tmp_path):
+    """086 N8 (M9, RI-012): a pytest summary inside a FAILED test ID (076/05 L39) is not read; only a
+    line that starts with the summary is. 1.00 + 2.00 is not flagged (59.00 + 2.00 would be)."""
+    t05 = "FAILED tests/x.py::t[1 failed, 2 passed in 59.00s]\n1 failed, 2 passed in 1.00s"
+    _batch_item(tmp_path, "999", impl=_impl("10:00", "10:00", "10:00"), t05=t05, t06="2 passed in 2.00s")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["checked"] == 1 and res["not_computable"] == [], res
+
+
+def test_batch_research_line_at_i2_minute_is_before(tmp_path):
+    """086 N9 (FAST shape, no I1): R3 10:15 in the research log counts as before I2 10:15, so start is
+    10:15, Δ0 and 40.00 + 39.00 - 0.01 = 78.99 >= 60 is flagged."""
+    research = [(BATCH_DAY, "10:10", "R1", "brief written | 1"), (BATCH_DAY, "10:15", "R3", "1 verified, 0 fixed, 0 removed | READY")]
+    impl = [(BATCH_DAY, "10:15", "I2", "1 files changed | tests 1 passed"), (BATCH_DAY, "10:15", "I3", "PASS | sent to audit: yes")]
+    _batch_item(tmp_path, "999", research, impl, "1 passed in 40.00s", "1 passed in 39.00s")
+    assert _bl(tmp_path)["flagged_ids"] == ["999"]
+
+
+def test_batch_malformed_last_line_still_ends_the_window(tmp_path):
+    """086 N10 (M10): a malformed `10:05 | I3 | 999 | PASS | see 06` still marks when I3 logged, so the
+    window is 10:00 -> 10:05 (Δ5, limit 360) and 98.99 s is not flagged."""
+    impl = _impl("10:00", "10:00", "10:00") + [(BATCH_DAY, "10:05", "I3", "PASS | see 06")]
+    _batch_item(tmp_path, "999", impl=impl, t05="1 passed in 50.00s", t06="1 passed in 49.00s")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["checked"] == 1 and res["not_computable"] == [], res
+
+
+def test_batch_unreadable_06_is_not_computable(tmp_path):
+    """086 N11: a non-UTF-8 06 is not computable with the file named, never a crash or a pass."""
+    _batch_item(tmp_path, "999", impl=_impl("10:00", "10:00", "10:00"), t05="1 passed in 50.00s")
+    (tmp_path / "work" / "999" / "06-verification.md").write_bytes(b"\xff\xfe 1 passed in 49.00s\n")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and len(res["not_computable"]) == 1, res
+    item, why = res["not_computable"][0]
+    assert item == "999" and why.endswith("work/999/06-verification.md unreadable"), res
+
+
+def test_batch_open_round_and_no_line_before_i2(tmp_path):
+    """086 N12: an I2 line with no I3 after it is in progress, not flagged; an item whose first line is
+    I2 is not computable (no line before I2)."""
+    _batch_item(tmp_path, "998", impl=[(BATCH_DAY, "10:00", "I2", "1 files changed | tests 1 passed in 50.00s")],
+                t05="1 passed in 50.00s")
+    _batch_item(tmp_path, "999", impl=[(BATCH_DAY, "10:00", "I2", "1 files changed | tests 1 passed in 50.00s"),
+                                       (BATCH_DAY, "10:00", "I3", "PASS | sent to audit: yes")],
+                t05="1 passed in 50.00s", t06="1 passed in 49.00s")
+    res = _bl(tmp_path)
+    assert res["in_progress"] == ["998"] and res["flagged"] == [], res
+    assert res["not_computable"] == [("999", "no line before I2")], res
+
+
+def _steps(root, item, steps):
+    for s in steps:
+        (root / "work" / item / STEP_NAMES[s]).write_text("x\n", encoding="utf-8")
+
+
+def _log_line(root, team, item, agent, fields):
+    log = root / "logs" / team / "2000-01-01.md"             # never today's file, which --log writes
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a", encoding="utf-8") as fh:
+        fh.write(f"10:00 | {agent} | {item} | {fields}\n")
+
+
+def _written(root, agent, item):
+    team = "research" if agent[0] == "R" else "implementation"
+    return any(f" | {agent} | {item} | " in f.read_text(encoding="utf-8")
+               for f in (root / "logs" / team).glob("*.md") if f.name != "2000-01-01.md")
+
+
+def test_log_refused_after_later_steps(tmp_path):
+    """086 D1 (M5): `--log R1` with 01-06 present (083's batch shape) is refused, exit 2, the later files
+    named, nothing written."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "02", "03", "04", "05", "06"))
+    code, err = _log(tmp_path, "R1", "999", "brief written | 0")
+    assert code == 2, err
+    assert ("--log refused: work/999/ already has 02-improvements.md 03-handoff.md 04-build-plan.md "
+            "05-build-report.md 06-verification.md after R1's step") in err, err
+    assert not (tmp_path / "logs").exists()
+
+
+def test_log_written_when_no_later_step(tmp_path):
+    """086 D2: only 01 present: R1's line is written."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01",))
+    code, err = _log(tmp_path, "R1", "999", "brief written | 0")
+    assert code == 0, err
+    assert _written(tmp_path, "R1", "999")
+
+
+def test_log_after_i3_fail_is_written(tmp_path):
+    """086 D3 (M6): 076's order: I1, I2, then `I3 | FAIL`; the round-2 `--log I1` and `--log I2` with 05
+    and 06 present are written (the item was sent back)."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "02", "03", "04", "05", "06"))
+    for agent, fields in (("I1", "FIT | 1 files planned"), ("I2", "1 files changed | tests 1 passed"),
+                          ("I3", "FAIL | sent to audit: no")):
+        _log_line(tmp_path, "implementation", "999", agent, fields)
+    assert _log(tmp_path, "I1", "999", "FIT | 1 files planned")[0] == 0
+    assert _log(tmp_path, "I2", "999", "1 files changed | tests 1 passed")[0] == 0
+    assert _written(tmp_path, "I1", "999") and _written(tmp_path, "I2", "999")
+
+
+@pytest.mark.parametrize("team, agent, fields, steps", [
+    ("research", "R3", "5 verified, 0 fixed, 0 removed | BLOCKED", ("01", "02", "03")),        # D4 (M6b)
+    ("implementation", "I1", "NOT A FIT | 0 files planned", ("01", "02", "03", "04")),          # D5
+])
+def test_log_after_blocked_or_not_a_fit_is_written(tmp_path, team, agent, fields, steps):
+    """086 D4, D5: after an R3 BLOCKED line (group 2 of R3's format) or an I1 NOT A FIT line, the R1
+    re-log with later files present is written."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", steps)
+    _log_line(tmp_path, team, "999", agent, fields)
+    code, err = _log(tmp_path, "R1", "999", "brief written | 0")
+    assert code == 0, err
+
+
+def test_log_after_a1_fail_is_written(tmp_path):
+    """086 D6: 07 with `A1 result: FAIL` (069/070 shape): `--log I1` with 05/06 present is written."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "02", "03", "04", "05", "06"))
+    (tmp_path / "work" / "999" / "07-audit-task.md").write_text("x\nA1 result: FAIL (test)\n", encoding="utf-8")
+    code, err = _log(tmp_path, "I1", "999", "FIT | 1 files planned")
+    assert code == 0, err
+
+
+def test_log_verdict_words_in_free_text_are_not_send_backs(tmp_path):
+    """086 D7 (M7, RI-012): `READY (was BLOCKED)` and `PASS | sent to audit: yes (FAIL fixed)` are not
+    send-backs (verdicts by fullmatch group), so `--log R1` with 02 present is refused."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "02"))
+    _log_line(tmp_path, "research", "999", "R3", "5 verified, 0 fixed, 0 removed | READY (was BLOCKED)")
+    _log_line(tmp_path, "implementation", "999", "I3", "PASS | sent to audit: yes (FAIL fixed)")
+    code, err = _log(tmp_path, "R1", "999", "brief written | 0")
+    assert code == 2 and "already has 02-improvements.md after R1's step" in err, err
+
+
+def test_log_07_never_counts_as_later(tmp_path):
+    """086 D8: RESEARCH ONLY shape: 01, 03 and R3's 07 present; `--log R3` is written (07 never counts)."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "03"))
+    (tmp_path / "work" / "999" / "07-audit-task.md").write_text("x\n", encoding="utf-8")
+    code, err = _log(tmp_path, "R3", "999", "1 verified, 0 fixed, 0 removed | READY")
+    assert code == 0, err
+
+
+def test_log_later_files_of_another_item_do_not_count(tmp_path):
+    """086 D9: item 998 with 01-06 present does not refuse item 999's R1 (only 01 present)."""
+    _request(tmp_path, "998")
+    _steps(tmp_path, "998", ("01", "02", "03", "04", "05", "06"))
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01",))
+    code, err = _log(tmp_path, "R1", "999", "brief written | 0")
+    assert code == 0, err
+
+
+def test_log_format_refusal_runs_first(tmp_path):
+    """086 D10: bad fields with later files present give the existing format refusal, unchanged."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "02"))
+    code, err = _log(tmp_path, "R1", "999", "see 01")
+    assert code == 2 and err.startswith('--log refused: R1 | 999 | see 01 does not match "brief written | '), err
+    assert "item 086" not in err and not (tmp_path / "logs").exists()

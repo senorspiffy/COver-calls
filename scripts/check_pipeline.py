@@ -85,6 +85,13 @@ each at most once; `deselected` and unknown parts are refused. Before it (I2_BEF
 and warnings are not tests) and pass <= total. Known limit: a trailing ` (<note>)` is free text
 and could hold e.g. `(1 failed)`; the stats part before the note is still checked in full, so no
 failure can be dropped from it.
+Item 086 (rule D, RI-010): --log also refuses (exit 2, nothing written) while a later step file 01-06
+of the same item exists in work/<ID>/ (`--log refused: work/<ID>/ already has <files> after <agent>'s
+step; ...`), so a batch of lines written after the build is refused at R1. 07 and other files never
+count. It runs after the format and request.md refusals, whose texts and order are unchanged. It is
+off for an item that was sent back (SEND_BACK: an R3 line with BLOCKED, an I1 line with NOT A FIT or an
+I3 line with FAIL, each read from its LOG_FORMAT fullmatch group, never a substring; or an `A1 result:
+FAIL` line in 07), because a re-run step logs again while later files from the earlier round exist.
 From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
   LOG TIME        a committed log line timed after the commit that added it (git blame): it was
                   not written when its step ran (exit 1; RI-010).
@@ -95,6 +102,28 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   file is skipped); a failed ls-tree is the entry `git ls-tree HEAD failed (item 081)`,
                   and a failed blame of a committed file is the entry `<file> (git blame failed; item
                   081)`, never none (exit 1).
+  LOG BATCH       (item 086, rule C, RI-010, exit 1) an item whose reported pytest runs could not
+                  fit between its log lines: Σ - BATCH_ROUND·k >= (Δ+1)×60 s, over the whole item:
+                  start = the item's latest log line before its first I2 line, end = its last I3
+                  line, Δ = whole minutes between them (a line's stamp is its file date + HH:MM, so
+                  lines Δ minutes apart are < (Δ+1)×60 s apart). Σ = t05 + t06: t05 the largest time
+                  of the I2 log fields and of the pytest summary lines (SUMMARY_LINE, matched at the
+                  start of the stripped line, so a summary inside a test ID is not a run) in every
+                  `## Test output` section of 05; t06 the largest in every `## Tests re-run` section
+                  of 06 after dropping any value equal to a t05 candidate (a copy). A section ends at
+                  the next `# ` or `## ` heading outside code fences. k = the number of known values
+                  (pytest prints .2f). Such an item is impossible under the run-item order on one
+                  steady clock (run-item L14, L16): I2 runs the suite before its line, I3 re-runs it
+                  after 05 exists and before its line. Items in LOG_BATCH_EXCEPT are counted, not
+                  evaluated, and named with their reason. An item with no time (k = 0), no line before
+                  its first I2, an unreadable 05/06/log file or a line with no valid time is listed
+                  as `not computable: <ID> (<reason>)`, never flagged; an item with no I3 line after
+                  its last I2 line is in progress and not evaluated. No git, so the text and exit
+                  code are the same without it. Known gaps: (w) runs pasted outside the two sections
+                  are not read (only lowers Σ); (x) fast or untimed suites can't be flagged, D covers
+                  those; (y) once an item was sent back D is off for it, and C covers only its I
+                  rounds; (z) pytest's time and the log stamp are both wall clock (time.time()), so a
+                  clock step during a run can move both.
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
@@ -275,6 +304,18 @@ I2_BEFORE = r"\d+ files? changed \| tests (\d+)/(\d+)\b.*"    # items LOG_CHECK_
 # before 045 merged; its six lines were typed by hand with a time after their commit, and the
 # real times are lost. Never add a new item here.
 LOG_TIME_EXCEPT = {"048": "built before 045's --log rule reached main; times typed by hand, not recoverable (item 049)"}
+# Item 086 (rule C, RI-010): items whose pytest runs can't be checked against their log times, with why.
+# 083's six lines were written in one batch after the build; the real times are lost. A separate
+# dict from LOG_TIME_EXCEPT (083's lines are not after their commit). Never add a new item here.
+LOG_BATCH_EXCEPT = {"083": "six lines written in one batch at 10:15 after the build (commit cfc0634 10:15:48); "
+                           "real times not recoverable (item 086)"}
+BATCH_ROUND = 0.005   # item 086: pytest prints seconds with .2f, so the real time is >= printed - 0.005
+# Item 086 (rule D): the send-back verdicts of a log line, as (LOG_FORMAT group, word); read by fullmatch,
+# never a substring (RI-012). R3's verdict is group 2 (group 1 is verified/as-is).
+SEND_BACK = {"R3": (2, "BLOCKED"), "I1": (1, "NOT A FIT"), "I3": (1, "FAIL")}
+# Item 086: a pytest summary line as printed, .match on the stripped line (anchored at its start, so a
+# summary inside a test ID such as `FAILED t[1 failed in 58.86s]` is not a run); seconds in group 1.
+SUMMARY_LINE = re.compile(rf"(?:=+ )?(?={_N} )(?:{_STATS}) in (\d+\.\d+)(?:s| seconds)\b")
 # Item 070: the Real-data effect field is checked from this ID on; earlier items are not re-checked.
 WHOLE_DIFF_FROM = 70
 # Item 071: I3's verdict and send-back target in 06 (templates/verification.md L2-3). The first
@@ -666,9 +707,37 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
     return missing
 
 
+def _sent_back(item, logs=Path("logs")):
+    """Item 086 (rule D): whether the item was ever sent back: a log line of R3, I1 or I3 whose fields
+    fullmatch LOG_FORMAT with the SEND_BACK word in its group (never a substring, RI-012), or an
+    `A1 result: FAIL` line in work/<ID>/07 (_a1_results, case-insensitive as in classify). An unreadable
+    log file or 07 adds no send-back (the refusal side)."""
+    for team in ("research", "implementation"):
+        folder = logs / team
+        for f in (sorted(folder.glob("????-??-??.md")) if folder.is_dir() else []):
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for m in map(LOG_LINE.match, text.splitlines()):
+                if m and m[4] == item and m[3] in SEND_BACK:
+                    group, word = SEND_BACK[m[3]]
+                    v = re.fullmatch(LOG_FORMAT[m[3]], m[5].strip())
+                    if v and v[group] == word:
+                        return True
+    audit = Path("work") / item / STEPS["07"]
+    try:
+        results = _a1_results(audit.read_text(encoding="utf-8")) if audit.exists() else []
+    except (OSError, UnicodeDecodeError):
+        results = []
+    return any(r.upper() == "FAIL" for r in results)
+
+
 def write_log(agent, item, fields, now=None):
     """Item 045: append `HH:MM | agent | ID | fields` (UTC) to today's research or implementation
-    log. Exit code 2 and nothing written when the agent, ID or fields are not in the format."""
+    log. Exit code 2 and nothing written when the agent, ID or fields are not in the format.
+    Item 086 (rule D): also refused while a later step file 01-06 of the item exists (07 and other
+    files never count), unless the item was sent back (_sent_back)."""
     if agent not in LOG_FORMAT or not re.fullmatch(r"\d{3}", item) \
             or not log_fields_ok(agent, item, fields):   # order matters: the ID check runs before int(item)
         print(f"--log refused: {agent} | {item} | {fields} does not match "
@@ -677,6 +746,12 @@ def write_log(agent, item, fields, now=None):
         return 2
     if not (Path("work") / item / "request.md").exists():
         print(f"--log refused: no work/{item}/request.md (item 047)", file=sys.stderr)
+        return 2
+    step = next(s for s, a in AGENT.items() if a == agent)
+    later = [STEPS[s] for s in sorted(AGENT) if s > step and (Path("work") / item / STEPS[s]).exists()]
+    if later and not _sent_back(item):
+        print(f"--log refused: work/{item}/ already has {' '.join(later)} after {agent}'s step; write this "
+              f"line before the later steps run, then redo those steps (item 086)", file=sys.stderr)
         return 2
     now = now or dt.datetime.now(dt.timezone.utc)
     team = "research" if agent[0] == "R" else "implementation"
@@ -734,6 +809,137 @@ def late_log_lines():
                                         f"{commit:%Y-%m-%d %H:%M} UTC)")
                     ctime = None
     return late
+
+
+def _item_lines(logs):
+    """Item 086 (rule C): ({ID: [(stamp, agent, team, file index, line index, fields), ...]}, unreadable) over
+    every LOG_LINE-shaped line in logs/research/????-??-??.md and logs/implementation/????-??-??.md,
+    whatever its fields (a malformed line still marks when a step logged; 086 change 3). stamp is the
+    file's date + HH:MM (UTC), or None when that is not a valid time. unreadable: `<file> unreadable`
+    for a file that can't be read (OSError, non-UTF-8), never skipped silently."""
+    lines, unreadable, index = {}, [], 0
+    for team in ("research", "implementation"):
+        folder = logs / team
+        for f in (sorted(folder.glob("????-??-??.md")) if folder.is_dir() else []):
+            index += 1
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                unreadable.append(f"{f.as_posix()} unreadable")
+                continue
+            for n, row in enumerate(text.splitlines()):
+                m = LOG_LINE.match(row)
+                if not m:
+                    continue
+                try:
+                    stamp = dt.datetime.fromisoformat(f"{f.stem}T{m[1]}:{m[2]}+00:00")
+                except ValueError:
+                    stamp = None
+                lines.setdefault(m[4], []).append((stamp, m[3], team, index, n, m[5]))
+    return lines, unreadable
+
+
+def _run_seconds(path, heading):
+    """Item 086 (rule C): (every SUMMARY_LINE time in seconds inside every section of `path` that starts
+    with a line matching `heading` outside code fences, None). A section ends at the next `# ` or `## `
+    heading outside fences; summary lines count outside or inside fences (pytest output is usually
+    fenced); HTML comments are dropped (_md_lines). ([], None) when the file is absent, ([], "<file>
+    unreadable") when it can't be read."""
+    if not path.exists():
+        return [], None
+    try:
+        rows, _ = _md_lines(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return [], f"{path.as_posix()} unreadable"
+    found, inside = [], False
+    for line, state in rows:
+        if state == "out" and re.match(heading, line):
+            inside = True
+            continue
+        if state == "out" and re.match(r"#{1,2} ", line):
+            inside = False
+            continue
+        if inside and state in ("out", "in"):
+            m = SUMMARY_LINE.match(line.strip())
+            if m:
+                found.append(float(m[1]))
+    return found, None
+
+
+def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
+    """Item 086 (rule C, RI-010): items whose pytest runs could not fit between their log lines.
+    For each ID >= LOG_CHECK_FROM with work/<ID>/: start = the item's latest log line before its first
+    I2 line (research lines with a stamp <= that I2's count as before; implementation lines with the
+    same stamp only if above it), end = its last I3 line, delta = whole minutes end - start. t05 = the
+    largest time of the item's I2 log fields and of 05's `## Test output` sections; t06 = the largest
+    of 06's `## Tests re-run` sections after dropping any value equal (to 0.01 s) to a t05 candidate
+    (a copy); k = the number of known values. Flag when t05 + t06 - BATCH_ROUND*k >= (delta+1)*60.
+    excepted (None = LOG_BATCH_EXCEPT) items are counted and listed with their reason, never evaluated.
+    No I2 line: skipped. No I3 line after the last I2 line: in_progress (a round is open). No line
+    before the first I2, no time at all (k = 0), an unreadable 05/06/log file or a line with no valid
+    time: not_computable with the reason, never flagged and never read as 0 s.
+    Returns {flagged, flagged_ids, excepted, not_computable, checked, in_progress}."""
+    excepted = LOG_BATCH_EXCEPT if excepted is None else excepted
+    order = lambda r: (r[0], r[3], r[4])                    # stamp, then file and line order
+    lines, bad_logs = _item_lines(logs)
+    out = {"flagged": [], "flagged_ids": [], "excepted": [], "not_computable": [], "checked": 0,
+           "in_progress": []}
+    for d in (sorted(work.glob("[0-9][0-9][0-9]")) if work.is_dir() else []):
+        item = d.name
+        if not d.is_dir() or int(item) < LOG_CHECK_FROM:
+            continue
+        rows = lines.get(item, [])
+        i2 = [r for r in rows if r[1] == "I2"]
+        if not i2 and not bad_logs:
+            continue                                        # not built yet: nothing to check
+        if bad_logs:                                        # a lost line could move start or end
+            out["checked"] += 1
+            out["not_computable"].append((item, "; ".join(bad_logs)))
+            continue
+        if any(r[0] is None for r in rows):
+            out["checked"] += 1
+            out["not_computable"].append((item, "log line with no valid time"))
+            continue
+        first, last_i2 = min(i2, key=order), max(i2, key=order)
+        i3 = [r for r in rows if r[1] == "I3"]
+        end = max(i3, key=order) if i3 else None
+        if end is None or order(end) < order(last_i2):
+            out["in_progress"].append(item)                 # a round is open: its runs may lie after end
+            continue
+        out["checked"] += 1
+        if item in excepted:
+            if (d / "request.md").exists():
+                out["excepted"].append((item, excepted[item]))
+            continue
+        before = [r for r in rows if (r[0] <= first[0] if r[2] == "research" else order(r) < order(first))]
+        if not before:
+            out["not_computable"].append((item, "no line before I2"))
+            continue
+        start = max(before, key=order)
+        delta = int((end[0] - start[0]).total_seconds()) // 60
+        t05, why05 = _run_seconds(d / STEPS["05"], r"## Test output\b")
+        t06, why06 = _run_seconds(d / STEPS["06"], r"## Tests re-run\b")
+        why = "; ".join(w for w in (why05, why06) if w)
+        if why:
+            out["not_computable"].append((item, why))
+            continue
+        for r in i2:                                        # the I2 field's tests part, as printed (076)
+            m = re.match(r"\d+ files? changed \| tests (.*)", r[5].strip())
+            s = SUMMARY_LINE.match(m[1]) if m else None
+            if s:
+                t05.append(float(s[1]))
+        kept06 = [v for v in t06 if all(round(v * 100) != round(c * 100) for c in t05)]
+        known = ([max(t05)] if t05 else []) + ([max(kept06)] if kept06 else [])
+        if not known:
+            out["not_computable"].append((item, "no pytest time in 05/06/I2 line"))
+            continue
+        total, limit = sum(known), (delta + 1) * 60
+        if round(total - BATCH_ROUND * len(known), 3) >= limit:   # values have 2 decimals: round off float noise
+            out["flagged_ids"].append(item)
+            out["flagged"].append(f"{item} ({total:.2f} s of pytest runs between {start[0]:%Y-%m-%d %H:%M} and "
+                                  f"{end[0]:%H:%M} UTC, limit {limit} s; impossible under the run-item order, "
+                                  f"item 086)")
+    return out
 
 
 def _git(*args):
@@ -1336,6 +1542,13 @@ def main(argv):
                          if (work / i / "request.md").exists())
     excepted = f" (not checked: {excepted})" if excepted and late is not None else ""
     print(f"LOG TIME: {'not checked (no git)' if late is None else (', '.join(late) or 'none') + excepted}")
+    batch = batch_log_items()                               # item 086: no git, same text with or without it
+    batch_text = "; ".join(batch["flagged"]) or "none"
+    if batch["excepted"]:
+        batch_text += f" (not checked: {'; '.join(f'{i}: {why}' for i, why in batch['excepted'])})"
+    if batch["not_computable"]:
+        batch_text += f"; not computable: {', '.join(f'{i} ({why})' for i, why in batch['not_computable'])}"
+    print(f"LOG BATCH: {batch_text}")
     print(f"UNTRACKED CHANGE: {'not checked (no git)' if untracked is None else untracked[0]}")
     print(f"RESEARCH CODE: {'not checked (no git)' if research is None else research[0]}")
     print(f"REAL-DATA FIELD: {'not checked (no git)' if real is None else real[0]}")
@@ -1350,7 +1563,7 @@ def main(argv):
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped or failed or i3_failed or unfinished or late or orphans or (untracked and untracked[1]) \
         or (real and real[2]) or (uncommitted and uncommitted[1]) or isinstance(branches, str) \
-        or branch_errors or isinstance(ahead, str) else 0
+        or branch_errors or isinstance(ahead, str) or batch["flagged"] else 0
 
 
 if __name__ == "__main__":
