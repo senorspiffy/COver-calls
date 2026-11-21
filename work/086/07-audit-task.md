@@ -12,3 +12,4 @@ What Audit should look at:
 8. Scope lock: `late_log_lines`, `LOG_TIME_EXCEPT`, `LOG_FORMAT`, `log_fields_ok`, `incomplete` and `classify` are untouched by 086 (`git diff 129120b 91ade51`), and no `_git(` call is added (census unchanged by 086).
 9. Re-run the whole suite (I3 got 1 failed, 649 passed, 1 skipped in 84.80s at 91ade51) and the python3.11 compile (python3.10 absent). Copy the RI-010 status note from 05 into recurring-issues.md (item 036): GUARDED when merged, (b) flags 083 on main, and the next items show `LOG BATCH: none`.
 10. Cosmetic: `test_batch_boundary_delta0` now holds one Δ1 case (documented in its docstring). Rename it if wanted.
+A1 result: PASS (2026-11-21, logs/audit/2026-11-21-086.md)
