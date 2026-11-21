@@ -67,7 +67,14 @@ and its last commit date and age (039). Three more lines come from the branches:
   BRANCH FAIL     an item the open branch changes is I3 FAIL or A1 FAIL by the rules above, using the
                   branch's own files (item 077). Listed for A1; exit code unchanged, since the branch
                   is not part of HEAD. An item that is BRANCH SKIPPED is not also listed here. A branch
-                  file git cannot show is read as empty, so its I3 FAIL is not listed.
+                  file git cannot show is a BRANCH ERROR, and that item is not classified (item 081).
+  BRANCH ERROR    (item 081, RI-014, exit 1) `<ref> (git <cmd> failed (exit <n>))`: a git read of an open
+                  branch failed (its diff after the merge-tree fallback, ls-tree, merge-base --all, or a
+                  show of a step file or request.md), so what that branch carries is not known. Each
+                  distinct reason is listed once per branch. Without git the scan is skipped (no line);
+                  a failing `git branch -r` prints `OPEN BRANCHES: git branch failed (exit <n>) (item
+                  081)`, and IN PR, RULES BRANCH and ID CLASH say `not checked (see OPEN BRANCHES)`
+                  (exit 1). A git repo with no open branch prints `OPEN BRANCHES: none`.
 --log <agent> <ID> "<fields>" (item 045) appends `HH:MM | <agent> | <ID> | <fields>` with the
 current UTC time to logs/research or logs/implementation/<UTC date>.md, and refuses (exit 2)
 fields that don't match the agent's format (LOG_FORMAT). Every step logs this way, right after
@@ -84,6 +91,10 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   Items in LOG_TIME_EXCEPT are not checked and are named with their reason
                   (item 049). Known gap: blame gives a line's latest commit, so a line edited
                   in a later commit is checked against that later commit.
+                  Item 081: only log files listed by `git ls-tree -r HEAD` are blamed (an uncommitted
+                  file is skipped); a failed ls-tree is the entry `git ls-tree HEAD failed (item 081)`,
+                  and a failed blame of a committed file is the entry `<file> (git blame failed; item
+                  081)`, never none (exit 1).
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
@@ -92,7 +103,9 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   when it is written.
   MAIN AHEAD      HEAD is behind origin/main: merge main first. origin/main and branches whose
                   tip is already in it are then left out of OPEN BRANCHES (item 051); --next-id
-                  still counts them.
+                  still counts them. Item 081: origin/main is the exact ref refs/remotes/origin/main
+                  (`git for-each-ref`; origin/main/x is not it); a failed lookup or count prints
+                  `MAIN AHEAD: git <cmd> failed (exit <n>) (item 081)` (exit 1), never 0.
   UNTRACKED CHANGE  (item 053, exit 1; RI-007) a commit on HEAD's first-parent chain after the
                   cutoff UNTRACKED_FROM that changes CODE_PATHS (ccbot/, config/, scripts/, tests/,
                   .claude/, templates/) and changes no step file 01-06 of a work item that is open at
@@ -142,9 +155,8 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   of the items it touches; a .py already at the tip and unchanged is not counted.
                   For (i): a work/ .py committed on a branch with no step file is 053's on HEAD.
                   (k) a diagnostic in a FULL/FAST item is covered by its step files; its logic is
-                  checked only by I3's re-run. (l) if the branch `git diff` fails, its change list
-                  is empty and its code is not seen here (information only, like the rest of
-                  BRANCH SKIPPED).
+                  checked only by I3's re-run. (l) a failed branch git diff is a BRANCH ERROR
+                  (item 081).
   REAL-DATA FIELD (item 070, RI-010/RI-013) for items from WHOLE_DIFF_FROM on (earlier items are not
                   re-checked): when one of the item's own non-merge commits after the cutoff (a commit
                   holding one of its step files 01-06; one `git log --no-merges` call) changes a TRIGGER
@@ -180,13 +192,21 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   a round-2 06) is not listed; (c) 07 and other files outside 01-06 are not checked.
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
+Item 081: when `git branch -r` or a branch's `git ls-tree <ref> -- work/` fails, it prints
+`--next-id refused: <why>; ...` to stderr, nothing on stdout, and exits 2 (never a guessed ID). A
+branch with no work/ adds no ID. In a repo with no commit: --next-id refuses; make the first commit.
+Known gap (item 081): when `--is-shallow-repository` and `--git-common-dir` both fail,
+_shallow_boundaries returns "full", so _walk prints the squash/rebase text for UNTRACKED CHANGE:
+the reason is wrong, but it still exits 1.
 INBOX (item 069, RI-010): the daily audit's Inbox step (a1-auditor job B) is a text duty, so the
 newest daily report logs/audit/<YYYY-MM-DD>.md must have a `## Inbox` section holding a
 `project-inbox:` line (`nothing new`, `<n> new` or `UNREAD:`) and a `hub:` line (a 7-40 hex SHA or
 `UNREAD:`), if it was written under the Inbox template (never a date, 069 round 2): the report is
 checked only if INBOX_TEMPLATE at the commit that added it (`git log --diff-filter=A`) has `## Inbox`;
 an uncommitted report is judged by the working-tree template. Otherwise, and with no git or in a
-shallow clone, it prints `INBOX: not checked (...)`; a failing `git log` gives exit 1. Only lines
+shallow clone, it prints `INBOX: not checked (...)`; a failing `git log` gives exit 1, and so does
+`--is-shallow-repository` exiting 128 (git died, e.g. a bad shallow line; item 081). Other codes keep
+the unknown-flag path. Only lines
 between `## Inbox` and the next `## ` heading count. Per-item reports (<date>-<ID>.md) are ignored.
 A report missing any part prints `INBOX: <file> (<what is missing>)` and gives exit 1; no daily
 report prints `INBOX: not checked (no daily report)`. Known gaps: this proves the lines exist,
@@ -196,6 +216,7 @@ before pulling. (v) removing `## Inbox` from the template later switches the che
 added after that; this is intended, the rule follows the template.
 """
 import datetime as dt
+import os
 import re
 import subprocess
 import sys
@@ -591,17 +612,26 @@ def orphan_log_lines():
 
 def late_log_lines():
     """Item 045: committed log lines (items from LOG_CHECK_FROM on) timed after the commit that
-    added them, by `git blame`. None when git is not available here."""
+    added them, by `git blame`. None when git is not available here. Item 081: a log file not in
+    HEAD's tree (`git ls-tree`) is uncommitted and skipped; a failed ls-tree is the one entry
+    `git ls-tree HEAD failed (item 081)`, and a failed blame of a committed file is an entry."""
     if _git("rev-parse", "HEAD") is None:
         return None
+    tree, why = _git_ok("ls-tree", "-r", "--name-only", "HEAD", "--", "logs/research/", "logs/implementation/")
+    if why:
+        return ["git ls-tree HEAD failed (item 081)"]
+    committed = set(tree.splitlines())
     late = []
     for team in ("research", "implementation"):
         for f in sorted((Path("logs") / team).glob("????-??-??.md")):
-            out = _git("blame", "--line-porcelain", "--", str(f))
-            if out is None or out[1] != 0:
+            if f.as_posix() not in committed:
+                continue                                    # uncommitted: nothing to blame
+            blame, why = _git_ok("blame", "--line-porcelain", "--", str(f))
+            if why:
+                late.append(f"{f.as_posix()} (git blame failed; item 081)")
                 continue
             ctime = None
-            for row in out[0].splitlines():
+            for row in blame.splitlines():
                 if row.startswith("committer-time "):
                     ctime = int(row.split()[1])
                 elif row.startswith("\t"):
@@ -618,29 +648,48 @@ def late_log_lines():
 
 def _git(*args):
     """stdout and exit code of a git command in the current directory, or None if git is
-    missing or this directory is not the top of a git work tree."""
+    missing or this directory is not the top of a git work tree. Output that is not UTF-8 is
+    decoded with `replace`, never a traceback; the top-level path is compared as bytes decoded
+    by os.fsdecode, as Path.cwd() is (item 081)."""
     try:
-        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
-                             text=True, encoding="utf-8")
-        if top.returncode != 0 or Path(top.stdout.strip()).resolve() != Path.cwd().resolve():
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True)
+        if top.returncode != 0 or Path(os.fsdecode(top.stdout.strip())).resolve() != Path.cwd().resolve():
             return None
-        r = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
+        r = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace")
     except FileNotFoundError:
         return None
     return r.stdout, r.returncode
 
 
+def _git_ok(*args):
+    """Item 081 (RI-014): (stdout, None) when git exits 0; (None, "no git") when _git is None
+    (git missing, or not the top of a work tree); (stdout, "git <args[0]> failed (exit <code>)")
+    on any other exit. The reason never holds git's stderr. A caller treats any reason other than
+    "no git" as an error, never as none, 0 or []."""
+    out = _git(*args)
+    if out is None:
+        return None, "no git"
+    if out[1] != 0:
+        return out[0], f"git {args[0]} failed (exit {out[1]})"
+    return out[0], None
+
+
 def open_branches(today=None):
     """One dict per remote branch not merged into HEAD (items 034, 037, 038, 039): ref, items
     {item: set of step codes}, conflicts, recurring, clashes, skipped [(item, detail)],
-    failed [(item, status, detail)] (item 077: I3 FAIL or A1 FAIL, never an item in skipped), last."""
-    out = _git("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
-    if out is None or out[1] != 0:
-        return []
+    failed [(item, status, detail)] (item 077: I3 FAIL or A1 FAIL, never an item in skipped), last,
+    errors [why] (item 081: a git read of this branch that failed; BRANCH ERROR). None without git;
+    the reason string when `git branch` itself fails (item 081), never []."""
+    out, why = _git_ok("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
+    if why == "no git":
+        return None
+    if why:
+        return why
     today = today or dt.datetime.now(dt.timezone.utc).date()
-    behind = main_ahead() > 0
+    behind = isinstance(a := main_ahead(), int) and a > 0
     found = []
-    for ref in out[0].split():
+    for ref in out.split():
         if ref.endswith("/HEAD") or "/" not in ref:
             continue
         # HEAD is behind main: main and refs already in main are not open work (item 051)
@@ -653,19 +702,28 @@ def open_branches(today=None):
         # what merging the branch would change: HEAD vs the merge result. `HEAD...ref` uses one
         # merge base, so with two (criss-cross) a PR already merged looks like this branch's (052)
         tree = merge[0].split()[0] if conflicts is not None and merge[0].strip() else None
+        errors = []                                         # item 081: BRANCH ERROR
 
         def changed(*paths):
-            out = _git("diff", "--name-only", "HEAD", tree, "--", *paths) if tree else None
-            if out is None or out[1] != 0:
-                out = _git("diff", "--name-only", f"HEAD...{ref}", "--", *paths)
-            return out[0].split() if out and out[1] == 0 else []
+            if tree:
+                diff, why = _git_ok("diff", "--name-only", "HEAD", tree, "--", *paths)
+                if why is None:
+                    return diff.split()
+            diff, why = _git_ok("diff", "--name-only", f"HEAD...{ref}", "--", *paths)
+            if why is not None:
+                if why not in errors:
+                    errors.append(why)
+                return []
+            return diff.split()
 
         # items the branch changes, with every step file it has for them
         touched = {n.split("/")[1] for n in changed("work/") if n.count("/") == 2}
         items = {i: set() for i in touched}
         files = {i: [] for i in touched}
-        listing = _git("ls-tree", "-r", "--name-only", ref, "--", "work/")
-        for name in (listing[0].splitlines() if listing and listing[1] == 0 else []):
+        listing, why = _git_ok("ls-tree", "-r", "--name-only", ref, "--", "work/")
+        if why is not None:
+            errors.append(why)
+        for name in (listing.splitlines() if why is None else []):
             parts = name.split("/")
             if len(parts) == 3 and parts[1] in items:
                 files[parts[1]].append(parts[2])
@@ -673,25 +731,39 @@ def open_branches(today=None):
                     items[parts[1]].add(parts[2][:2])
         recurring = bool(changed(RECURRING))
         rules = changed(*RULE_PATHS)
-        bases = _git("merge-base", "--all", "HEAD", ref)
-        bases = bases[0].split() if bases and bases[1] == 0 else []
+        bases, why = _git_ok("merge-base", "--all", "HEAD", ref)
+        if why is not None:
+            errors.append(why)
+        bases = bases.split() if why is None else []
         clashes, skipped, failed, requests = [], [], [], {}
         for item in sorted(touched):
             req = f"work/{item}/request.md"
-            theirs = _git("show", f"{ref}:{req}")
-            requests[item] = theirs[0] if theirs and theirs[1] == 0 else None
+            theirs = None
+            if "request.md" in files[item]:
+                theirs, why = _git_ok("show", f"{ref}:{req}")
+                if why is not None:
+                    errors.append(why)
+                    theirs = None
+            requests[item] = theirs
             mine = Path(req)
-            if (bases and theirs and theirs[1] == 0 and mine.exists()
+            if (bases and theirs is not None and mine.exists()
                     and all(_git("cat-file", "-e", f"{b}:{req}")[1] != 0 for b in bases)
-                    and theirs[0] != mine.read_text(encoding="utf-8")):
+                    and theirs != mine.read_text(encoding="utf-8")):
                 clashes.append(item)
-            if theirs and theirs[1] == 0 and item not in LEGACY:
+            if theirs is not None and item not in LEGACY:
                 with tempfile.TemporaryDirectory() as tmp:
                     d = Path(tmp) / item
                     d.mkdir()
+                    unread = False
                     for f in files[item]:
-                        body = _git("show", f"{ref}:work/{item}/{f}")
-                        (d / f).write_text(body[0] if body else "", encoding="utf-8")
+                        body, why = _git_ok("show", f"{ref}:work/{item}/{f}")
+                        if why is not None:                 # item 081: not classified, BRANCH ERROR
+                            errors.append(why)
+                            unread = True
+                            break
+                        (d / f).write_text(body, encoding="utf-8")
+                    if unread:
+                        continue
                     status, detail = classify(d, today)
                 if status == "SKIPPED":
                     skipped.append((item, detail))
@@ -713,7 +785,8 @@ def open_branches(today=None):
         last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
         found.append({"ref": ref, "items": items, "conflicts": conflicts,
                       "recurring": recurring, "clashes": clashes,
-                      "skipped": skipped, "failed": failed, "last": last, "rules": rules})
+                      "skipped": skipped, "failed": failed, "last": last, "rules": rules,
+                      "errors": errors})
     return found
 
 
@@ -969,22 +1042,41 @@ MAIN = "origin/main"
 
 
 def main_ahead():
-    """Commits on origin/main that HEAD lacks (item 051); 0 when there is no origin/main."""
-    ref = _git("rev-parse", "--verify", "-q", MAIN)
-    if ref is None or ref[1] != 0:
+    """Commits on origin/main that HEAD lacks (item 051): an int, 0 when there is no
+    refs/remotes/origin/main (exact refname, so origin/main/x is not it) or no git; or, item 081,
+    the error string `<why> (item 081)` when the lookup or the count fails, never 0."""
+    refs, why = _git_ok("for-each-ref", "--format=%(refname) %(objectname)", f"refs/remotes/{MAIN}")
+    if why == "no git":
         return 0
-    n = _git("rev-list", "--count", f"HEAD..{MAIN}")
-    return int(n[0].strip()) if n and n[1] == 0 and n[0].strip().isdigit() else 0
+    if why:
+        return f"{why} (item 081)"
+    sha = next((p[1] for p in (ln.split() for ln in refs.splitlines())
+                if len(p) == 2 and p[0] == f"refs/remotes/{MAIN}"), None)
+    if sha is None:
+        return 0
+    n, why = _git_ok("rev-list", "--count", f"HEAD..{sha}")
+    if why == "no git":
+        return 0
+    if why or not n.strip().isdigit():
+        return f"{why or 'git rev-list gave no count'} (item 081)"
+    return int(n.strip())
 
 
 def next_id():
-    """The next free work item ID over HEAD and every unmerged remote branch (item 037)."""
+    """The next free work item ID over HEAD and every unmerged remote branch (item 037):
+    (id, None), or (None, why) when a git read fails (item 081), so no ID is guessed. Without git,
+    HEAD's work/ only. A branch with no work/ adds no ID."""
     ids = [int(p.name) for p in Path("work").iterdir() if p.name.isdigit()] if Path("work").is_dir() else []
-    out = _git("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
-    for ref in (out[0].split() if out and out[1] == 0 else []):
-        listing = _git("ls-tree", "-d", "--name-only", f"{ref}:work")
-        ids += [int(n) for n in (listing[0].split() if listing and listing[1] == 0 else []) if n.isdigit()]
-    return f"{max(ids, default=0) + 1:03d}"
+    out, why = _git_ok("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
+    if why not in (None, "no git"):
+        return None, why
+    for ref in (out.split() if why is None else []):
+        listing, why = _git_ok("ls-tree", "-d", "--name-only", ref, "--", "work/")
+        if why is not None:
+            return None, why
+        names = [Path(line).name for line in listing.splitlines()]
+        ids += [int(n) for n in names if n.isdigit()]
+    return f"{max(ids, default=0) + 1:03d}", None
 
 
 def _inbox_gate(path: Path) -> "tuple[str, bool] | None":
@@ -995,6 +1087,8 @@ def _inbox_gate(path: Path) -> "tuple[str, bool] | None":
     shallow = _git("rev-parse", "--is-shallow-repository")
     if shallow is None:
         return "not checked (no git)", False
+    if shallow[1] == 128:                                   # item 081: git died, e.g. a bad shallow line
+        return f"{path.name} (git rev-parse failed (exit 128); item 081)", True
     if shallow[1] == 0 and shallow[0].strip() == "true":
         return "not checked (shallow clone; run git fetch --unshallow)", False
     sha = ""
@@ -1041,7 +1135,12 @@ def inbox_section(audit=Path("logs/audit")) -> tuple[str, bool]:
 def main(argv):
     today = dt.datetime.now(dt.timezone.utc).date()
     if argv[:1] == ["--next-id"]:
-        print(next_id())
+        nid, why = next_id()
+        if why:                                             # item 081: never guess an ID
+            print(f"--next-id refused: {why}; not counting open branches would risk an ID clash "
+                  f"(item 037). Fix the clone (git fetch origin) and re-run.", file=sys.stderr)
+            return 2
+        print(nid)
         return 0
     if argv[:1] == ["--log"]:
         if len(argv) != 4:
@@ -1059,6 +1158,7 @@ def main(argv):
     work = Path("work")
     skipped, stuck, awaiting, in_pr, failed, i3_failed, unfinished = [], [], [], [], [], [], []
     branches = open_branches(today)
+    blist = branches if isinstance(branches, list) else []  # item 081: None (no git) or a git error
     walked = _walk(cutoff) if _git("rev-parse", "HEAD") is not None else None
     untracked = untracked_changes(cutoff, walked)
     research = research_code(cutoff, walked)
@@ -1075,7 +1175,7 @@ def main(argv):
         if status in ("STUCK", "not started", "in progress", "I3 FAIL"):
             here = {s for s, f in STEPS.items() if (d / f).exists()}
             best = max(((len(items.get(d.name, set()) - here), ref, items.get(d.name, set()))
-                        for ref, items in ((b["ref"], b["items"]) for b in branches)), default=(0, "", set()))
+                        for ref, items in ((b["ref"], b["items"]) for b in blist)), default=(0, "", set()))
             if best[0] > 0:
                 status, detail = "IN PR", f"{best[1]} has {' '.join(sorted(best[2]))}; was {status} here"
                 in_pr.append(d.name)
@@ -1098,11 +1198,18 @@ def main(argv):
         skipped.append(item)
     print(f"STUCK: {', '.join(stuck) or 'none'}")
     print(f"AWAITING A1: {', '.join(awaiting) or 'none'}")
-    print(f"IN PR: {', '.join(in_pr) or 'none'}")
+    unread = "not checked (see OPEN BRANCHES)" if isinstance(branches, str) else None
+    print(f"IN PR: {unread or ', '.join(in_pr) or 'none'}")
     ahead = main_ahead()
-    if ahead:
+    if isinstance(ahead, str):                              # item 081: the lookup failed, exit 1
+        print(f"MAIN AHEAD: {ahead}")
+    elif ahead > 0:
         print(f"MAIN AHEAD: {MAIN} has {ahead} commits not in HEAD; merge it before building (item 051)")
-    if branches:
+    if isinstance(branches, str):                           # item 081: git branch failed, exit 1
+        print(f"OPEN BRANCHES: {branches} (item 081)")
+    elif branches == []:
+        print("OPEN BRANCHES: none")
+    elif branches:
         print("OPEN BRANCHES (not merged into HEAD):")
         for b in branches:
             conflicts = b["conflicts"]
@@ -1112,16 +1219,19 @@ def main(argv):
             age = f"; last commit {b['last']} ({(today - b['last']).days} days)" if b["last"] else ""
             print(f"  {b['ref']}: items {', '.join(sorted(b['items'])) or 'none'}; {merge}{note}{age}")
     if _git("rev-parse", "HEAD") is not None:
-        ruling = [f"{b['ref']} changes {', '.join(b['rules'])}" for b in branches if b["rules"]]
-        print(f"RULES BRANCH: {'; '.join(ruling) + '; build new items on top of it (item 049)' if ruling else 'none'}")
-    clashes = [f"{i} ({b['ref']})" for b in branches for i in b["clashes"]]
-    print(f"ID CLASH: {', '.join(clashes) or 'none'}")
-    for b in branches:
+        ruling = [f"{b['ref']} changes {', '.join(b['rules'])}" for b in blist if b["rules"]]
+        print(f"RULES BRANCH: {unread or ('; '.join(ruling) + '; build new items on top of it (item 049)' if ruling else 'none')}")
+    clashes = [f"{i} ({b['ref']})" for b in blist for i in b["clashes"]]
+    print(f"ID CLASH: {unread or ', '.join(clashes) or 'none'}")
+    for b in blist:
         for item, detail in b["skipped"]:
             print(f"BRANCH SKIPPED: {item} ({b['ref']}: {detail})")
-    for b in branches:                                      # item 077: information, exit unchanged
+    for b in blist:                                         # item 077: information, exit unchanged
         for item, status, detail in b["failed"]:
             print(f"BRANCH FAIL: {item} ({b['ref']}: {status}; {detail})")
+    branch_errors = [f"{b['ref']} ({why})" for b in blist for why in b["errors"]]
+    for line in branch_errors:                              # item 081: exit 1
+        print(f"BRANCH ERROR: {line}")
     print(f"I3 FAIL: {', '.join(i3_failed) or 'none'}")
     print(f"A1 FAIL: {', '.join(failed) or 'none'}")
     print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
@@ -1143,7 +1253,8 @@ def main(argv):
         return 1
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped or failed or i3_failed or unfinished or late or orphans or (untracked and untracked[1]) \
-        or (real and real[2]) or (uncommitted and uncommitted[1]) else 0
+        or (real and real[2]) or (uncommitted and uncommitted[1]) or isinstance(branches, str) \
+        or branch_errors or isinstance(ahead, str) else 0
 
 
 if __name__ == "__main__":

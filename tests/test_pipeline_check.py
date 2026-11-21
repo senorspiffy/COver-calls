@@ -1736,9 +1736,10 @@ def test_branch_unchanged_tip_py_not_counted(tmp_path):
 
 
 @NO_GIT
-def test_branch_diff_failure_hides_code_gap_l(tmp_path, monkeypatch):
-    """Gap (l) pinned: a failed branch `git diff` gives an empty change list, so the branch's
-    code is not seen (information only). Making it loud must change this test on purpose."""
+def test_branch_diff_failure_is_branch_error(tmp_path, monkeypatch, capsys):
+    """Gap (l) closed on purpose (item 081, RI-014): this test was test_branch_diff_failure_hides_code_gap_l,
+    which pinned a failed branch `git diff` as an empty change list (the branch's code not seen, no
+    error). Now the failure is recorded once per branch and printed as BRANCH ERROR (exit 1)."""
     import datetime as dt
     cp = _cp()
     repo = _repo_with_open_branch(tmp_path)
@@ -1749,7 +1750,12 @@ def test_branch_diff_failure_hides_code_gap_l(tmp_path, monkeypatch):
     found = cp.open_branches(dt.date(2026, 11, 13))
     res = [b for b in found if b["ref"] == "origin/res"]
     assert res
+    assert res[0]["errors"] == ["git diff failed (exit 1)"]       # changed() runs 5 times: listed once
     assert not any("changes work/160/diag.py" in d for b in res for _, d in b["skipped"])
+    code = cp.main(["--untracked-from", _root(repo), "--today", "2026-11-13"])
+    out = capsys.readouterr().out
+    assert "BRANCH ERROR: origin/res (git diff failed (exit 1))" in out, out
+    assert code == 1
 
 
 # Item 069 (RI-010): the daily report's Inbox section (INBOX:).
@@ -2335,3 +2341,239 @@ def test_agent_texts_name_item_071(path, must, must_not):
     """T13 (C5, RI-010): the two agent sentences stay in place."""
     text = (REPO / path).read_text(encoding="utf-8")
     assert all(m in text for m in must) and not any(m in text for m in must_not)
+
+
+# Item 081 (RI-014): a failed git read is an error or "not checked", never none, 0 or [].
+GIT_LINES = ("LOG TIME:", "OPEN BRANCHES", "IN PR:", "RULES BRANCH:", "ID CLASH:", "MAIN AHEAD:",
+             "UNTRACKED CHANGE:", "RESEARCH CODE:", "REAL-DATA FIELD:", "UNCOMMITTED STEP:", "INBOX:")
+# Every _git / _git_ok call in scripts/check_pipeline.py by (innermost function, callee): (count, reason).
+# A new git call adds or bumps one entry with its reason (items 084, 086 build on this).
+GIT_CENSUS = {
+    ("uncommitted_steps", "_git"): (2, "is None no-git probe; ls-tree failure is 077's error"),
+    ("late_log_lines", "_git"): (1, "no-git probe"),
+    ("late_log_lines", "_git_ok"): (2, "ls-tree and blame failures are entries (081)"),
+    ("_git_ok", "_git"): (1, "the helper"),
+    ("open_branches", "_git"): (4, "is-ancestor 128 lists the ref (more); merge-tree 0/1 are answers, else "
+                                   "'merge not checked'; cat-file non-zero = absent at base (a die gives a "
+                                   "clash, loud); log -1 is age only (cosmetic)"),
+    ("open_branches", "_git_ok"): (5, "branch -r, ls-tree, merge-base --all, show request/body -> BRANCH ERROR"),
+    ("changed", "_git_ok"): (2, "fallback failure -> BRANCH ERROR"),
+    ("_open_at", "_git"): (1, "an absent 07 must read open; the same walk's diff-tree just succeeded (F8)"),
+    ("_shallow_boundaries", "_git"): (2, "079: failure -> 'full' -> _walk loud (exit 1)"),
+    ("_walk", "_git"): (7, "079: each failure is a not-checked or error tuple"),
+    ("untracked_changes", "_git"): (1, "no-git probe"),
+    ("research_code", "_git"): (1, "no-git probe"),
+    ("real_data_field", "_git"): (1, "no-git probe"),
+    ("_item_triggers", "_git"): (1, "070: 'git log failed', exit 1"),
+    ("main_ahead", "_git_ok"): (2, "error string -> MAIN AHEAD line, exit 1"),
+    ("next_id", "_git_ok"): (2, "refusal, exit 2"),
+    ("_inbox_gate", "_git"): (4, "flag 128 loud (081); log failure loud (069); show failure -> not checked"),
+    ("main", "_git"): (2, "no-git probes"),
+}
+
+
+def _git_lines(out):
+    return {p: [l for l in out.splitlines() if l.startswith(p)] for p in GIT_LINES}
+
+
+def test_git_ok_contract(monkeypatch):
+    """Item 081: _git_ok's three results; the reason holds the command and code, never stderr."""
+    cp = _cp()
+    monkeypatch.setattr(cp, "_git", lambda *a: ("x", 0))
+    assert cp._git_ok("status") == ("x", None)
+    monkeypatch.setattr(cp, "_git", lambda *a: None)
+    assert cp._git_ok("status") == (None, "no git")
+    monkeypatch.setattr(cp, "_git", lambda *a: ("", 128))
+    assert cp._git_ok("log", "-1") == ("", "git log failed (exit 128)")
+
+
+def test_git_call_census():
+    """Item 081: every git call site is counted with a reason, so a new raw _git call (whose
+    failure could read as none) fails here until it is reviewed and added."""
+    import ast
+    import collections
+    tree = ast.parse((REPO / "scripts" / "check_pipeline.py").read_text(encoding="utf-8"))
+    seen = collections.Counter()
+
+    def walk(node, fn):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, ast.Call) and isinstance(ch.func, ast.Name) and ch.func.id in ("_git", "_git_ok"):
+                seen[(fn, ch.func.id)] += 1
+            walk(ch, ch.name if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)) else fn)
+
+    walk(tree, None)
+    assert dict(seen) == {k: v[0] for k, v in GIT_CENSUS.items()}
+    assert all(reason.strip() for _, reason in GIT_CENSUS.values())
+    assert sum(seen.values()) == 41
+
+
+def test_all_git_fails_no_line_says_none(tmp_path, monkeypatch, capsys):
+    """(a) every git command exits 128: each git-reading line is there and none says none; exit 1.
+    --next-id refuses (exit 2, empty stdout) instead of guessing from HEAD alone."""
+    cp = _cp()
+    _item(tmp_path, "150", [], date="2026-11-20")
+    _daily(tmp_path, "2026-11-20.md", INBOX_OK.format(sha="a" * 7), git=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cp, "_git", lambda *a: ("", 128))
+    code = cp.main(["--today", "2026-11-20"])
+    out = capsys.readouterr().out
+    for p, lines in _git_lines(out).items():
+        assert lines, f"{p} missing:\n{out}"
+        assert not any(l.rstrip().endswith(": none") for l in lines), out
+    assert code == 1
+    code = cp.main(["--next-id"])
+    cap = capsys.readouterr()
+    assert code == 2 and cap.out == ""
+    assert "--next-id refused: git branch failed (exit 128)" in cap.err
+
+
+@NO_GIT
+def test_malformed_shallow_real_git_nothing_none(tmp_path):
+    """(b) A1's repro, real git: a bad shallow line makes ls-tree, branch, blame and rev-list die
+    (exit 128). No git-reading line says none, exit 1, and --next-id refuses (never `041`)."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "scratch-x", "099", [])
+    _item(repo, "150", [], date="2026-11-20", logged=False)
+    _write(repo, "logs/implementation/2026-11-20.md", "23:59 | I2 | 150 | 1 files changed | tests 1 passed\n")
+    _daily(repo, "2026-11-20.md", INBOX_OK.format(sha="a" * 7), commit=False)
+    _commit(repo, "late log")
+    head, root = _commit_sha(repo), _root(repo)
+    (repo / ".git" / "shallow").write_text(f"{head}\nzz\n", encoding="utf-8")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", "2026-11-20")
+    for p, lines in _git_lines(out).items():
+        assert lines, f"{p} missing:\n{out}"
+        assert not any(l.rstrip().endswith(": none") for l in lines), out
+    assert code == 1, out
+    assert _run(repo, "check_pipeline.py", "--next-id") == (2, "")
+
+
+@NO_GIT
+def test_non_utf8_shallow_line_no_traceback(tmp_path):
+    """(c) a non-UTF-8 byte in git's output or error text is decoded with replace: no traceback,
+    exit 1, and no git-reading line says none."""
+    repo, c = _history(tmp_path)
+    (repo / ".git" / "shallow").write_bytes(c.encode() + b"\n\xff\n")
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), "--untracked-from", c,
+                        "--today", "2026-11-20"], cwd=repo, capture_output=True)
+    out = r.stdout.decode("utf-8", "replace")
+    assert b"Traceback" not in r.stderr, r.stderr
+    assert r.returncode == 1, out
+    for lines in _git_lines(out).values():
+        assert not any(l.rstrip().endswith(": none") for l in lines), out
+
+
+@NO_GIT
+def test_non_utf8_repo_path_is_still_git(tmp_path):
+    """(c2) a repo whose path is not UTF-8 is still the top of a work tree (os.fsdecode on both
+    sides), so the checks run instead of `not checked (no git)`."""
+    repo = tmp_path / os.fsdecode(b"r\xff")
+    try:
+        repo.mkdir()
+    except (OSError, UnicodeEncodeError) as e:
+        pytest.skip(f"file system refuses a non-UTF-8 name: {e}")
+    _git(repo, "init", "-q", "-b", "main")
+    _item(repo, "150", ALL)
+    c = _commit(repo, "cutoff")
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), "--untracked-from", c,
+                        "--today", "2026-11-20"], cwd=repo, capture_output=True)
+    out = r.stdout.decode("utf-8", "replace")
+    assert b"Traceback" not in r.stderr, r.stderr
+    assert "not checked (no git)" not in out, out
+    assert "UNTRACKED CHANGE: none" in out, out
+
+
+@NO_GIT
+def test_uncommitted_log_file_is_skipped(tmp_path):
+    """(d1) a log file not in HEAD's tree is uncommitted: it is not blamed (0 of 1 listed), so a
+    late-looking line in it is not LOG TIME. The committed log is still checked."""
+    repo, c = _history(tmp_path)
+    _write(repo, "logs/implementation/2026-11-20.md", "23:59 | I3 | 150 | PASS | sent to audit: yes\n")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", c, "--today", "2026-11-20")
+    assert "LOG TIME: none" in out, out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_next_id_orphan_branch_without_work(tmp_path):
+    """(d2) an orphan branch with no work/ adds no ID (041); with b099 open too the answer is 100."""
+    repo = _repo_with_open_branch(tmp_path)
+    _git(repo, "checkout", "-q", "--orphan", "nowork")
+    _git(repo, "rm", "-rfq", ".")
+    _write(repo, "README.md")
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "orphan")
+    _git(repo, "push", "-q", "origin", "nowork")
+    _git(repo, "checkout", "-q", "-f", "main")
+    assert _run(repo, "check_pipeline.py", "--next-id") == (0, "041\n")
+    _branch_adds(repo, "b099", "099", [])
+    assert _run(repo, "check_pipeline.py", "--next-id") == (0, "100\n")
+
+
+@NO_GIT
+def test_main_ahead_exact_ref_only(tmp_path):
+    """(d3) refs/remotes/origin/main/x (one commit ahead) is not origin/main: no MAIN AHEAD line."""
+    repo, c = _history(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "tmp")
+    _write(repo, "notes/a.md")
+    ahead = _commit(repo, "ahead")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "branch", "-q", "-D", "tmp")
+    _git(repo, "update-ref", "refs/remotes/origin/main/x", ahead)
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", c, "--today", "2026-11-20")
+    assert "origin/main/x" in out, out                       # the ref is seen as an open branch
+    assert "MAIN AHEAD" not in out, out
+
+
+@NO_GIT
+def test_branch_show_failure_skips_classify(tmp_path, monkeypatch, capsys):
+    """(f) a branch step file git cannot show is a BRANCH ERROR and its item is not classified, so
+    no false BRANCH SKIPPED is printed from an empty file. Control: unpatched, 060 is SKIPPED."""
+    cp = _cp()
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "short", "060", ["05-build-report.md"])
+    monkeypatch.chdir(repo)
+    cp.main(["--untracked-from", _root(repo), "--today", "2026-11-20"])
+    out = capsys.readouterr().out
+    assert "BRANCH SKIPPED: 060 (origin/short:" in out and "BRANCH ERROR" not in out, out
+    _patched_git(monkeypatch, cp, {("show", "origin/short:work/060/05-build-report.md"): ("", 128)})
+    code = cp.main(["--untracked-from", _root(repo), "--today", "2026-11-20"])
+    out = capsys.readouterr().out
+    assert "BRANCH ERROR: origin/short (git show failed (exit 128))" in out, out
+    assert "BRANCH SKIPPED: 060" not in out, out
+    assert code == 1
+
+
+@NO_GIT
+def test_inbox_flag_die_is_loud(tmp_path, monkeypatch):
+    """(g) --is-shallow-repository exit 128 (git died) is a failure; 129 keeps the 079 path
+    (test_shallow_flag_unknown_no_file_is_full)."""
+    cp = _cp()
+    _daily(tmp_path, "2026-11-18.md", INBOX_OK.format(sha="a" * 7))
+    monkeypatch.chdir(tmp_path)
+    _patched_git(monkeypatch, cp, {("rev-parse", "--is-shallow-repository"): ("", 128)})
+    text, failed = cp.inbox_section(Path("logs/audit"))
+    assert failed is True
+    assert "git rev-parse failed (exit 128)" in text
+
+
+@NO_GIT
+def test_open_branches_none_line(tmp_path):
+    """(h1) a git repo with no remote branch says `OPEN BRANCHES: none`; without git there is no line."""
+    repo, c = _history(tmp_path)
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", c, "--today", "2026-11-20")
+    assert "OPEN BRANCHES: none" in out.splitlines(), out
+    assert code == 0, out
+
+
+def test_check_handoff_open_branches_states(tmp_path, monkeypatch, capsys):
+    """(h2) check_handoff --all: a failed branch list is `not checked` and exit 1, never `no
+    hand-off`; no git (None) is `no hand-off`, exit 0."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_handoff
+    cp = sys.modules["check_pipeline"] if "check_pipeline" in sys.modules else _cp()
+    (tmp_path / "work" / "150").mkdir(parents=True)
+    monkeypatch.setattr(cp, "open_branches", lambda *a: "git branch failed (exit 128)")
+    assert check_handoff.check_all(tmp_path / "work") == 1
+    assert "150: not checked (open branches: git branch failed (exit 128))" in capsys.readouterr().out
+    monkeypatch.setattr(cp, "open_branches", lambda *a: None)
+    assert check_handoff.check_all(tmp_path / "work") == 0
+    assert "150: no hand-off" in capsys.readouterr().out
