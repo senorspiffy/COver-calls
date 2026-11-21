@@ -270,10 +270,15 @@ none). Each such pair is printed after INCOMPLETE as `RULE NOT SEEN: <ID> (<step
 without <CONST> (<rule item>): judged by <old rule>; item 084)`, or `none`; the exit code is
 unchanged. No git or a shallow clone (079's _shallow_boundaries) prints `RULE NOT SEEN: not checked
 (no git)` / `not checked (shallow clone; run git fetch --unshallow)` and keeps the numeric cutoffs.
-An uncommitted 05/06 or an unborn HEAD keeps them too; a failed git call (`<step> anchor: git failed
-(item 084)`) or an anchor tree without RULE_FILE (`<step> anchor <sha7> has no
+Item 088: an uncommitted 05/06 (any check run before its commit) keeps them with no entry; an unborn
+HEAD prints `not checked (unborn HEAD)` and keeps them; a failed HEAD verify prints `not checked (git
+rev-parse --verify HEAD failed (exit <n>))`, keeps them and gives exit 1. A failed git call (`<step>
+anchor: git failed (item 084)`) or an anchor tree without RULE_FILE (`<step> anchor <sha7> has no
 scripts/check_pipeline.py (item 084)`) keeps them and adds that entry (exit 1). Items below either
-cutoff make no git call. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
+cutoff make no git call. Cost (item 088): HEAD is read once per run (+1 wrapper call); a full pair
+is 3 wrapper calls (log, ls-tree, show) = 6 git processes (each _git also runs rev-parse
+--show-toplevel); early exits make 0, 1 or 2; at most 3 pairs per item (05 TESTS, 05 SUITE, 06
+VERDICT). Before 088 a full pair was 4 calls = 8 processes. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
 items today); the 06 verdict vs last I3 line cross-check stays at CHECKLIST_FROM by decision;
 CHECKLIST_FROM, LOG_CHECK_FROM and their checks stay numeric; --log (write_log) stays numeric, so a
 new log line is never judged by an old rule. The constant counts only at the start of a line, so a
@@ -621,31 +626,39 @@ def uncommitted_steps(logs=Path("logs")):
 
 
 def _anchor_env():
-    """Item 084 (RI-014): None when git can give the commit that added a step file; "no git", or
-    "shallow clone; run git fetch --unshallow" when _shallow_boundaries (079) gives boundaries or
-    "unreadable". Then no anchor is read and every item keeps the numeric cutoffs (strict)."""
+    """Items 084, 088 (RI-014): (env, failed). env is None when git can give the commit that added a
+    step file; else the reason no anchor is read, and every item keeps the numeric cutoffs (strict):
+    "no git"; "shallow clone; run git fetch --unshallow" when _shallow_boundaries (079) gives
+    boundaries or "unreadable"; "unborn HEAD" when `rev-parse --verify -q HEAD` exits 1; any other
+    exit gives "git rev-parse --verify HEAD failed (exit <n>)" with failed True (main exits 1). HEAD
+    is read once per run here, not per pair in _rule_seen (item 088). Known gap: exit 1 means HEAD
+    names no commit: unborn, or a ref git can't resolve; both are strict, and the second also fails
+    UNCOMMITTED STEP's ls-tree HEAD (exit 1), so it is never a silent pass."""
     if _git("rev-parse", "--git-dir") is None:
-        return "no git"
+        return "no git", False
     s = _shallow_boundaries()
     if s == "unreadable" or (isinstance(s, list) and s):
-        return "shallow clone; run git fetch --unshallow"
-    return None
+        return "shallow clone; run git fetch --unshallow", False
+    head = _git("rev-parse", "--verify", "-q", "HEAD")
+    if head is None:
+        return "no git", False
+    if head[1] == 0:
+        return None, False
+    if head[1] == 1:
+        return "unborn HEAD", False
+    return f"git rev-parse --verify HEAD failed (exit {head[1]})", True
 
 
 def _rule_seen(item_dir, step, const, env):
     """Item 084 (RI-010): whether `const` (`^<const> = `) is in RULE_FILE in the tree of the commit
     that added work/<ID>/<step file> (default history simplification, no --first-parent).
-    (True|False, sha7) when read; (None, "") with env set, an unborn HEAD or an uncommitted file;
+    (True|False, sha7) when read; (None, "") with env set (_anchor_env: no git, shallow, unborn or a
+    failed HEAD verify; HEAD is read once there, item 088) or an uncommitted file;
     (None, "<step> anchor: git failed (item 084)") on any failed git call and (None, "<step> anchor
     <sha7> has no RULE_FILE (item 084)") when the file is absent there. None keeps the strict rule."""
     if env is not None:
         return None, ""
-    head = _git("rev-parse", "--verify", "-q", "HEAD")
-    if head is None or head[1] == 1:                        # no git, or unborn HEAD: nothing to anchor
-        return None, ""
     failed = f"{step} anchor: git failed (item 084)"
-    if head[1] != 0:
-        return None, failed
     sha, why = _git_ok("log", "--no-renames", "--diff-filter=A", "--format=%H", "-1", "--",
                        f"work/{item_dir.name}/{STEPS[step]}")
     if why:
@@ -1532,7 +1545,7 @@ def main(argv):
     branches = open_branches(today)
     blist = branches if isinstance(branches, list) else []  # item 081: None (no git) or a git error
     walked = _walk(cutoff) if _git("rev-parse", "HEAD") is not None else None
-    env, not_seen = _anchor_env(), []                       # item 084: computed once
+    (env, env_failed), not_seen = _anchor_env(), []         # items 084, 088: computed once
     untracked = untracked_changes(cutoff, walked)
     research = research_code(cutoff, walked)
     real = real_data_field(cutoff, walked)                  # item 070
@@ -1642,7 +1655,7 @@ def main(argv):
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped or failed or i3_failed or unfinished or late or orphans or (untracked and untracked[1]) \
         or (real and real[2]) or (uncommitted and uncommitted[1]) or isinstance(branches, str) \
-        or branch_errors or isinstance(ahead, str) or batch["flagged"] else 0
+        or branch_errors or isinstance(ahead, str) or batch["flagged"] or env_failed else 0
 
 
 if __name__ == "__main__":

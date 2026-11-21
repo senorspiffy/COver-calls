@@ -2390,9 +2390,8 @@ GIT_CENSUS = {
     ("next_id", "_git_ok"): (2, "refusal, exit 2"),
     ("_inbox_gate", "_git"): (4, "flag 128 loud (081); log failure loud (069); show failure -> not checked"),
     ("main", "_git"): (2, "no-git probes"),
-    ("_anchor_env", "_git"): (1, "084: no-git probe -> RULE NOT SEEN: not checked (no git), strict"),
-    ("_rule_seen", "_git"): (1, "084: rev-parse --verify exit 1 = unborn HEAD (strict, no anchor); any other "
-                                "non-zero -> 'anchor: git failed' entry"),
+    ("_anchor_env", "_git"): (2, "084: no-git probe; 088: rev-parse --verify HEAD read once: exit 1 = no commit "
+                                 "(unborn) -> not checked, None -> no git, other non-zero -> not checked + exit 1"),
     ("_rule_seen", "_git_ok"): (3, "084: log/ls-tree/show failure -> 'anchor: git failed' entry, strict"),
 }
 
@@ -2701,13 +2700,15 @@ def test_unseen_item_that_passes_is_not_listed(tmp_path):
 
 @NO_GIT
 def test_rule_anchor_git_failure_is_incomplete(tmp_path, monkeypatch):
-    """(d1) a failed add-commit log or show is strict plus an entry, never 'not seen' (M3)."""
+    """(d1) a failed add-commit log, ls-tree or show is strict plus an entry, never 'not seen' (M3; item
+    088 added the ls-tree row; the HEAD verify row moved to test_anchor_env_reads_head_once)."""
     cp = _cp()
     repo, _, added, _ = _rules_repo(tmp_path)
     monkeypatch.chdir(repo)
     item = Path("work/150")
     log = ("log", "--no-renames", "--diff-filter=A", "--format=%H", "-1", "--", "work/150/05-build-report.md")
-    for table in ({log: ("", 128)}, {("show", f"{added}:scripts/check_pipeline.py"): ("", 128)}):
+    ls = ("ls-tree", "--name-only", added, "--", "scripts/check_pipeline.py")
+    for table in ({log: ("", 128)}, {("show", f"{added}:scripts/check_pipeline.py"): ("", 128)}, {ls: ("", 128)}):
         _patched_git(monkeypatch, cp, table)
         assert cp._rule_seen(item, "05", "TESTS_FORMAT_FROM", None) == (None, "05 anchor: git failed (item 084)")
         ns = []
@@ -2811,6 +2812,99 @@ def test_rule_seen_ignores_constant_inside_other_text(tmp_path, monkeypatch, for
     assert _pick(out, "RULE NOT SEEN:") == SEEN_150.format(sha=added[:7]), out
     assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
     assert code == 0, out
+
+
+# Item 088 (RI-002, RI-014): an unknown anchor (uncommitted 05/06, unborn HEAD) keeps the strict rule.
+INC_150 = (f"INCOMPLETE: 150 (log line for I2 does not match its format (item 045): {NEW_I2_WANT}; "
+           f"{NO_SENT_BACK})")
+
+
+@NO_GIT
+def test_rule_anchor_uncommitted_step_is_strict(tmp_path, monkeypatch):
+    """(u) 150's 05 and 06 are in the tree but in no commit: `git log --diff-filter=A` exits 0 with no
+    output, so no anchor is read; 150 stays INCOMPLETE with today's text and is not listed (M-a)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", NEW_RULES)
+    root = _commit(repo, "root")
+    _defective(repo, "150")
+    log = subprocess.run(["git", "log", "--no-renames", "--diff-filter=A", "--format=%H", "-1", "--",
+                          "work/150/05-build-report.md"], cwd=repo, capture_output=True, text=True)
+    assert (log.returncode, log.stdout) == (0, "")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", "2026-11-02")
+    assert _pick(out, "INCOMPLETE:") == INC_150, out
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+    cp = _cp()
+    monkeypatch.chdir(repo)
+    assert cp._rule_seen(Path("work/150"), "05", "TESTS_FORMAT_FROM", None) == (None, "")
+    assert cp._rule_seen(Path("work/150"), "06", "VERDICT_FROM", None) == (None, "")
+
+
+@NO_GIT
+def test_rule_anchor_unborn_head_is_strict(tmp_path, monkeypatch):
+    """(h) no commit at all (unborn HEAD): `rev-parse --verify -q HEAD` exits 1, so _anchor_env gives
+    "unborn HEAD": not checked, no anchor is read and 150 keeps today's strict text (M-b, M-b', M-g).
+    The exit code is not pinned: it is 1 via UNCOMMITTED STEP."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", NEW_RULES)
+    _defective(repo, "150")
+    head = subprocess.run(["git", "rev-parse", "--verify", "-q", "HEAD"], cwd=repo, capture_output=True, text=True)
+    assert head.returncode == 1
+    flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=repo, capture_output=True,
+                          text=True)
+    assert flag.stdout.strip() == "false"
+    _, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    assert _pick(out, "INCOMPLETE:") == INC_150, out
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: not checked (unborn HEAD)", out
+    cp = _cp()
+    monkeypatch.chdir(repo)
+    assert cp._anchor_env() == ("unborn HEAD", False)
+    assert cp._rule_seen(Path("work/150"), "05", "TESTS_FORMAT_FROM", "unborn HEAD") == (None, "")
+    assert cp._rule_seen(Path("work/150"), "06", "VERDICT_FROM", "unborn HEAD") == (None, "")
+
+
+@NO_GIT
+def test_anchor_env_reads_head_once(tmp_path, monkeypatch):
+    """Item 088: _anchor_env's HEAD verify. Exit 0 on a committed repo -> (None, False); another exit
+    (128) -> not checked and failed (M-e); `_git` None for the verify alone -> "no git" (M-h)."""
+    cp = _cp()
+    repo, _ = _history(tmp_path)
+    monkeypatch.chdir(repo)
+    assert cp._anchor_env() == (None, False)
+    verify = ("rev-parse", "--verify", "-q", "HEAD")
+    _patched_git(monkeypatch, cp, {verify: ("", 128)})
+    assert cp._anchor_env() == ("git rev-parse --verify HEAD failed (exit 128)", True)
+    _patched_git(monkeypatch, cp, {verify: None})
+    assert cp._anchor_env() == ("no git", False)
+
+
+@NO_GIT
+def test_anchor_env_failure_exits_1(tmp_path, monkeypatch, capsys):
+    """Item 088 (RI-014): a failed HEAD verify prints not checked with the exit code and main exits 1;
+    the same clean repo (150 complete, the (i) rule file) unpatched exits 0 (M-f). `_anchor_env` is patched, not `_git`, because
+    _inbox_gate runs the same `rev-parse --verify -q HEAD` command."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", EMBEDDED_RULES["comment"])
+    root = _commit(repo, "root")
+    _item(repo, "150", ALL)                                 # complete: no gate fires, so INCOMPLETE stays none
+    _commit(repo, "150 on main")
+    cp = _cp()
+    monkeypatch.chdir(repo)
+    args = ["--untracked-from", root, "--today", "2026-11-02"]
+    assert cp.main(args) == 0, capsys.readouterr().out
+    capsys.readouterr()
+    monkeypatch.setattr(cp, "_anchor_env", lambda: ("git rev-parse --verify HEAD failed (exit 128)", True))
+    code = cp.main(args)
+    out = capsys.readouterr().out
+    assert _pick(out, "RULE NOT SEEN:") == ("RULE NOT SEEN: not checked (git rev-parse --verify HEAD failed "
+                                            "(exit 128))"), out
+    assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+    assert code == 1, out
 
 
 def test_write_log_stays_numeric(tmp_path):
@@ -3441,6 +3535,21 @@ def test_suite_gate_follows_rule_file_of_05_commit(tmp_path, rules, seen):
         assert "151 (" not in _pick(out, "INCOMPLETE:"), out
         assert _pick(out, "RULE NOT SEEN:") == (f"RULE NOT SEEN: 151 (05 added in {root[:7]} without SUITE_FROM "
                                                 "(082): judged by no Suite check; item 084)"), out
+
+
+@NO_GIT
+def test_suite_gate_uncommitted_05_is_strict(tmp_path):
+    """(u-s, item 088) S13b's rule file is committed but 151's 05 is not: no anchor, so the Suite check
+    stays on (strict): INCOMPLETE, not listed (M-a)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", "TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\nSUITE_FROM = 87\n")
+    root = _commit(repo, "root")
+    _suite_item(repo, "x\n")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", SUITE_DAY)
+    assert _pick(out, "INCOMPLETE:") == f"INCOMPLETE: 151 ({NO_SUITE})", out
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
 
 
 def test_suite_label_in_template_and_i2_text():
