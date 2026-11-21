@@ -2363,10 +2363,13 @@ GIT_CENSUS = {
     ("late_log_lines", "_git"): (1, "no-git probe"),
     ("late_log_lines", "_git_ok"): (2, "ls-tree and blame failures are entries (081)"),
     ("_git_ok", "_git"): (1, "the helper"),
-    ("open_branches", "_git"): (4, "is-ancestor 128 lists the ref (more); merge-tree 0/1 are answers, else "
+    ("open_branches", "_git"): (5, "is-ancestor 128 lists the ref (more); merge-tree 0/1 are answers, else "
                                    "'merge not checked'; cat-file non-zero = absent at base (a die gives a "
-                                   "clash, loud); log -1 is age only (cosmetic)"),
-    ("open_branches", "_git_ok"): (5, "branch -r, ls-tree, merge-base --all, show request/body -> BRANCH ERROR"),
+                                   "clash, loud); log -1 is age only (cosmetic); merge-base --all exit 1 = no "
+                                   "common ancestor (git source: show_merge_base returns 1 only for an empty "
+                                   "result) -> not-scanned line, other non-zero -> BRANCH ERROR (081 r2)"),
+    ("open_branches", "_git_ok"): (5, "branch -r, ls-tree, show request/body -> BRANCH ERROR; ls-tree of an "
+                                      "unrelated ref's checked paths (081 r2)"),
     ("changed", "_git_ok"): (2, "fallback failure -> BRANCH ERROR"),
     ("_open_at", "_git"): (1, "an absent 07 must read open; the same walk's diff-tree just succeeded (F8)"),
     ("_shallow_boundaries", "_git"): (2, "079: failure -> 'full' -> _walk loud (exit 1)"),
@@ -2418,7 +2421,7 @@ def test_git_call_census():
     walk(tree, None)
     assert dict(seen) == {k: v[0] for k, v in GIT_CENSUS.items()}
     assert all(reason.strip() for _, reason in GIT_CENSUS.values())
-    assert sum(seen.values()) == 46                    # 41 (081) + 5 (084)
+    assert sum(seen.values()) == 47                    # 41 (081) + 5 (084) + 1 (081 r2)
 
 
 def test_all_git_fails_no_line_says_none(tmp_path, monkeypatch, capsys):
@@ -3136,3 +3139,97 @@ def test_log_format_refusal_runs_first(tmp_path):
     code, err = _log(tmp_path, "R1", "999", "see 01")
     assert code == 2 and err.startswith('--log refused: R1 | 999 | see 01 does not match "brief written | '), err
     assert "item 086" not in err and not (tmp_path / "logs").exists()
+
+
+# Item 081 round 2 (RI-014): blame failure of a committed log; branches with no common history.
+def _orphan(repo, name, files):
+    """Push an orphan branch `name` holding `files` {path: text} (README.md when empty); back on main."""
+    _git(repo, "checkout", "-q", "--orphan", name)
+    _git(repo, "rm", "-rfq", ".")
+    for path, text in (files or {"README.md": "x\n"}).items():
+        _write(repo, path, text)
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "orphan")
+    _git(repo, "push", "-q", "origin", name)
+    _git(repo, "checkout", "-q", "-f", "main")
+
+
+@NO_GIT
+def test_blame_failure_of_committed_log_is_an_entry(tmp_path, monkeypatch, capsys):
+    """R2-a: ls-tree succeeds and 1 of the 2 committed log files fails blame -> exactly 1 entry,
+    LOG TIME names it, exit 1 (never `LOG TIME: none`)."""
+    cp = _cp()
+    repo, c = _history(tmp_path)
+    monkeypatch.chdir(repo)
+    assert cp.late_log_lines() == []                         # control: ls-tree and both blames work
+    _patched_git(monkeypatch, cp, {("blame", "--line-porcelain", "--", "logs/implementation/2026-10-31.md"):
+                                   ("", 128)})
+    assert cp.late_log_lines() == ["logs/implementation/2026-10-31.md (git blame failed; item 081)"]
+    code = cp.main(["--untracked-from", c, "--today", "2026-11-20"])
+    out = capsys.readouterr().out
+    assert "LOG TIME: logs/implementation/2026-10-31.md (git blame failed; item 081)" in out, out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_unrelated_branch_without_checked_paths_is_not_an_error(tmp_path, monkeypatch):
+    """R2-b: I3's `nowork` repro. merge-base --all exit 1 is a real answer; 0 of 1 files on checked
+    paths -> not-scanned line, no BRANCH ERROR, exit 0. Absent case: its ls-tree fails -> error."""
+    import datetime as dt
+    cp = _cp()
+    repo = _repo_with_open_branch(tmp_path)
+    _orphan(repo, "nowork", {})
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-02")
+    assert code == 0, out
+    assert any(l.startswith("  origin/nowork: no common history with HEAD; not scanned (item 081)")
+               for l in out.splitlines()), out
+    assert "BRANCH ERROR" not in out, out
+    assert "  origin/fix: items 040; merges cleanly" in out, out
+    assert "IN PR: 040" in out, out
+    monkeypatch.chdir(repo)
+    real = cp._git
+    monkeypatch.setattr(cp, "_git", lambda *a: ("", 128) if a[:2] == ("ls-tree", "-r") and "origin/nowork" in a
+                        else real(*a))
+    nw = [b for b in cp.open_branches(dt.date(2026, 11, 2)) if b["ref"] == "origin/nowork"][0]
+    assert nw["unrelated"] is True and nw["errors"] == ["git ls-tree failed (exit 128)"]
+
+
+@NO_GIT
+def test_unrelated_branch_with_work_is_branch_error(tmp_path):
+    """R2-c: an orphan carrying work/150 (1 of 1 files on checked paths) cannot be scanned without a
+    merge base: BRANCH ERROR, exit 1; --next-id still counts its ID (RI-009)."""
+    repo = _repo_with_open_branch(tmp_path)
+    _orphan(repo, "oldwork", {"work/150/request.md": "# Work item 150\nScope: FULL\nDate: 2026-10-31\n"})
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-02")
+    assert code == 1, out
+    assert ("BRANCH ERROR: origin/oldwork (no common history with HEAD; 1 file(s) on checked paths "
+            "(first: work/150/request.md) not checked (item 081))") in out, out
+    assert any(l.startswith("  origin/oldwork: no common history with HEAD; not scanned (item 081)")
+               for l in out.splitlines()), out
+    assert _run(repo, "check_pipeline.py", "--next-id") == (0, "151\n")
+
+
+@NO_GIT
+def test_merge_base_die_is_branch_error(tmp_path, monkeypatch, capsys):
+    """R2-d: only merge-base exit 1 is the no-common-history answer; 128 is a BRANCH ERROR and the
+    branch is still scanned (only the clash base is unknown)."""
+    import datetime as dt
+    cp = _cp()
+    repo = _repo_with_open_branch(tmp_path)
+    monkeypatch.chdir(repo)
+    _patched_git(monkeypatch, cp, {("merge-base", "--all", "HEAD", "origin/fix"): ("", 128)})
+    fix = [b for b in cp.open_branches(dt.date(2026, 11, 2)) if b["ref"] == "origin/fix"][0]
+    assert fix["unrelated"] is False
+    assert fix["errors"] == ["git merge-base failed (exit 128)"]
+    assert "040" in fix["items"]
+    code = cp.main(["--untracked-from", _root(repo), "--today", "2026-11-02"])
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "BRANCH ERROR: origin/fix (git merge-base failed (exit 128))" in out, out
+
+
+def test_main_ahead_non_digit_count(monkeypatch):
+    """R2-e: rev-list exits 0 with no count -> the error string, never None or 0."""
+    cp = _cp()
+    monkeypatch.setattr(cp, "_git", lambda *a: ("refs/remotes/origin/main " + "a" * 40 + "\n", 0)
+                        if a[0] == "for-each-ref" else ("", 0))
+    assert cp.main_ahead() == "git rev-list gave no count (item 081)"

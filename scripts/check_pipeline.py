@@ -75,6 +75,16 @@ and its last commit date and age (039). Three more lines come from the branches:
                   a failing `git branch -r` prints `OPEN BRANCHES: git branch failed (exit <n>) (item
                   081)`, and IN PR, RULES BRANCH and ID CLASH say `not checked (see OPEN BRANCHES)`
                   (exit 1). A git repo with no open branch prints `OPEN BRANCHES: none`.
+                  A branch with no common history with HEAD (`git merge-base --all` exit 1, a real
+                  answer; item 081 round 2) is not scanned. OPEN BRANCHES shows `<ref>: no common
+                  history with HEAD; not scanned (item 081)`, and the exit is unchanged when its tree
+                  holds no file under work/, logs/recurring-issues.md, the rule paths or the code
+                  paths (a docs or pages branch). If it holds any, it is the BRANCH ERROR `no common
+                  history with HEAD; <n> file(s) on checked paths (first: <path>) not checked (item
+                  081)`. Any other merge-base exit is `git merge-base failed (exit <n>)`. --next-id
+                  still counts its work/ IDs. Known gap: check_handoff's `_branch_with_handoff` does
+                  not read per-ref errors, so an item whose 03 exists only on an unreadable or
+                  unrelated branch shows `no hand-off` there; this BRANCH ERROR is the loud signal.
 --log <agent> <ID> "<fields>" (item 045) appends `HH:MM | <agent> | <ID> | <fields>` with the
 current UTC time to logs/research or logs/implementation/<UTC date>.md, and refuses (exit 2)
 fields that don't match the agent's format (LOG_FORMAT). Every step logs this way, right after
@@ -978,8 +988,10 @@ def open_branches(today=None):
     """One dict per remote branch not merged into HEAD (items 034, 037, 038, 039): ref, items
     {item: set of step codes}, conflicts, recurring, clashes, skipped [(item, detail)],
     failed [(item, status, detail)] (item 077: I3 FAIL or A1 FAIL, never an item in skipped), last,
-    errors [why] (item 081: a git read of this branch that failed; BRANCH ERROR). None without git;
-    the reason string when `git branch` itself fails (item 081), never []."""
+    errors [why] (item 081: a git read of this branch that failed; BRANCH ERROR), unrelated (item
+    081 r2: True when merge-base --all exits 1; such a ref is not scanned, and its errors say whether
+    it holds checked paths). None without git; the reason string when `git branch` itself fails
+    (item 081), never []."""
     out, why = _git_ok("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
     if why == "no git":
         return None
@@ -993,6 +1005,20 @@ def open_branches(today=None):
             continue
         # HEAD is behind main: main and refs already in main are not open work (item 051)
         if behind and (ref == MAIN or _git("merge-base", "--is-ancestor", ref, MAIN)[1] == 0):
+            continue
+        when = _git("log", "-1", "--format=%cs", ref)
+        last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
+        mb = _git("merge-base", "--all", "HEAD", ref)      # item 081 r2: exit 1 = no common ancestor (real answer)
+        if mb is not None and mb[1] == 1:
+            held, why = _git_ok("ls-tree", "-r", "--name-only", ref, "--", "work/", RECURRING,
+                                *RULE_PATHS, *RESEARCH_CODE_PATHS)
+            held = held.splitlines() if why is None else []
+            errors = ([why] if why else
+                      [f"no common history with HEAD; {len(held)} file(s) on checked paths "
+                       f"(first: {held[0]}) not checked (item 081)"] if held else [])
+            found.append({"ref": ref, "items": {}, "conflicts": None, "recurring": False, "clashes": [],
+                          "skipped": [], "failed": [], "last": last, "rules": [], "errors": errors,
+                          "unrelated": True})
             continue
         merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
         conflicts = None
@@ -1030,10 +1056,9 @@ def open_branches(today=None):
                     items[parts[1]].add(parts[2][:2])
         recurring = bool(changed(RECURRING))
         rules = changed(*RULE_PATHS)
-        bases, why = _git_ok("merge-base", "--all", "HEAD", ref)
-        if why is not None:
-            errors.append(why)
-        bases = bases.split() if why is None else []
+        if mb is None or mb[1] != 0:
+            errors.append("git merge-base failed (no git)" if mb is None else f"git merge-base failed (exit {mb[1]})")
+        bases = mb[0].split() if mb is not None and mb[1] == 0 else []
         clashes, skipped, failed, requests = [], [], [], {}
         for item in sorted(touched):
             req = f"work/{item}/request.md"
@@ -1080,12 +1105,10 @@ def open_branches(today=None):
             else:
                 skipped.append((item, detail))
         failed = [f for f in failed if f[0] not in {i for i, _ in skipped}]   # item 077: SKIPPED wins
-        when = _git("log", "-1", "--format=%cs", ref)
-        last = dt.date.fromisoformat(when[0].strip()) if when and when[1] == 0 and when[0].strip() else None
         found.append({"ref": ref, "items": items, "conflicts": conflicts,
                       "recurring": recurring, "clashes": clashes,
                       "skipped": skipped, "failed": failed, "last": last, "rules": rules,
-                      "errors": errors})
+                      "errors": errors, "unrelated": False})
     return found
 
 
@@ -1512,11 +1535,14 @@ def main(argv):
     elif branches:
         print("OPEN BRANCHES (not merged into HEAD):")
         for b in branches:
+            age = f"; last commit {b['last']} ({(today - b['last']).days} days)" if b["last"] else ""
+            if b.get("unrelated"):                          # item 081 r2: not scanned
+                print(f"  {b['ref']}: no common history with HEAD; not scanned (item 081){age}")
+                continue
             conflicts = b["conflicts"]
             merge = ("merge not checked" if conflicts is None else
                      f"CONFLICTS: {', '.join(conflicts)}" if conflicts else "merges cleanly")
             note = f"; edits {RECURRING} (item 036)" if b["recurring"] else ""
-            age = f"; last commit {b['last']} ({(today - b['last']).days} days)" if b["last"] else ""
             print(f"  {b['ref']}: items {', '.join(sorted(b['items'])) or 'none'}; {merge}{note}{age}")
     if _git("rev-parse", "HEAD") is not None:
         ruling = [f"{b['ref']} changes {', '.join(b['rules'])}" for b in blist if b["rules"]]

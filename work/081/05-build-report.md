@@ -241,3 +241,134 @@ not required (scripts/check_pipeline.py, scripts/check_handoff.py, tests/test_pi
 3. `main_ahead` with exit 0 but a non-digit count: the plan's `f"{why} (item 081)"` would print `None (item 081)` (why is None there). I print `git rev-list gave no count (item 081)` instead. The result is the same (str → MAIN AHEAD line, exit 1). The text differs only so it is readable. No test pins this branch (git always prints a digit on exit 0).
 4. Test (e) asserts `res[0]["errors"] == ["git diff failed (exit 1)"]` (equality, which also pins change 4's de-dup) instead of the plan's `in`. That is stricter, with the same intent.
 5. Test (b) takes `_root(repo)` before writing `.git/shallow`, because `git rev-list --max-parents=0` dies (128) after it is written.
+
+---
+
+## Round 2 (2026-11-21, I2)
+Base: daily-fixes/2026-11-20 at 55893e5 (code identical to 0583289: 55893e5 only adds work/086/04 and a log line). It includes 084 r1-r2 and 086 r1; their code was not touched. Not committed (orchestrator commits). No brokerage connection; every fixture is a temp git repo. Built from 04 "## Round 2" exactly; no deviations.
+
+File counts (commands, item 012):
+- `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'` → `0`
+- `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'` → `2`
+```
+ scripts/check_pipeline.py    |  46 ++++++++++++++-----
+ tests/test_pipeline_check.py | 105 +++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 137 insertions(+), 14 deletions(-)
+```
+The round-1 total stays 4 files (both files were already in round 1).
+
+### Changes made (round 2)
+- `scripts/check_pipeline.py`
+  - `open_branches`: `when`/`last` moved up unchanged to just after the `behind` skip. A raw `mb = _git("merge-base", "--all", "HEAD", ref)` follows. When exit is 1 (no common ancestor), the branch's checked paths are listed with `_git_ok("ls-tree", "-r", "--name-only", ref, "--", "work/", RECURRING, *RULE_PATHS, *RESEARCH_CODE_PATHS)`, an `unrelated: True` dict is appended, and the loop continues. Its errors are the ls-tree reason, or the `no common history with HEAD; <n> file(s) on checked paths (first: <path>) not checked (item 081)` text, or nothing.
+  - The old `_git_ok("merge-base", ...)` block was replaced by an `mb`-based one. The texts are the same: `git merge-base failed (exit <n>)` at the same point in the flow. `bases` is set only on exit 0.
+  - The normal dict gains `"unrelated": False`. The docstring gains the `unrelated` field.
+  - `main` OPEN BRANCHES loop: `age` moved to the top. `b.get("unrelated")` prints `  <ref>: no common history with HEAD; not scanned (item 081)<age>` and continues. BRANCH ERROR and the exit term are unchanged.
+  - Module docstring, BRANCH ERROR entry: added the plan's no-common-history paragraph plus the known-gap sentence (check_handoff `_branch_with_handoff` does not read per-ref errors).
+  - `late_log_lines` and `main_ahead`: no code change.
+- `tests/test_pipeline_check.py`
+  - `GIT_CENSUS`: `("open_branches", "_git")` 4 → 5 with the merge-base reason. `("open_branches", "_git_ok")` stays 5 with its new reason. Census total `== 46` → `== 47`. Recount on the built file: `test_git_call_census` passes at 47, so 086 r1 added no git calls (46 before + 1).
+  - New helper `_orphan(repo, name, files)`. (d2) is left unchanged.
+  - New tests: R2-a `test_blame_failure_of_committed_log_is_an_entry`, R2-b `test_unrelated_branch_without_checked_paths_is_not_an_error`, R2-c `test_unrelated_branch_with_work_is_branch_error`, R2-d `test_merge_base_die_is_branch_error`, R2-e `test_main_ahead_non_digit_count`. Each follows the plan's assertions.
+
+### Connectivity check (round 2)
+- [x] every new function/rule is used: `_orphan` is used by R2-b and R2-c. The `unrelated` key is read by `main` (`b.get`) and asserted in R2-b and R2-d.
+- [x] every input has a source, every output has a consumer: merge-base exit 1 → ls-tree → the not-scanned line and/or BRANCH ERROR (exit 1). ls-tree failure → BRANCH ERROR.
+- [x] every branch ends in a defined result: merge-base exit 0 → scanned. Exit 1 + 0 files → not-scanned line, exit unchanged. Exit 1 + ≥ 1 file → BRANCH ERROR. Exit 1 + ls-tree fails → BRANCH ERROR `git ls-tree failed (exit <n>)`. Other exit → BRANCH ERROR `git merge-base failed (exit <n>)`, branch still scanned. `mb is None` → `git merge-base failed (no git)`.
+- [x] no leftover TODOs or unused files.
+- Missing-data grep `grep -rnE "fillna|nan_to_num|or 0|else 0|pd\.notna\(.*\) and|is not None and|max\(1,|min\(1,|\.get\([^)]*, 0\)" ccbot/` → 38 hits, all pre-existing. ccbot/ is untouched, so there are no new hits. The same pattern on this round's check_pipeline.py diff:
+  - `if mb is not None and mb[1] == 1`: None (no git) is not this branch. It falls to the error path below.
+  - `bases = mb[0].split() if mb is not None and mb[1] == 0 else []`: `[]` only with an error already appended. This is round 1's behaviour.
+  - `b.get("unrelated")`: hand-built test dicts lack the key, and absent means a normal scanned branch, not a pass of any check.
+  - No numeric dataclass defaults and no new `>`/`<` tests.
+
+### Recurring issues checked (round 2, item 013)
+- RI-001: each new filter has a computed fixture count (below).
+- RI-002: an unrelated branch is quiet only after a successful ls-tree shows 0 checked files. A failed ls-tree is an error (R2-b absent case, m14).
+- RI-008: py_compile with python3.11 is OK.
+- RI-009: `--next-id` still counts an orphan's work/ ID (R2-c: 151).
+- RI-010: the log line is written by `--log`.
+- RI-011: the anchors are byte-identical (1/1/1) and criss-cross passes.
+- RI-012: unrelated is decided by exit code 1 only (R2-d, m13).
+- RI-014: below.
+
+RI-014: guardrail extended (081); GUARDED when 079 and 081 are merged and m2 fails fixture (b) on main.
+
+### Feasibility numbers (measured)
+- Blame: 1 of 2 committed log files failed → exactly 1 entry (R2-a passes with the exact list).
+- `nowork`: 1 file (README.md), 0 on checked paths → not-scanned line, exit 0.
+- `oldwork`: 1 file, 1 on checked paths → BRANCH ERROR, exit 1.
+- merge-base 128 → `git merge-base failed (exit 128)`, `unrelated` False, 040 still in items.
+- Census: 47.
+
+I3's repro, real git (scratch pytest wrapper around `_repo_with_open_branch` + `_orphan`, `--today 2026-11-02`, so the age is negative because the commits are dated today):
+```
+NOWORK exit 0
+040: IN PR (origin/fix has 01 02 03 04 05 06 07; was STUCK here)
+OPEN BRANCHES (not merged into HEAD):
+  origin/fix: items 040; merges cleanly; edits logs/recurring-issues.md (item 036); last commit 2026-11-21 (-19 days)
+  origin/nowork: no common history with HEAD; not scanned (item 081); last commit 2026-11-21 (-19 days)
+OLDWORK exit 1
+040: IN PR (origin/fix has 01 02 03 04 05 06 07; was STUCK here)
+OPEN BRANCHES (not merged into HEAD):
+  origin/fix: items 040; merges cleanly; edits logs/recurring-issues.md (item 036); last commit 2026-11-21 (-19 days)
+  origin/nowork: no common history with HEAD; not scanned (item 081); last commit 2026-11-21 (-19 days)
+  origin/oldwork: no common history with HEAD; not scanned (item 081); last commit 2026-11-21 (-19 days)
+BRANCH ERROR: origin/oldwork (no common history with HEAD; 1 file(s) on checked paths (first: work/150/request.md) not checked (item 081))
+next-id (0, '151\n')
+```
+
+### Test output (round 2, pasted)
+Base, in a scratch copy with both files reset to HEAD (`git checkout -- ...` in the copy only), `python3 -m pytest -q`:
+```
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_old_06_without_round_headers_unchanged
+FAILED tests/test_pipeline_check.py::test_i3_fail_target_not_stated - Asserti...
+FAILED tests/test_pipeline_check.py::test_pass_without_sent_back_none_is_incomplete
+4 failed, 637 passed, 1 skipped in 84.71s (0:01:24)
+```
+Build (repo working tree), `python3 -m pytest -q`:
+```
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_old_06_without_round_headers_unchanged
+FAILED tests/test_pipeline_check.py::test_i3_fail_target_not_stated - Asserti...
+FAILED tests/test_pipeline_check.py::test_pass_without_sent_back_none_is_incomplete
+4 failed, 642 passed, 1 skipped in 86.11s (0:01:26)
+```
+The same 4 failures appear at base and build, and none is 081's. Three come from 086's not-computable text (086 is back at I1). `test_repo_pipeline_has_no_skipped_items` fails while 081/084/086 are open. New tests: 642 − 637 = 5 (R2-a to R2-e).
+
+Checks:
+- `python3.11 -m py_compile scripts/check_pipeline.py tests/test_pipeline_check.py` → OK.
+- `grep -cxF` of the 3 anchor lines → 1, 1, 1.
+- Real repo `python3 scripts/check_pipeline.py`, before the edit vs after → `diff before.txt after.txt` gives no output (both exit 1, from the open items). Every origin/* branch shares history with HEAD.
+
+Mutations (scratch copy `/tmp/claude-0/-home-claude/8f94cbd2-523d-52d1-8971-85df3e672dc0/scratchpad/mut-081-r2-<epoch>/repo`, never the repo; the file was restored and `cmp` matched after each set):
+```
+m1 | test_blame_failure_of_committed_log_is_an_entry | 1 failed   (assert [] == ['logs/implementation/2026-10-31.md (git blame failed; item 081)'])
+m11 | test_unrelated_branch_without_checked_paths_is_not_an_error | 1 failed   (assert code == 0: BRANCH ERROR, exit 1)
+m12 | test_unrelated_branch_with_work_is_branch_error | 1 failed
+m13 | test_merge_base_die_is_branch_error | 1 failed   (assert fix["unrelated"] is False: True)
+m14 | test_unrelated_branch_without_checked_paths_is_not_an_error | 1 failed   (absent case: [] == ['git ls-tree failed (exit 128)'])
+m15 | test_main_ahead_non_digit_count | 1 failed
+m9 (extra _git("status") in open_branches) | test_git_call_census | 1 failed
+```
+Round-1 mutations re-run on the round-2 build (my reading of each round-1 site):
+```
+m1b -> test_all_git_fails_no_line_says_none: 1 failed
+m2 -> test_all_git_fails_no_line_says_none: 1 failed
+m2 -> test_malformed_shallow_real_git_nothing_none: 1 failed
+m2 -> test_open_branches_none_line: 1 passed   (control, as planned)
+m3 -> test_all_git_fails_no_line_says_none: 1 failed
+m3 -> test_malformed_shallow_real_git_nothing_none: 1 failed
+m7 -> test_branch_diff_failure_is_branch_error: 1 failed
+m10 -> test_branch_show_failure_skips_classify: 1 failed
+m8 -> test_all_git_fails_no_line_says_none: 1 failed
+m8 -> test_inbox_flag_die_is_loud: 1 failed
+```
+m4/m4b/m5/m6 were not re-run: their sites (main_ahead return value, exact-refname filter, the decode settings) are not touched in round 2, and their tests (a), (d3), (c), (c2) pass.
+
+### Real-data effect (round 2)
+not required (scripts/check_pipeline.py, tests/test_pipeline_check.py)
+
+### Deviations from plan (round 2)
+None. Round 1 Deviation 1 is closed by R2-a/m1. Deviation 2 is closed by the no-common-history handling (R2-b to R2-d). Deviation 3 is pinned by R2-e/m15.
