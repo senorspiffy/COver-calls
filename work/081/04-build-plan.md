@@ -1,6 +1,8 @@
 # 04 Build plan - 081
 Fit verdict: FIT WITH CHANGES
 
+Round 2 (2026-11-21, after I3 FAIL round 1): see "## Round 2" at the end. The verdict is unchanged. Round 1 text below is kept as written.
+
 I1 had no shell in this run, so I ran no git command, no pytest and no `check_pipeline.py`. The code facts below come from reading `scripts/check_pipeline.py`, `scripts/check_handoff.py`, `scripts/probe_guardrails.py` and `tests/test_pipeline_check.py` on daily-fixes/2026-11-20. 081 builds first today, so the line numbers in 03 still match this tree. I re-read L480-1151 and L1-203. Functions are named below as well, so 084 and 086 can follow the plan after line drift. The I1 log line has to be written by the orchestrator: `python3 scripts/check_pipeline.py --log I1 081 "FIT WITH CHANGES | 4 files planned"`.
 
 Recurring issues checked (item 013), open or ESCALATED entries:
@@ -234,3 +236,161 @@ New and changed tests in `tests/test_pipeline_check.py` (`@NO_GIT` unless noted)
 - A `\xff` shallow line gives no traceback.
 - The full suite passes, with the count as printed by pytest. m1-m10 each fail a named test. `probe_guardrails.py --ref HEAD` shows 0 ANCHOR MISSING.
 - 05/06 status line (step 13): "RI-014: guardrail extended (081); GUARDED when 079 and 081 are merged and m2 fails fixture (b) on main."
+
+---
+
+## Round 2 (2026-11-21, I1, after 06 FAIL round 1)
+Fit verdict (round 2): FIT WITH CHANGES (unchanged). 2 files planned: `scripts/check_pipeline.py`, `tests/test_pipeline_check.py`. No change to `scripts/check_handoff.py` or `.claude/agents/a1-auditor.md` in this round, so no new RULES text and nothing new for the person to approve beyond round 1.
+
+I1 still has no shell in this run: no git, pytest or `check_pipeline.py` was run. Code facts come from reading the current working tree of daily-fixes/2026-11-20. That tree already has 084 (`_anchor_env`, `_rule_seen`; `GIT_CENSUS` total 46) and has 086 in progress (`batch_log_items`, `_item_lines`, `_run_seconds`; no git calls as I read them). So every change below is named by function and by the line text it touches, never by line number. The I1 log line has to be written by the orchestrator, right after this file: `python3 scripts/check_pipeline.py --log I1 081 "FIT WITH CHANGES | 2 files planned"`. 086's rule D (refuse while later step files exist) is off for 081, because 081 has an I3 FAIL line (SEND_BACK).
+
+Recurring issues checked (item 013), round 2: RI-001, RI-002, RI-008, RI-009, RI-010, RI-011, RI-012, RI-014.
+- **RI-001** (ESCALATED). Each new filter has a computed fixture count, pinned by a named test. Blame: 1 of 2 committed log files fails → 1 entry (R2-a). Unrelated branch: 0 of 1 files on checked paths → quiet (R2-b). 1 of 1 → loud (R2-c). merge-base exit 128 is not exit 1 → error (R2-d). Nothing says "always".
+- **RI-002** (GUARDED). An unrelated branch is quiet only when a successful `ls-tree` shows it holds nothing the scan reads. A failed `ls-tree` is an error (R2-b, absent case). An unrelated branch that carries work/ or rule/code files is a BRANCH ERROR, never `items none`.
+- **RI-008**. No new syntax. The walrus was already in round 1.
+- **RI-009** (GUARDED). `next_id` is unchanged, so an unrelated branch's work/ IDs are still counted. R2-c pins `--next-id` = 151.
+- **RI-010** (ESCALATED). The orchestrator writes the log line through `--log`. Nothing is typed by hand.
+- **RI-011** (GUARDED). The three anchor lines stay byte-identical. `merge-tree` is skipped only for a ref with no merge base. The criss-cross fixture has two bases, so it is not affected.
+- **RI-012** (GUARDED). The unrelated case is decided by git's exit code (1), never by stderr or stdout text.
+- **RI-014** (OPEN, this item). Both send-back defects close a silent or false path at a git site. The status line is below.
+
+### Decision on I3 defect 2: no common ancestor is a real answer
+Decision: `git merge-base --all HEAD <ref>` exit 1 means "no common ancestor". It is a real answer, not a failure, so it moves to raw `_git` with a census reason, as round 1's own Interface rule asks. What the branch carries is then reported by a successful read, never assumed:
+- The branch's tree holds **no** file under the paths the per-ref scan reads (`work/`, `logs/recurring-issues.md`, RULE_PATHS, RESEARCH_CODE_PATHS), e.g. a docs or pages branch. It gets its own block line, `  <ref>: no common history with HEAD; not scanned (item 081)<age>`, and the exit is unchanged. Before 081 this branch printed `items none` with exit 0, but that came from a swallowed diff failure. It now comes from a read that worked.
+- The branch's tree holds **any** such file. That is a BRANCH ERROR (exit 1), because its items, rules and code cannot be scanned without a merge base: `BRANCH ERROR: <ref> (no common history with HEAD; <n> file(s) on checked paths (first: <path>) not checked (item 081))`.
+- `ls-tree` on that branch fails. That is a BRANCH ERROR `git ls-tree failed (exit <n>)`.
+- Any merge-base exit other than 0 and 1 stays `BRANCH ERROR: <ref> (git merge-base failed (exit <n>))`, as built in round 1.
+
+Why not "loud on purpose": any docs or pages branch that is pushed would turn the repo check (and `test_repo_pipeline_has_no_skipped_items`) red for good, with no fix except deleting the branch. That alarm would always fire, so people would learn to ignore it, and BRANCH ERROR would lose its value. Why not plain `bases = []` plus the old flow: the `HEAD...ref` fallback diff then fails 128 (no merge base), so the false error stays. Without that error, the branch's work/ would be `items none` unread. That is RI-002 again.
+
+### Extra research (round 2, with sources)
+1. **merge-base exit 1 is "no merge base", by git's source.** In `builtin/merge-base.c`, `show_merge_base` returns -1 when the merge-base lookup fails, returns 1 when the result list is empty (`if (!result)` → `return 1;`), and returns 0 after printing the bases. Bad commit names `die` (exit 128) [https://raw.githubusercontent.com/git/git/master/builtin/merge-base.c]. So exit 1 is the empty answer, and other non-zero codes are errors. The man page states exit codes only for `--is-ancestor`: "exit with status 0 if true, or with status 1 if not. Errors are signaled by a non-zero status that is not 1" [https://git-scm.com/docs/git-merge-base]. The `--all` meaning comes from the source, not the man page. I3 measured it on git 2.43 (06: exit 1, no output, orphan `nowork`), and R2-b pins it with real git.
+2. **merge-tree refuses unrelated histories.** "merge-tree will by default error out if the two branches specified share no common history", and the exit status for an error is "something other than 0 or 1" [https://git-scm.com/docs/git-merge-tree]. So for an unrelated ref, round 1 already printed `merge not checked`. Skipping merge-tree for that ref loses nothing. `--allow-unrelated-histories` is not used, because such a branch is not a normal PR into HEAD.
+3. **Edge I3 did not name.** The same per-ref path is reached when a branch is unrelated **and** carries work/. One example is a history rewritten and force-pushed as an orphan. The previous behaviour (`items none`, exit 0) would have hidden that work completely. R2-c covers it.
+
+### Files to change (round 2, small additions by function name)
+1. `scripts/check_pipeline.py`
+   - `late_log_lines`: no code change. The blame-failure entry is already built. Round 2 adds only its test (R2-a).
+   - `open_branches`, inside `for ref in out.split():`, right after the `behind` skip (`if behind and (ref == MAIN or ...): continue`):
+     - Move the two existing lines `when = _git("log", "-1", "--format=%cs", ref)` and `last = dt.date.fromisoformat(...) if ... else None` up to here, unchanged, from just before `found.append(...)`. This is a move, not a new call.
+     - Add:
+       ```python
+       mb = _git("merge-base", "--all", "HEAD", ref)      # item 081 r2: exit 1 = no common ancestor (real answer)
+       if mb is not None and mb[1] == 1:
+           held, why = _git_ok("ls-tree", "-r", "--name-only", ref, "--", "work/", RECURRING,
+                               *RULE_PATHS, *RESEARCH_CODE_PATHS)
+           held = held.splitlines() if why is None else []
+           errors = ([why] if why else
+                     [f"no common history with HEAD; {len(held)} file(s) on checked paths "
+                      f"(first: {held[0]}) not checked (item 081)"] if held else [])
+           found.append({"ref": ref, "items": {}, "conflicts": None, "recurring": False, "clashes": [],
+                         "skipped": [], "failed": [], "last": last, "rules": [], "errors": errors,
+                         "unrelated": True})
+           continue
+       ```
+     - Replace the round-1 block
+       `bases, why = _git_ok("merge-base", "--all", "HEAD", ref)` / `if why is not None: errors.append(why)` / `bases = bases.split() if why is None else []`
+       with
+       ```python
+       if mb is None or mb[1] != 0:
+           errors.append("git merge-base failed (no git)" if mb is None else f"git merge-base failed (exit {mb[1]})")
+       bases = mb[0].split() if mb is not None and mb[1] == 0 else []
+       ```
+       The text for a non-zero exit is the same as `_git_ok`'s, so round 1's messages do not change. The error is still appended at the same point in the flow, so the order of `errors` for (e) and (f) is unchanged.
+     - The normal `found.append({...})` dict gains `"unrelated": False`.
+     - The docstring gains: `unrelated (item 081 r2: True when merge-base --all exits 1; such a ref is not scanned, and its errors say whether it holds checked paths)`.
+     - The three anchor lines stay byte-identical (`clashes.append(item)`, `rules = changed(*RULE_PATHS)`, `tree = merge[0].split()[0] if ...`).
+   - `main`, in the `OPEN BRANCHES (not merged into HEAD):` block loop (`for b in branches:`):
+     - Move the existing `age = ...` line to the top of the loop body, unchanged.
+     - Then add `if b.get("unrelated"): print(f"  {b['ref']}: no common history with HEAD; not scanned (item 081){age}"); continue` (written as 3 lines).
+     - `.get` is used so hand-built dicts in tests still work.
+     - The BRANCH ERROR lines and the exit term (`branch_errors`) are unchanged. An unrelated ref with checked paths reaches them through `errors`.
+   - `main_ahead`: no code change. Deviation 3 (05) is folded into the plan: round 1's line "returns the string `f"{why} (item 081)"`" is corrected for the exit-0, non-digit count case to `git rev-list gave no count (item 081)` (as built). R2-e pins it.
+   - Module docstring, BRANCH ERROR entry: add "A branch with no common history with HEAD (`git merge-base --all` exit 1, a real answer; item 081 round 2) is not scanned. OPEN BRANCHES shows `<ref>: no common history with HEAD; not scanned (item 081)`, and the exit is unchanged when its tree holds no file under work/, logs/recurring-issues.md, the rule paths or the code paths (a docs or pages branch). If it holds any, it is the BRANCH ERROR `no common history with HEAD; <n> file(s) on checked paths (first: <path>) not checked (item 081)`. Any other merge-base exit is `git merge-base failed (exit <n>)`. --next-id still counts its work/ IDs."
+   - Known gap (docstring sentence, no code): check_handoff's `_branch_with_handoff` does not read per-ref `errors` (true since round 1). An item whose 03 exists only on an unreadable or unrelated branch shows `no hand-off` there. check_pipeline's BRANCH ERROR for that ref is the loud signal. Out of scope for this round.
+2. `tests/test_pipeline_check.py`
+   - `GIT_CENSUS`:
+     - `("open_branches", "_git")` → 5. Append to its reason: "; merge-base --all exit 1 = no common ancestor (git source: show_merge_base returns 1 only for an empty result) → not-scanned line, other non-zero → BRANCH ERROR (081 r2)".
+     - `("open_branches", "_git_ok")` stays 5, with reason "branch -r, ls-tree, show request/body -> BRANCH ERROR; ls-tree of an unrelated ref's checked paths (081 r2)". The merge-base `_git_ok` call is removed and the unrelated-ref ls-tree is added, net 0.
+   - In `test_git_call_census`, `sum(seen.values()) == 46` → `== 47`, with comment `# 41 (081) + 5 (084) + 1 (081 r2)`. If 086 lands its own git calls first, I2 recounts on the built file and states both numbers in 05.
+   - New helper `_orphan(repo, name, files)`: `checkout -q --orphan <name>`, `rm -rfq .`, write each `{path: text}` (or `README.md` when `files` is empty), commit, `push -q origin <name>`, `checkout -q -f main`. (d2) may keep its own inline lines. I2 must not change (d2)'s assertions.
+   - The new tests R2-a to R2-e below.
+
+### Tests (round 2)
+- **R2-a** `test_blame_failure_of_committed_log_is_an_entry` (@NO_GIT; closes defect 1). It reaches the blame site with ls-tree succeeding.
+  - `cp = _cp(); repo, c = _history(tmp_path); monkeypatch.chdir(repo)`. `_history` commits item 150 with all steps, so `logs/research/2026-10-31.md` and `logs/implementation/2026-10-31.md` are both in HEAD.
+  - Control: `assert cp.late_log_lines() == []`. ls-tree succeeds and both blames succeed.
+  - `_patched_git(monkeypatch, cp, {("blame", "--line-porcelain", "--", "logs/implementation/2026-10-31.md"): ("", 128)})`.
+  - `assert cp.late_log_lines() == ["logs/implementation/2026-10-31.md (git blame failed; item 081)"]`. This is exact, so the research log is still blamed and adds nothing.
+  - `code = cp.main(["--untracked-from", c, "--today", "2026-11-20"])`; out from capsys. Assert `"LOG TIME: logs/implementation/2026-10-31.md (git blame failed; item 081)" in out` and `code == 1`. (d1) shows that `_history` with these args exits 0 otherwise.
+- **R2-b** `test_unrelated_branch_without_checked_paths_is_not_an_error` (@NO_GIT; I3's `nowork` repro).
+  - `repo = _repo_with_open_branch(tmp_path); _orphan(repo, "nowork", {})` (README only).
+  - `code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-02")`.
+  - Assert `code == 0`.
+  - Assert a line starting `  origin/nowork: no common history with HEAD; not scanned (item 081)` is present. (The age is not asserted, because the commit date is the real date.)
+  - Assert `"BRANCH ERROR" not in out`, `"  origin/fix: items 040; merges cleanly" in out` (the other branch is still scanned) and `"IN PR: 040" in out`.
+  - Absent case: in-process, `monkeypatch.chdir(repo)`, `real = cp._git`, `monkeypatch.setattr(cp, "_git", lambda *a: ("", 128) if a[:2] == ("ls-tree", "-r") and "origin/nowork" in a else real(*a))`. Then `nw = [b for b in cp.open_branches(dt.date(2026, 11, 2)) if b["ref"] == "origin/nowork"][0]`. Assert `nw["unrelated"] is True and nw["errors"] == ["git ls-tree failed (exit 128)"]`.
+- **R2-c** `test_unrelated_branch_with_work_is_branch_error` (@NO_GIT).
+  - `repo = _repo_with_open_branch(tmp_path); _orphan(repo, "oldwork", {"work/150/request.md": "# Work item 150\nScope: FULL\nDate: 2026-10-31\n"})`.
+  - The run as in R2-b gives `code == 1`.
+  - Assert `"BRANCH ERROR: origin/oldwork (no common history with HEAD; 1 file(s) on checked paths (first: work/150/request.md) not checked (item 081))" in out`.
+  - Assert the `  origin/oldwork: no common history with HEAD; not scanned (item 081)` line is present.
+  - `_run(repo, "check_pipeline.py", "--next-id") == (0, "151\n")`, because the orphan's ID is still counted (RI-009).
+- **R2-d** `test_merge_base_die_is_branch_error` (@NO_GIT; pins that only exit 1 is the real answer).
+  - `repo = _repo_with_open_branch(tmp_path); monkeypatch.chdir(repo); _patched_git(monkeypatch, cp, {("merge-base", "--all", "HEAD", "origin/fix"): ("", 128)})`.
+  - `fix = [b for b in cp.open_branches(dt.date(2026, 11, 2)) if b["ref"] == "origin/fix"][0]`.
+  - Assert `fix["unrelated"] is False`, `fix["errors"] == ["git merge-base failed (exit 128)"]` and `"040" in fix["items"]`. The branch is still scanned. Only the clash base is unknown.
+  - `cp.main(["--untracked-from", _root(repo), "--today", "2026-11-02"])` returns 1, and the output has `BRANCH ERROR: origin/fix (git merge-base failed (exit 128))`.
+- **R2-e** `test_main_ahead_non_digit_count` (no git needed; folds Deviation 3).
+  - Patch with `monkeypatch.setattr(cp, "_git", lambda *a: ("refs/remotes/origin/main " + "a" * 40 + "\n", 0) if a[0] == "for-each-ref" else ("", 0))`.
+  - Assert `cp.main_ahead() == "git rev-list gave no count (item 081)"`.
+- Kept unchanged and must pass: (a)-(h2), (d2) (`--next-id` 041 / 100 with `nowork`), (e) (`errors == ["git diff failed (exit 1)"]`, since merge-base is real there and exits 0), (f), `test_criss_cross_branch_lists_only_its_own_changes`, `test_unrelated_root_in_full_clone_stays_loud` (it has no remote, so it does not touch this path), and all 084/086 tests.
+
+**Mutations (round 2; each must fail the named test, I2 runs them and I3 re-runs them on a scratch copy):**
+- m1 (re-mapped from (a)/(b)): `continue` without the append at the blame failure in `late_log_lines` fails R2-a (`[]` / `LOG TIME: none`, exit 0).
+- m11: the `mb[1] == 1` branch removed (exit 1 falls to the error path, as built in round 1) fails R2-b (BRANCH ERROR, exit 1).
+- m12: the unrelated `errors` forced to `[]` fails R2-c (exit 0, no BRANCH ERROR).
+- m13: `mb[1] == 1` widened to `mb[1] != 0` fails R2-d (128 is read as unrelated: `unrelated` True and a different error text).
+- m14: the unrelated ls-tree `why` ignored (treated as empty) fails R2-b's absent case.
+- m15: `main_ahead`'s `why or 'git rev-list gave no count'` back to `why` fails R2-e (`None (item 081)`).
+- m9 (unchanged): an extra `_git` call fails the census, now at 47.
+- m1b-m10 from round 1 must still fail their round-1 tests.
+
+**Checks (round 2):** the round 1 checks, plus:
+- `python3 scripts/check_pipeline.py` in the real repo. Every `origin/*` branch shares history with HEAD, so the output equals round 1's apart from in-progress items. I2 diffs before and after, and the diff should be empty except for item status lines.
+- `grep -cxF` of the 3 anchor lines → 1 each.
+- `python3.11 -m py_compile scripts/check_pipeline.py tests/test_pipeline_check.py`.
+
+### Rule trace (round 2 rows; round 1 rows stand except where re-mapped here)
+| Rule (source) | Plan line, or DROPPED: <reason> |
+|---|---|
+| 03 Missing input: blame of committed log fails (re-mapped; was "(b) (real die); m1") | R2-a; m1 |
+| 06 defect 1: a fixture with ls-tree succeeding and only one blame failing, expecting the entry and exit 1 | R2-a (control `[]`, then the exact entry, `LOG TIME:` line, exit 1) |
+| 06 defect 2: no common ancestor, decide real answer vs loud, pin with the `nowork` fixture | Decision above (real answer); Files 1 `open_branches`, `main`, docstring; R2-b, R2-c, R2-d; m11-m14 |
+| Round 1 Interface: raw `_git` only where non-zero is a real answer, with a census reason | `merge-base --all` added to that list; `GIT_CENSUS` open_branches `_git` 5 with its reason |
+| 03 Missing input: per-ref merge-base fails (round 1 row, narrowed) | exit != 0/1 → R2-d; exit 1 → R2-b/R2-c |
+| New input: unrelated ref's checked-path listing (`ls-tree`) | R2-b absent case (`git ls-tree failed (exit 128)`); m14 |
+| New filter: unrelated ref holds ≥ 1 file on checked paths → loud | R2-b (0 of 1 → quiet), R2-c (1 of 1 → loud) |
+| 06 optional 3: 05 Deviation 3 text | Files 1 `main_ahead` note; R2-e; m15 |
+| 001 rule text the person follows (slack, tolerance, cap) | none changed; no request needed |
+| a1-auditor.md (RULES) | DROPPED for round 2: the round 1 L23 sentence already sends every `BRANCH ERROR:` line to the top of the report, so no new rule text is needed |
+
+### Guardrail tests (round 2)
+- Feasibility:
+  - Blame failure: 1 of 2 committed log files fails → exactly 1 entry → R2-a.
+  - Unrelated quiet: `nowork` has 1 file (README.md), 0 of them on checked paths → R2-b.
+  - Unrelated loud: `oldwork` has 1 file, 1 on checked paths → R2-c.
+  - merge-base exit 128 (≠ 1) → error → R2-d.
+  - Census: 47 calls → `test_git_call_census`.
+- Missing inputs:
+  - Blame of a committed log → R2-a.
+  - Unrelated ref's ls-tree → R2-b absent case.
+  - merge-base die → R2-d.
+  - rev-list empty count on exit 0 → R2-e.
+
+### Expected result (round 2)
+- 2 files changed in round 2 (`scripts/check_pipeline.py`, `tests/test_pipeline_check.py`). The round-1 total stays 4 files.
+- The full suite passes apart from the known pre-existing failure (if 084 has not fixed it yet), with 5 new tests (R2-a to R2-e) and the count as printed. m1 and m11-m15 each fail their named test.
+- I3's `nowork` repro prints `  origin/nowork: no common history with HEAD; not scanned (item 081); last commit ...` with no BRANCH ERROR and exit 0. An orphan carrying `work/150` is a BRANCH ERROR, exit 1, and `--next-id` gives 151.
+- The real repo's output is unchanged apart from in-progress item lines.
+- 05/06 status line (step 13, unchanged): "RI-014: guardrail extended (081); GUARDED when 079 and 081 are merged and m2 fails fixture (b) on main."
