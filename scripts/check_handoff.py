@@ -88,25 +88,36 @@ def main(item):
 
 
 def _branch_with_handoff(item):
-    """The first open branch (scripts/check_pipeline.py OPEN BRANCHES) that has this item's
-    03-handoff.md, or None (item 044). Without git, None."""
+    """(ref, None) for the first open branch (scripts/check_pipeline.py OPEN BRANCHES) that has
+    this item's 03-handoff.md, else (None, None) (item 044); without git (None, None). Item 081:
+    (None, why) when the branch list itself failed, so "no hand-off" is never claimed unread."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from check_pipeline import open_branches
-    for b in open_branches():
+    found = open_branches()
+    if found is None:
+        return None, None
+    if isinstance(found, str):
+        return None, found
+    for b in found:
         if "03" in b["items"].get(item, set()):
-            return b["ref"]
-    return None
+            return b["ref"], None
+    return None, None
 
 
 def check_all(work=Path("work")):
     """One line per work item: PASS, LEGACY, FAIL, 'IN PR (<branch>)' (the hand-off is only on an
-    open branch, item 044) or 'no hand-off'. Exit 1 only on FAIL."""
+    open branch, item 044), 'no hand-off', or 'not checked (open branches: <why>)' when git cannot list
+    the branches (item 081). Exit 1 on FAIL or not checked."""
     import contextlib
     import io
     failed = []
     for d in sorted(p for p in work.iterdir() if p.is_dir()):
         if not (d / "03-handoff.md").exists():
-            ref = _branch_with_handoff(d.name)
+            ref, why = _branch_with_handoff(d.name)
+            if why:                                         # item 081: counted as a failure
+                print(f"{d.name}: not checked (open branches: {why})")
+                failed.append(d.name)
+                continue
             print(f"{d.name}: IN PR ({ref})" if ref else f"{d.name}: no hand-off")
             continue
         out = io.StringIO()

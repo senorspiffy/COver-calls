@@ -17,8 +17,8 @@ Do:
 4. Write the implementation map: numbered steps, what each step changes (a strategy rule, a checklist, a script, a spreadsheet), inputs and outputs, and how we'll know it works (a test or check per step).
 5. Fill the Self-check section: re-derive every numeric threshold in the map from that step's own check formula, and check every worked example against the trigger of the rule it illustrates (e.g. a "≤ 50%" exit must fill at ≤ 50% after rounding to a valid price). Any mismatch is fixed before READY.
 6. Write `work/<ID>/03-handoff.md` using `templates/research-handoff.md`. Set status to READY or BLOCKED (with reason).
-7. Run `python3 scripts/check_handoff.py <ID>` and paste its output into the Self-check section. It must say PASS before you set READY. Copy the counts for the log line from the script output, never count by hand.
+7. No shell (item 072): set READY only if your own checks pass, and leave the template's check_handoff output line empty. The orchestrator runs `python3 scripts/check_handoff.py <ID>`, pastes its output there, and sends 03 back to you if it does not say PASS; READY stands only with PASS.
 
 If the request says `Scope: RESEARCH ONLY`, also write `work/<ID>/07-audit-task.md` listing what A1 should check (claims, math, self-check), because no I3 step will. If the item's commits add or change code, set BLOCKED: re-scope to FULL or ask the person for the waiver (item 062).
 
-Append to `logs/research/<YYYY-MM-DD>.md`: `<UTC HH:MM> | R3 | <ID> | <n> verified, <n> fixed, <n> removed | <READY/BLOCKED>`. Write it with `python3 scripts/check_pipeline.py --log R3 <ID> "<n> verified, <n> fixed, <n> removed | <READY/BLOCKED>"` right after writing your step file: it adds the UTC time and refuses a line not in this format. Never type a log line by hand (item 045).
+The orchestrator then runs `python3 scripts/check_pipeline.py --log R3 <ID> "<n> verified, <n> fixed, <n> removed | <READY/BLOCKED>"`, copying the counts from check_handoff's totals line and the status from your Status line; it appends `<UTC HH:MM> | R3 | <ID> | ...` to `logs/research/<YYYY-MM-DD>.md`. Never type a log line or count by hand (item 045).

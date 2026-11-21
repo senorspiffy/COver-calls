@@ -1,0 +1,12 @@
+# 07 Audit task - 077
+Build commits: 3006b73 (round 1: scripts/check_pipeline.py, .claude/agents/a1-auditor.md, tests/test_pipeline_check.py, tests/test_real_data_field.py) and f765ca5 (round 2: 2 negative tests in tests/test_pipeline_check.py). I3: FAIL round 1, PASS round 2 (06).
+
+What Audit should look at:
+1. Re-run the three RI-012 probes on a scratch worktree of the branch head: `_a1_results` unanchored (`re.findall(r"A1 result:\s*(\w+)", text)`), `_logged` as `item in text and agent in text`, and `_logged` with no trailing `\|`. Each must fail its named test (I3 round 2: the first fails `test_i3_fail_with_a1_pass_only_inside_text_keeps_old_detail`, the other two fail `test_uncommitted_step_with_lookalike_log_lines_is_listed`).
+2. Re-run a sample of round 1's planned mutations (06 round 1 table: BF skipped filter dropped, P3 `a1[0]`, fence closer `lstrip`, backtick-info dropped, ls-tree fail -> none, uncommitted ls-files). Each must fail its named test.
+3. New output lines: `BRANCH FAIL:` (listed for A1, exit code unchanged) and `UNCOMMITTED STEP:` (exit 1 when listed or when ls-tree fails). Check that A1 job B reads both, as .claude/agents/a1-auditor.md now says (pinned by `test_a1_text_names_077_lines`).
+4. Known gaps accepted in 04 and still open: (a) a PRE_A1_LINE/LEGACY item with 06 FAIL and no A1 PASS keeps the old detail while `_open_at` calls it closed (0 items); (b) a branch file `git show` cannot read is empty, so its I3 FAIL is not listed (test DROPPED, docstring gap); (c) fences inside list items/blockquotes are read line by line, and a `<!--` inside a fence with no `-->` hides text; (d) UNCOMMITTED STEP gaps (a)-(c) in the docstring. Decide whether any needs an item.
+5. RULES change: .claude/agents/a1-auditor.md (two clauses for the new lines) needs the person's OK in PR review.
+6. RI-014 (OPEN): 077 does not touch `_walk`. Its fix is 079. Confirm that 079 builds on 077's `uncommitted_steps` and `_md_lines` code.
+7. Re-run the whole suite (I3 at f765ca5: 1 failed, 554 passed, 1 skipped; the failure is `test_repo_pipeline_has_no_skipped_items`, because round 1's 06 FAIL was the committed 06. With this PASS 06 committed it should pass) and `python3.11 -m py_compile scripts/check_pipeline.py`.
+A1 result: PASS (2026-11-20, logs/audit/2026-11-19-077.md; worktree 62f0cc0: suite 555 passed 1 skipped, py_compile ok, 3 RI-012 probes and 7 round-1 mutations each fail their named test, UNCOMMITTED STEP live probe exit 1; follow-ups P1 longer-closer test (EFFICIENCY), P2 _logged left-pipe test (EFFICIENCY))
