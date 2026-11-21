@@ -2918,11 +2918,16 @@ def test_batch_079_real_lines_not_flagged(tmp_path):
     assert res["flagged"] == [] and res["checked"] == 1 and res["not_computable"] == [], res
 
 
-@pytest.mark.parametrize("t05, t06, flagged", [("30.00", "30.01", True), ("29.99", "30.01", False)])
-def test_batch_boundary_delta0(tmp_path, t05, t06, flagged):
+@pytest.mark.parametrize("t05, t06, end, flagged", [("30.00", "30.01", "10:00", True),
+                                                     ("29.99", "30.01", "10:00", False),
+                                                     ("0.02", "119.99", "10:01", True)])
+def test_batch_boundary_delta0(tmp_path, t05, t06, end, flagged):
     """086 N2 (M1): Δ0, limit 60 s, k = 2: 30.00 + 30.01 - 0.01 = 60.00 >= 60 is flagged;
-    29.99 + 30.01 - 0.01 = 59.99 is not. (Two distinct values: equal ones are a copy, N4.)"""
-    _batch_item(tmp_path, "999", impl=_impl("10:00", "10:00", "10:00"),
+    29.99 + 30.01 - 0.01 = 59.99 is not. (Two distinct values: equal ones are a copy, N4.)
+    Round 2, R2-3 (iv) (M15): no such pair falls below 60 in float, but at Δ1 (I2/I3 10:01, limit 120)
+    float 0.02 + 119.99 - 0.01 is 119.99999999999999, the first of 6302 such pairs; round(..., 3) makes
+    it the exact 120.000 >= 120, flagged."""
+    _batch_item(tmp_path, "999", impl=_impl("10:00", end, end),
                 t05=f"1 passed in {t05}s", t06=f"1 passed in {t06}s")
     assert (_bl(tmp_path)["flagged_ids"] == ["999"]) is flagged
 
@@ -2952,7 +2957,7 @@ def test_batch_untimed_item_is_not_computable(tmp_path):
     res = _bl(tmp_path)
     assert res["flagged"] == [] and res["not_computable"] == [("999", "no pytest time in 05/06/I2 line")], res
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
-    assert "LOG BATCH: none; not computable: 999 (no pytest time in 05/06/I2 line)" in out.splitlines(), out
+    assert "LOG BATCH: none; not computable: 999: no pytest time in 05/06/I2 line" in out.splitlines(), out
     assert code == 0, out
 
 
@@ -3025,6 +3030,45 @@ def test_batch_open_round_and_no_line_before_i2(tmp_path):
     res = _bl(tmp_path)
     assert res["in_progress"] == ["998"] and res["flagged"] == [], res
     assert res["not_computable"] == [("999", "no line before I2")], res
+
+
+def test_batch_open_round_keyed_on_last_i2(tmp_path):
+    """086 N12b (M13, round 2 R2-3 (i)): I1, I2, I3 FAIL at 10:00, then a round-2 I2 at 10:30 with no
+    I3 after it: the round is open, so the item is in progress, not flagged and not checked (its
+    round-2 run lies after the last I3, outside the window)."""
+    impl = [(BATCH_DAY, "10:00", "I1", "FIT | 1 files planned"),
+            (BATCH_DAY, "10:00", "I2", "1 files changed | tests 1 passed in 50.00s"),
+            (BATCH_DAY, "10:00", "I3", "FAIL | sent to audit: no"),
+            (BATCH_DAY, "10:30", "I2", "1 files changed | tests 1 passed in 50.00s")]
+    _batch_item(tmp_path, "999", impl=impl, t05="1 passed in 50.00s", t06="1 passed in 49.00s")
+    res = _bl(tmp_path)
+    assert res["in_progress"] == ["999"] and res["flagged"] == [] and res["checked"] == 0, res
+    assert res["not_computable"] == [], res
+
+
+def test_batch_unreadable_log_file_makes_every_item_not_computable(tmp_path):
+    """086 N13 (M14, round 2 R2-3 (ii)): a log file that is not UTF-8 can't be attributed to an item,
+    and a lost line could move start or end, so every item is not computable with that file named;
+    never skipped silently, never flagged, no traceback."""
+    for item in ("998", "999"):
+        _batch_item(tmp_path, item, impl=_impl("10:00", "10:20", "10:40"), t05="1 passed in 30.00s",
+                    t06="1 passed in 31.00s")
+    bad = tmp_path / "logs" / "implementation" / "2026-11-19.md"
+    bad.write_bytes(b"\xff\xfe")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and [i for i, _ in res["not_computable"]] == ["998", "999"], res
+    assert all(why.endswith(f"{bad.as_posix()} unreadable") for _, why in res["not_computable"]), res
+
+
+def test_batch_invalid_log_time_is_not_computable(tmp_path):
+    """086 N14 (round 2 R2-3 (iii)): an 083-shaped item with one more line timed 25:00 is not
+    computable (log line with no valid time), never a crash and never a silent skip (dropping the line
+    could shorten the window)."""
+    r, i = _six("10:15")
+    _batch_item(tmp_path, "999", r, i + [(BATCH_DAY, "25:00", "I3", "PASS | sent to audit: yes")],
+                "344 passed, 1 skipped in 48.51s", "344 passed, 1 skipped in 47.57s")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["not_computable"] == [("999", "log line with no valid time")], res
 
 
 def _steps(root, item, steps):

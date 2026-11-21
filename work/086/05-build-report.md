@@ -247,3 +247,168 @@ Also checked:
 - RI-008: py311 compile ok.
 - RI-009: mutations ran in a scratch copy, never in the repo; built on 081 and 084.
 - RI-012: verdicts are read from fullmatch groups and summaries are anchored (D7, N8, M7, M9).
+
+## Round 2 (2026-11-21, I2)
+Base: daily-fixes/2026-11-20 at fd2b139 (includes 081 r1+r2, 084 r1+r2 and 086 r1 416835f; their code was not touched). Built from 04 "## Round 2" (R2-1 to R2-4 and the round-2 build steps). Not committed (the orchestrator commits). No brokerage connection; every new fixture is a tmp_path tree. The round-1 text above is kept as written.
+
+### Changes made (round 2)
+File counts (by command, 012):
+```
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'
+0
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'
+2
+```
+- `scripts/check_pipeline.py`:
+  - R2-1: the `main()` print is now `"; not computable: " + "; ".join(f"{i}: {why}" for i, why in batch["not_computable"])`, which is format (a), the same `<ID>: <why>` shape as `not checked:`.
+  - The docstring LOG BATCH entry now reads ``as `not computable: <ID>: <reason>` (entries joined by "; ")``, and the lines after it are rewrapped. No other code changed: `git diff --stat` shows `16 ++++++-------`, and the only non-docstring line is the print.
+- `tests/test_pipeline_check.py`:
+  - N5's assert (086's own test) is now `"LOG BATCH: none; not computable: 999: no pytest time in 05/06/I2 line"`.
+  - N2 (`test_batch_boundary_delta0`) gets an `end` column and a third case, `("0.02", "119.99", "10:01", True)` (R2-3 (iv), see the search below).
+  - New N12b `test_batch_open_round_keyed_on_last_i2`, N13 `test_batch_unreadable_log_file_makes_every_item_not_computable` and N14 `test_batch_invalid_log_time_is_not_computable`.
+  - No existing (pre-086) assertion was edited. N2/N3 values are as built in round 1 (R2-2).
+  - 086 cases: `pytest --collect-only` gives 30 (26 in round 1 + N2 third case + N12b + N13 + N14), which matches 04's "29 (+ 1 if the pair exists)".
+- `.claude/commands/run-item.md`: unchanged in round 2. The round-1 total is still 3 files.
+
+### R2-3 (iv) rounding search (scratch `r2_round_search.py`, never in the repo, 2026-11-21 00:5x UTC)
+The search takes 2-decimal pairs a ≠ b with |a − b| > 0.01 and a + b − 0.01 == limit in decimal. It tests the code's own float expression `sum([a, b]) - 0.005 * 2 < limit`, without `round()`:
+```
+limit 60: pairs tried 6000, below-limit pairs 0, first []
+limit 120: pairs tried 12000, below-limit pairs 6302, first [('0.02', '119.99', '119.99999999999999'), ('0.05', '119.96', '119.99999999999999'), ('0.07', '119.94', '119.99999999999999')]
+```
+The count is 0 at Δ0. It is 6302 at Δ1, so the first pair (0.02, 119.99) is added as N2's third case. That case runs at Δ1 (I1 10:00, I2/I3 10:01, limit 120), which is why N2 now has an `end` column. M15 was added as well, and it fails on that case (below). `round()` is therefore load-bearing at limit 120, not merely harmless.
+
+### Connectivity check (round 2)
+- [x] Every new function and rule is used. There is no new function. The changed print feeds the `LOG BATCH:` line, which run-item L14, I3 and A1 read. The new tests call `batch_log_items` through `_bl`.
+- [x] Every input has a source and every output a consumer. This is unchanged from round 1.
+- [x] Every branch ends in a defined result, and each not-computable branch now has an absent-case test:
+  - k = 0: N5;
+  - unreadable 05/06: N11;
+  - no line before I2: N12;
+  - open round: N12b, `in_progress`;
+  - unreadable log file: N13, every item not computable with the file named;
+  - invalid HH:MM: N14, `log line with no valid time`.
+- [x] No leftover TODOs or unused files. The scratch scripts and copies live only in the session scratchpad.
+
+Missing-data policy:
+- `grep -rnE "fillna|nan_to_num|or 0|else 0|pd\.notna\(.*\) and|is not None and|max\(1,|min\(1,|\.get\([^)]*, 0\)" ccbot/` gives 38 hits, all pre-existing (`git diff --stat -- ccbot/` is empty). There is no new or changed hit.
+- The same pattern, plus `: float = ` and `: int = `, over the added lines of both changed files (`git diff -U0 ... | grep "^+"`) gives 0 hits.
+- No dataclass and no new comparison were added. The one `>=` (`round(...) >= limit`) is unchanged and runs only on parsed `\d+\.\d+` values, so it never sees NaN.
+
+### Recurring issues checked (round 2, item 013)
+- RI-001 (ESCALATED): the R2-3 (iv) search has a dated count: 0 at 60 and 6302 at 120. N2/N3 are re-derived with k = 2, as round 1 built them.
+- RI-010 (ESCALATED, this item): fixture (b) still gives 083 flagged on real data (`excepted={}` → `flagged ['083']`, below). `LOG_BATCH_EXCEPT` is pinned (M8). The real line keeps (c)'s text `LOG BATCH: none (not checked: 083: six lines written in one batch`.
+- RI-014 (OPEN): no git call was added. `git diff scripts/check_pipeline.py | grep -c "^+.*_git"` gives 0, the census total is 47 as the orchestrator stated, and `test_git_call_census` passes.
+- RI-002 (GUARDED): see the missing-data policy above. M4, M13 and M14 each fail a test.
+- RI-004/RI-005 (GUARDED): N2's third case is re-derived as 0.02 + 119.99 − 0.01 = 120.00 ≥ 120 in decimal, and the float value is 119.99999999999999.
+- RI-009: base and mutation runs were done in scratch copies (`i2-086-r2-base-005453`, `i2-086-r2-mut-<HHMMSS>` in the session scratchpad), never in the repo. After the mutations, `git diff --stat` in the repo still shows only the 2 files.
+- RI-012 (GUARDED): unchanged (D7, N8, M7, M9 all still fail their tests).
+
+RI-010: guardrail built (086); GUARDED when merged, fixture (b) gives 083 flagged on main, and the next items have LOG BATCH: none
+RI-001: unchanged (R2-3 (iv) count 0 at limit 60, 6302 at limit 120, 2026-11-21)
+RI-014: unchanged (no git call added; census total 47)
+
+### Feasibility numbers (measured, round 2)
+`batch_log_items()` on the repo (working tree, 2026-11-21 00:58 UTC):
+```
+excepted= None checked 39 flagged [] excepted ['083'] not_computable ['048', '054', '055', '056', '058', '059', '060'] in_progress ['081']
+excepted= {} checked 39 flagged ['083'] excepted [] not_computable ['048', '054', '055', '056', '058', '059', '060'] in_progress ['081']
+```
+- 081 is in progress: its round-2 I2 line comes after its last I3 line, which is R2-3 (i) at work.
+- 086 is now checked: its round-1 I2 line is followed by an I3 FAIL line. It goes back to in progress once this round's I2 line is logged.
+
+### Test output (round 2, pasted)
+Full suite before the round-2 edits (HEAD fd2b139, repo):
+```
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_old_06_without_round_headers_unchanged
+FAILED tests/test_pipeline_check.py::test_i3_fail_target_not_stated - Asserti...
+FAILED tests/test_pipeline_check.py::test_pass_without_sent_back_none_is_incomplete
+4 failed, 642 passed, 1 skipped in 87.65s (0:01:27)
+```
+Full suite after the round-2 edits (`python3 -m pytest -q`, repo root, final run):
+```
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 649 passed, 1 skipped in 83.52s (0:01:23)
+```
+R2-4 bar:
+- The 3 P1 tests pass. In the full run above, the only FAILED line is the allowed test. Run alone with N2, N5 and N12b-N14: `11 passed, 275 deselected in 0.46s`.
+- The allowed failure, `test_repo_pipeline_has_no_skipped_items`, fails at `assert code == 0`. The only error line in the output is `I3 FAIL: 081, 086` (INCOMPLETE none, A1 FAIL none, SKIPPED none):
+  - 084 passed I3 round 2 (fd2b139), so the reason changed from 04's `I3 FAIL: 081, 084` to `081, 086`.
+  - 086's own I3 round-1 FAIL is correct while its round is open (item 071 rule).
+- Base (1): a scratch copy of this working tree (`i2-086-r2-base-005453`) with `scripts/check_pipeline.py` and `tests/test_pipeline_check.py` from 129120b, the commit before 086's code (416835f). So it has no 086 code at all:
+  ```
+  FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+  1 failed, 246 deselected in 3.77s
+  I3 FAIL: 081, 086
+  A1 FAIL: none
+  INCOMPLETE: none
+  SKIPPED: none
+  exit 1
+  ```
+  It is the same test ID with the same reason.
+- Base (2): HEAD fd2b139 (086 r1 code), in the full run before the edits above, fails it too.
+- No other test fails.
+
+`-k "batch or log_"`: `51 passed, 235 deselected in 3.25s`.
+`python3.11 -m py_compile scripts/check_pipeline.py`: `py311 compile ok`.
+`-k "census or fstrings_parse"`: `1 passed, 285 deselected in 0.07s`. The full run also passes `test_fstrings_parse_on_python_310`.
+
+`python3 scripts/check_pipeline.py` (repo, working tree). The LOG BATCH line is in format (a):
+```
+LOG BATCH: none (not checked: 083: six lines written in one batch at 10:15 after the build (commit cfc0634 10:15:48); real times not recoverable (item 086)); not computable: 048: no pytest time in 05/06/I2 line; 054: no pytest time in 05/06/I2 line; 055: no pytest time in 05/06/I2 line; 056: no pytest time in 05/06/I2 line; 058: no pytest time in 05/06/I2 line; 059: no pytest time in 05/06/I2 line; 060: no pytest time in 05/06/I2 line
+exit 1
+```
+The exit code is unchanged by 086. I ran HEAD's script (`git show HEAD:scripts/check_pipeline.py`) and 129120b's (pre-086) script on the same tree. Both exit 1, and their whole outputs differ from the new one only on the LOG BATCH line:
+```
+$ diff r2_head_out.txt r2_new_out2.txt        # HEAD (086 r1) script vs round 2
+99c99
+< LOG BATCH: none (not checked: 083: ...); not computable: 048 (no pytest time in 05/06/I2 line), 054 (...), ...
+---
+> LOG BATCH: none (not checked: 083: ...); not computable: 048: no pytest time in 05/06/I2 line; 054: ...; ...
+$ diff r2_pre086_out2.txt r2_new_out2.txt     # pre-086 script vs round 2
+98a99
+> LOG BATCH: none (not checked: 083: six lines written in one batch at 10:15 after the build (commit cfc0634 10:15:48); real times not recov...
+```
+Note: my first run of these diffs also showed `084: complete` / `084: awaiting A1` and `AWAITING A1: none` / `084`. A1 was writing work/084/07 and logs/audit/2026-11-21-084.md at the same time, in another thread. A re-run on the same tree (above) has only the LOG BATCH difference.
+
+Mutations. They ran in a scratch copy of the repo (`i2-086-r2-mut-<HHMMSS>` in the session scratchpad, script `i2_086_r2_mutate.py`), never in the repo. The command was `tests/test_pipeline_check.py -k "batch or log_ or old_06_without_round_headers_unchanged or i3_fail_target_not_stated or pass_without_sent_back_none_is_incomplete"`:
+```
+unmutated: 54 passed, 232 deselected in 6.58s
+M1: 2 failed, 52 passed, 232 deselected in 3.48s  -> test_batch_boundary_delta0[30.00-30.01-10:00-True], test_batch_boundary_delta0[0.02-119.99-10:01-True]
+M1b: 5 failed, 49 passed, 232 deselected in 3.74s  -> test_batch_083_shape_is_flagged, test_batch_boundary_delta0[29.99-30.01-10:00-False], test_batch_delta1_limit_is_120, test_batch_copy_of_05_in_06_is_dropped, test_batch_summary_in_test_id_is_not_a_run
+M2: 6 failed, 48 passed, 232 deselected in 3.91s  -> test_batch_083_shape_is_flagged, test_batch_083_flagged_on_repo_data, test_batch_boundary_delta0[30.00-30.01-10:00-True], test_batch_boundary_delta0[0.02-119.99-10:01-True], test_batch_sections_and_largest_value, test_batch_research_line_at_i2_minute_is_before
+M3: 1 failed, 53 passed, 232 deselected in 3.48s  -> test_batch_copy_of_05_in_06_is_dropped
+M4: 1 failed, 53 passed, 232 deselected in 3.44s  -> test_batch_untimed_item_is_not_computable
+M5: 2 failed, 52 passed, 232 deselected in 4.46s  -> test_log_refused_after_later_steps, test_log_verdict_words_in_free_text_are_not_send_backs
+M6: 4 failed, 50 passed, 232 deselected in 3.76s  -> test_log_after_i3_fail_is_written, test_log_after_blocked_or_not_a_fit_is_written[research-R3-5 verified, 0 fixed, 0 removed | BLOCKED-steps0], test_log_after_blocked_or_not_a_fit_is_written[implementation-I1-NOT A FIT | 0 files planned-steps1], test_log_after_a1_fail_is_written
+M6b: 1 failed, 53 passed, 232 deselected in 3.54s  -> test_log_after_blocked_or_not_a_fit_is_written[research-R3-5 verified, 0 fixed, 0 removed | BLOCKED-steps0]
+M7: 1 failed, 53 passed, 232 deselected in 3.50s  -> test_log_verdict_words_in_free_text_are_not_send_backs
+M8: 1 failed, 53 passed, 232 deselected in 3.56s  -> test_log_batch_except_is_pinned
+M9: 1 failed, 53 passed, 232 deselected in 3.47s  -> test_batch_summary_in_test_id_is_not_a_run
+M10: 2 failed, 52 passed, 232 deselected in 3.56s  -> test_batch_083_flagged_on_repo_data, test_batch_malformed_last_line_still_ends_the_window
+M11: 1 failed, 53 passed, 232 deselected in 3.88s  -> test_batch_sections_and_largest_value
+M12: 4 failed, 50 passed, 232 deselected in 4.71s  -> test_old_06_without_round_headers_unchanged, test_i3_fail_target_not_stated, test_pass_without_sent_back_none_is_incomplete, test_batch_untimed_item_is_not_computable
+M13: 1 failed, 53 passed, 232 deselected in 3.84s  -> test_batch_open_round_keyed_on_last_i2
+M14: 1 failed, 53 passed, 232 deselected in 3.75s  -> test_batch_unreadable_log_file_makes_every_item_not_computable
+M15: 1 failed, 53 passed, 232 deselected in 3.67s  -> test_batch_boundary_delta0[0.02-119.99-10:01-True]
+restored: 54 passed, 232 deselected in 3.73s
+```
+M1-M11 are the same edits as round 1 (table above). The new ones:
+
+| Mutation | Change |
+|---|---|
+| M12 | round-1 print `f"; not computable: {', '.join(f'{i} ({why})' ...)}"` restored |
+| M13 | `order(end) < order(last_i2)` → `order(end) < order(first)` (in progress keyed on the first I2) |
+| M14 | `unreadable.append(...)` in `_item_lines` → `pass` (unreadable log file skipped silently) |
+| M15 | `round(total - BATCH_ROUND * len(known), 3) >= limit` → `total - BATCH_ROUND * len(known) >= limit` |
+
+Every mutation fails at least one named test. M12 fails exactly the 3 existing tests plus N5, as R2-1 expects.
+
+### Real-data effect (round 2)
+not required (`git diff --stat`: scripts/check_pipeline.py, tests/test_pipeline_check.py; no TRIGGER path or data/real/)
+
+### Deviations from plan (round 2)
+1. **N13's `_run` part is not asserted, because of a pre-existing crash outside 086's scope.** R2-3 (ii) says "`_run` exit 0 when nothing else is wrong". Something else is wrong: `main()` reads every log file through older readers with no decode guard, and a non-UTF-8 log file raises UnicodeDecodeError there before LOG BATCH prints. The readers are `_log_text` (items 043/077, `"".join(f.read_text(encoding="utf-8") ...)`), `orphan_log_lines` (047) and the I3 last-line loop in `incomplete()` (071). They are in the scope lock (`incomplete`), or outside 086 entirely. So N13 asserts C in-process only: every item is not computable with the file named, nothing is flagged, and there is no traceback from `batch_log_items`. Probe (scratch tree `i2-086-r2-n13probe`: one item, one good log file and one `\xff\xfe` log file): `check_pipeline.py` ends in `UnicodeDecodeError` via `main` L1516 → `incomplete` L669 → `_log_text` L581, exit 1. This is loud, not silent (a traceback, exit ≠ 0), so it is not an RI-002 pass. **I1/A1: please consider a separate item** that gives these readers the `<file> unreadable` handling `_item_lines` already has.
+2. **N2's third case runs at Δ1.** The R2-3 (iv) search found no pair at limit 60 and 6302 at limit 120. Following 04 ("If the count is 0 at Δ0, repeat at limit 120"; "If the count is ≥ 1, add the first pair as a third N2 case"), the case uses the limit-120 pair. It therefore needs I2/I3 at 10:01, so N2's parametrize gained an `end` column. The two round-1 cases keep `end = "10:00"`, with the same values and results.
+3. 04 R2-4 names the allowed failure's reason as `I3 FAIL: 081, 084`. Today it is `I3 FAIL: 081, 086`, because 084 passed its I3 round 2 in fd2b139. The base copy shows the same reason, so the bar's "same stated reason at base" holds with today's set.

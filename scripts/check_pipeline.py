@@ -127,13 +127,13 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   after 05 exists and before its line. Items in LOG_BATCH_EXCEPT are counted, not
                   evaluated, and named with their reason. An item with no time (k = 0), no line before
                   its first I2, an unreadable 05/06/log file or a line with no valid time is listed
-                  as `not computable: <ID> (<reason>)`, never flagged; an item with no I3 line after
-                  its last I2 line is in progress and not evaluated. No git, so the text and exit
-                  code are the same without it. Known gaps: (w) runs pasted outside the two sections
-                  are not read (only lowers Σ); (x) fast or untimed suites can't be flagged, D covers
-                  those; (y) once an item was sent back D is off for it, and C covers only its I
-                  rounds; (z) pytest's time and the log stamp are both wall clock (time.time()), so a
-                  clock step during a run can move both.
+                  as `not computable: <ID>: <reason>` (entries joined by "; "), never flagged; an
+                  item with no I3 line after its last I2 line is in progress and not evaluated.
+                  No git, so the text and exit code are the same without it. Known gaps: (w) runs
+                  pasted outside the two sections are not read (only lowers Σ); (x) fast or untimed
+                  suites can't be flagged, D covers those; (y) once an item was sent back D is off
+                  for it, and C covers only its I rounds; (z) pytest's time and the log stamp are
+                  both wall clock (time.time()), so a clock step during a run can move both.
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
@@ -1576,7 +1576,7 @@ def main(argv):
     if batch["excepted"]:
         batch_text += f" (not checked: {'; '.join(f'{i}: {why}' for i, why in batch['excepted'])})"
     if batch["not_computable"]:
-        batch_text += f"; not computable: {', '.join(f'{i} ({why})' for i, why in batch['not_computable'])}"
+        batch_text += "; not computable: " + "; ".join(f"{i}: {why}" for i, why in batch["not_computable"])
     print(f"LOG BATCH: {batch_text}")
     print(f"UNTRACKED CHANGE: {'not checked (no git)' if untracked is None else untracked[0]}")
     print(f"RESEARCH CODE: {'not checked (no git)' if research is None else research[0]}")
