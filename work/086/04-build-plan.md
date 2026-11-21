@@ -166,3 +166,109 @@ Recurring issues checked (item 013), open or ESCALATED entries:
 - 05 guardrail line: `RI-010: guardrail built (086); GUARDED when merged, fixture (b) gives 083 flagged on main, and the next items have LOG BATCH: none`. D needs no 083 exception (write time only); say so in 05. Do not edit logs/recurring-issues.md, and do not add 083 to LOG_TIME_EXCEPT.
 
 Log fields: FIT WITH CHANGES | 3 files planned
+
+## Round 2
+Fit verdict (round 2): FIT WITH CHANGES
+
+Written 2026-11-21 UTC by I1 after I3's round-1 FAIL (work/086/06-verification.md, P1-P3 and "Sent back" points 1-4) and 05 Deviations 1-5. The round-1 text above is kept as written; where it differs from this section, **this section wins**. I1 again had no shell: no git, no pytest, no `check_pipeline.py`. Facts come from reading 05, 06, `scripts/check_pipeline.py` (docstring L105-126, `main()` L1553) and `tests/test_pipeline_check.py` (L411, L489, L2162, L2272, L2285, L2318-2343, L2945-3024) on daily-fixes/2026-11-20 at 416835f + the I3 FAIL files. The orchestrator writes the I1 log line: `python3 scripts/check_pipeline.py --log I1 086 "FIT WITH CHANGES | 2 files planned"`. Rule D allows it, because 086 now has an `I3 | FAIL` line (D3 shape).
+
+Fit check (round 2): unchanged. Process only, no ccbot/config/data change, no rule the person follows changes, no brokerage. The round-2 changes are a print-format fix, test-number fixes and acceptance of I2's not-flag additions, so nothing new conflicts with 081, 084 or the scope lock.
+
+### R2-1. Not-computable text format (I3 P1, point 1): option (a)
+Decision: **(a)**. Each not-computable entry is printed as `<ID>: <reason>`, and entries are joined by `; `. This is the same shape as the `not checked:` part of the same line. Placement is unchanged (LOG BATCH stays directly after LOG TIME, so after INCOMPLETE), and **no existing assertion is edited**.
+
+Why (a) and not (b) or (c):
+- (b) moves the line in front of INCOMPLETE and away from LOG TIME, so it would break the "LOG BATCH directly after LOG TIME" rule and the one-line diff against HEAD's output that 05 showed.
+- (c) weakens three existing guards (`"<ID> (" not in <everything after INCOMPLETE:>`) to cover only the INCOMPLETE line. Those guards exist to catch an INCOMPLETE entry printed anywhere later. Weakening tests to fit new output is the wrong direction.
+- (a) is the shape the line already uses. I2's scratch probe of (a) found only N5's assert changes (05 Deviation 1).
+
+Exact text, replacing round-1 Files 1 `main()` third bullet:
+- plus `; not computable: <ID>: <reason>; <ID>: <reason>; ...` when `not_computable` is non-empty. In code: `"; not computable: " + "; ".join(f"{i}: {why}" for i, why in batch["not_computable"])`.
+
+So the real-repo line becomes `LOG BATCH: none (not checked: 083: six lines written in one batch at 10:15 after the build (commit cfc0634 10:15:48); real times not recoverable (item 086)); not computable: 048: no pytest time in 05/06/I2 line; 054: no pytest time in 05/06/I2 line; ...`.
+
+I checked the other `split("INCOMPLETE:")` asserts against (a). L411 (040) and L489/L2285 (044, 040) are below LOG_CHECK_FROM = 45, so C never lists them. L2340 (183) asserts that text is present, and `"06 Verdict says" not in rest` holds, because no not-computable reason contains it. The only reasons are `no pytest time in 05/06/I2 line`, `no line before I2`, `log line with no valid time` and `<file> unreadable`, and none contains `(`. A flagged entry still prints `<ID> (` on purpose. None of the three fixtures has a time, so none can be flagged.
+
+Files changed for R2-1:
+- `scripts/check_pipeline.py`: the `main()` print (L1553), and the docstring L120 `as \`not computable: <ID> (<reason>)\`` changed to `as \`not computable: <ID>: <reason>\` (entries joined by "; ")`.
+- `tests/test_pipeline_check.py`: N5's assert (L2952), which is 086's own new test, not an existing one. It becomes `"LOG BATCH: none; not computable: 999: no pytest time in 05/06/I2 line" in out.splitlines()`.
+- New mutation **M12**: restore the round-1 format `f"{i} ({why})"`. Expect `test_old_06_without_round_headers_unchanged`, `test_i3_fail_target_not_stated`, `test_pass_without_sent_back_none_is_incomplete` and N5 to fail. That pins the format with the existing tests.
+
+### R2-2. N2 and N3 values (I3 P2, point 2): I2's values adopted
+Round-1 N2's non-flag case (30.00 + 30.00) and N3 (45.00 + 45.00) are replaced. The copy guard drops an equal 06 value, which made k = 1 in both. Re-derived against `round(t05 + t06 − 0.005·k, 3) ≥ (Δ+1)·60` with k = 2:
+- **N2 (Δ0, limit 60):**
+  - flag case: 05 30.00, 06 30.01, so 60.01 − 0.01 = 60.00 ≥ 60, flagged. This kills M1 (`>`: 60.00 > 60 is false).
+  - non-flag case: 05 29.99, 06 30.01, so 60.00 − 0.01 = 59.99 < 60, not flagged.
+  - The values differ by more than 0.01, so the copy guard keeps both (k = 2).
+- **N3 (Δ1, I1 10:00, I2/I3 10:01, limit 120):** 05 45.00, 06 45.01, so 90.01 − 0.01 = 90.00 < 120, not flagged. M1b (limit Δ·60 = 60) flags it at 90.00 ≥ 60, which kills M1b.
+- The round-1 Guardrail tests line "C boundary, 30.00 + 30.01 at Δ0 → N2; Δ1 → N3" stands with these numbers. Fact check #26's "Δ1 45/45" is replaced by 45.00/45.01, for the same copy-guard reason.
+
+These are the numbers already built and pasted in 05 (M1 and M1b lines), so this is a plan change only and the code needs no rebuild for it.
+
+### R2-3. I2's Deviation 3 (I3 P3, point 3): all five accepted
+- **(i) Accepted.** `in_progress` = "no I3 line after the item's **last** I2 line". Round-1 Files 1 `batch_log_items` bullet 2 ("first I2 line and no later I3 line") is replaced by: "no I3 line after the last I2 line: `in_progress`". Reason: a round-2 I2 run logged after the last I3 would fall outside [start, last I3]. The window would then miss that I2 run's time, and the proof would not hold for it. The start rule is unchanged: the latest line before the **first** I2 line.
+  - New test **N12b**: lines I1 10:00, I2 10:00, I3 10:00 FAIL, I2 10:30, with no later I3, gives `in_progress == ["999"]`, not flagged and not checked.
+  - Mutation **M13**: key in_progress on the first I2. N12b then fails, because the item is evaluated.
+- **(ii) Accepted.** An unreadable log file makes **every** item `not computable (<file> unreadable)`. The lines inside an unreadable file cannot be attributed to an item, so "items with lines of that date" is not knowable, and a lost line could move start or end. This is the not-flag side, and it is loud: every item is listed with the file named.
+  - New test **N13**: two items with good 05/06 and spaced lines, plus a third log file of bytes `\xff\xfe`. Expect `flagged == []`, and both items in `not_computable` with a reason ending `<that file> unreadable`. No traceback, and `_run` exit 0 when nothing else is wrong.
+  - Mutation **M14**: skip unreadable log files silently. N13 fails.
+- **(iii) Accepted.** A LOG_LINE-shaped line with an impossible time (e.g. `25:00`, `10:61`) gives `not computable (log line with no valid time)` and never a crash. A silent skip would be wrong here: dropping the line could shorten the window (the round-1 change 3 reasoning).
+  - New test **N14**: 083-shaped item 999 with one line `25:00 | I3 | 999 | PASS | sent to audit: yes`. Expect `not_computable == [("999", "log line with no valid time")]` and no traceback.
+- **(iv) Accepted.** The flag test is `round(t05 + t06 − BATCH_ROUND·k, 3) >= limit`. The inputs have at most 2 decimals and BATCH_ROUND·k has 3, so the true value is exact at 3 decimals and the rounding removes only binary float error. The Python tutorial shows the same effect with `0.1 + 0.1 + 0.1 == 0.3` → `False`. [https://docs.python.org/3/tutorial/floatingpoint.html] The limit `(Δ+1)·60` is an integer and so exact. `round(x, 3)` of a value whose 3-decimal form is exactly 60.000 returns 60.0. The rounding therefore matters only at exact equality. There it settles the M1 boundary the way the docstring states it (≥).
+  - Pin: I2 searches, by a scratch loop (never in the repo), for 2-decimal pairs a ≠ b with |a − b| > 0.01, a + b − 0.01 == 60.00 in decimal, and float `a + b - 0.01 < 60`. I2 states the count in 05.
+  - If the count is ≥ 1, add the first pair as a third N2 case (flagged) and mutation **M15** (`round` removed), which that case must fail.
+  - If the count is 0 at Δ0, repeat at limit 120 (Δ1, a + b − 0.01 == 120.00). If both counts are 0, write `M15: no below-limit pair exists (count 0 at 60 and 120); round() kept as harmless` in 05. No test is added then, and this is not a defect.
+- **(v) Accepted.** `_item_lines` returns 6-tuples `(stamp, agent, team, file index, line index, fields)`. The fields are needed for the I2 seconds and are not used for start/end. This replaces round-1's 5-tuple signature.
+
+### R2-4. Expected-result bar (I3 point 4): "no failure caused by 086"
+Round-1 Expected result "The full suite passes" is replaced by the bar below. A failure is "not caused by 086" only when all three of these hold, and I2 shows each in 05 (I3 re-checks):
+1. The same test ID also fails at the base commit (the commit before 086's code), run in a scratch worktree, never the repo.
+2. It fails there for the same stated reason. Today the reason is `I3 FAIL: 081, 084` (exit 1) in `test_repo_pipeline_has_no_skipped_items`. That is the correct state of those items while their I3 rounds are open (item 071 rule).
+3. No other test fails. On this branch today the allowed set is exactly {`test_repo_pipeline_has_no_skipped_items`}, and the 3 P1 tests must pass. Any other failure, or any of the 3 P1 tests failing, means FAIL.
+
+The (c) assert sits after `code == 0`, so it does not run while that test fails. I2 therefore pastes the real `LOG BATCH:` line from `python3 scripts/check_pipeline.py` and shows that it contains `LOG BATCH: none (not checked: 083: six lines written in one batch`. When 081 and 084 reach a later PASS round, the test must pass with (c) included. A1 checks that on the next daily run.
+
+### Round-2 build steps for I2
+1. Change the `main()` print to format (a), and change docstring L120 (R2-1).
+2. Change N5's assert (R2-1). Add N12b, N13 and N14 (R2-3 (i)-(iii)). Add the N2 third case only if the R2-3 (iv) search finds a pair.
+3. Keep N2/N3 as built (R2-2). Leave every other test, the run-item.md text and the scope lock as built in round 1.
+4. Re-run in this order:
+   - the full suite: the only allowed failure is the R2-4 one, and the 3 P1 tests pass;
+   - `-k "batch or log_"`;
+   - M1-M11 and the new M12, M13, M14 (and M15 if added), each with its failing test named;
+   - `python3.11 -m py_compile scripts/check_pipeline.py`;
+   - `python3 scripts/check_pipeline.py`, with its LOG BATCH line pasted. That line must use format (a), and its exit code must be unchanged against HEAD's script on the same tree (one added line).
+5. In 05, add a `## Round 2 build` section and keep round 1.
+
+### Rule trace (round 2 additions)
+| Source (I3 06 / 05 Deviation) | Plan line, or DROPPED: <reason> |
+|---|---|
+| 06 P1 / point 1, 05 Dev 1: not-computable format | R2-1 (a); `main()` + docstring L120; N5 assert; M12 pins it with the 3 existing tests |
+| 06 P2 / point 2, 05 Dev 2: N2/N3 values | R2-2; N2 30.00+30.01 flag, 29.99+30.01 no flag; N3 45.00+45.01 < 120; M1, M1b |
+| 06 P3 (i), 05 Dev 3 (i): in_progress on last I2 | R2-3 (i); N12b; M13 |
+| 06 P3 (ii), 05 Dev 3 (ii): unreadable log file → every item not computable | R2-3 (ii); N13; M14 |
+| 06 P3 (iii), 05 Dev 3 (iii): invalid HH:MM → not computable | R2-3 (iii); N14 |
+| 06 P3 (iv), 05 Dev 3 (iv): `round(..., 3) >= limit` | R2-3 (iv); dated count by I2 search; N2 third case + M15, or the stated count 0 |
+| 06 P3 (v), 05 Dev 3 (v): 6-tuple | R2-3 (v); signature text only, covered by N1-N14 |
+| 06 point 4: "full suite passes" bar | R2-4 |
+| 05 Dev 4: spaced control in (a) | Accepted as built (exit 1 shown to come from LOG BATCH) |
+| 05 Dev 5: D needs no 083 exception | Accepted as built; round-1 Expected result already says so |
+
+Missing-data policy (round 2): every not-computable branch now has an absent-case test. N5 covers k = 0, N11 an unreadable 05/06, N12 no line before I2, N12b an open round, N13 an unreadable log file and N14 an invalid time. None of them yields 0 s, 60 s or a flag (RI-002).
+
+### Recurring issues checked (round 2, item 013)
+- **RI-001 (ESCALATED):** the new N2/N3 numbers were re-derived against the copy guard and the flag test above. The R2-3 (iv) pair search has a dated count stated by I2, and 0 is allowed. Nothing is asserted as "always".
+- **RI-010 (ESCALATED, this item):** unchanged. (b), D1 and the pin test stay. Format (a) keeps (c)'s text `LOG BATCH: none (not checked: 083: ...`, because only the not-computable part changes.
+- **RI-014 (OPEN):** no git call is added in round 2 (census stays 46).
+- **RI-002 (GUARDED):** see the missing-data policy line above. M4, M13 and M14 apply.
+- **RI-004/RI-005 (GUARDED):** this round's own defect, N2/N3 not re-derived against the plan's own copy guard, is fixed in R2-2. Every number in this section was re-derived against `round(Σ − 0.005·k, 3) ≥ (Δ+1)·60` with k after the guard.
+- **RI-012 (GUARDED):** unchanged (D7, N8, M7, M9).
+
+### Expected result (round 2)
+- 2 files changed in round 2 (`scripts/check_pipeline.py`, `tests/test_pipeline_check.py`). The round-1 total stays 3 files, because run-item.md is unchanged from round 1.
+- The real-repo LOG BATCH line is in format (a), as in R2-1. The exit code is unchanged by 086.
+- Full suite: meets the R2-4 bar. The 3 P1 tests pass. New cases are 29 (+ 1 if the R2-3 (iv) pair exists), against 26 in round 1.
+- M1-M14 (and M15 if added) each fail ≥ 1 named test.
+- The 05 guardrail line is unchanged from round 1.
+
+Log fields (round 2): FIT WITH CHANGES | 2 files planned
