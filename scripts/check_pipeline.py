@@ -95,6 +95,13 @@ each at most once; `deselected` and unknown parts are refused. Before it (I2_BEF
 and warnings are not tests) and pass <= total. Known limit: a trailing ` (<note>)` is free text
 and could hold e.g. `(1 failed)`; the stats part before the note is still checked in full, so no
 failure can be dropped from it.
+Item 082 (RI-006): from SUITE_FROM on, an item's 05 has exactly one column-0 `Suite:` line outside code
+fences and HTML comments (_md_lines "out" rows), and its text after `Suite:` (stripped) equals the tests
+field of the item's last I2 log line (by file date, then line order), compared as a whole string,
+` (note)` included. No Suite line, more than one, or a different value is INCOMPLETE (exit 1). No I2
+line or a malformed last one: no Suite entry (043/045 already report it; an earlier line is never
+used). The check is gated by 084's _rule_seen on the commit that added 05 (SUITE_FROM): a 05 added
+under a rule file without it is listed in RULE NOT SEEN as `judged by no Suite check`.
 Item 086 (rule D, RI-010): --log also refuses (exit 2, nothing written) while a later step file 01-06
 of the same item exists in work/<ID>/ (`--log refused: work/<ID>/ already has <files> after <agent>'s
 step; ...`), so a batch of lines written after the build is refused at R1. 07 and other files never
@@ -303,6 +310,9 @@ AGENT = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"}
 # may not be timed after the commit that added it. Lines are written with --log, never by hand.
 LOG_CHECK_FROM = 45
 TESTS_FORMAT_FROM = 76   # item 076: from this ID on the I2 tests field is pytest's summary line as printed
+# Item 082: from this ID on 05 has exactly one column-0 `Suite:` line equal to the last I2 log tests field;
+# numeric floor above every in-flight item (080-086).
+SUITE_FROM = 87
 # Item 076: the parts of pytest's summary line, in KNOWN_TYPES order (pytest main/9.0.x terminal.py),
 # each at most once. "deselected" left out on purpose: a full-suite run has none.
 _N = r"[1-9]\d*"
@@ -654,11 +664,32 @@ def _rule_seen(item_dir, step, const, env):
     return re.search(rf"^{const} = ", text, re.M) is not None, sha[:7]
 
 
+def _last_log_line(logs, agent, item):
+    """Item 082: the item's last LOG_LINE match for `agent` in logs/implementation/????-??-??.md, by
+    sorted file name then line order, or None."""
+    last = None
+    impl = logs / "implementation"
+    for f in (sorted(impl.glob("????-??-??.md")) if impl.is_dir() else []):
+        for l in f.read_text(encoding="utf-8").splitlines():
+            m = LOG_LINE.match(l)
+            if m and m[3] == agent and m[4] == item:
+                last = m
+    return last
+
+
+def _suite_lines(text):
+    """Item 082: the text after `Suite:` (stripped) of every column-0 `Suite:` line outside code fences
+    and HTML comments (_md_lines "out" rows), in order."""
+    return [line[len("Suite:"):].strip() for line, state in _md_lines(text)[0]
+            if state == "out" and line.startswith("Suite:")]
+
+
 def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
     """Item 043: what is missing from a step's own checklist ([] = nothing). Item 084: a TESTS or
     VERDICT check that would fire is dropped only if the item's 05 / 06 was added under a rule file
     without that constant (_rule_seen False) and, for I2, every I2 line passes I2_BEFORE; each such
-    pair is appended to `not_seen` as (ID, step, sha7, constant, rule item, old rule)."""
+    pair is appended to `not_seen` as (ID, step, sha7, constant, rule item, old rule). Item 082: the
+    Suite check (SUITE_FROM) is gated the same way, on 05."""
     not_seen = [] if not_seen is None else not_seen
     if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
         return []
@@ -690,6 +721,25 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
             missing.append(f"log line for {' '.join(bad)} does not match its format (item 045): {wants}")
         if note:
             missing.append(note)
+    report = item_dir / STEPS["05"]
+    if int(item_dir.name) >= SUITE_FROM and report.exists():   # item 082: Suite line = last I2 tests field
+        last = _last_log_line(logs, "I2", item_dir.name)
+        if last is not None and log_fields_ok("I2", item_dir.name, last[5]):   # else 043/045 report it
+            field = last[5].strip().split(" | tests ", 1)[1]
+            suites = _suite_lines(report.read_text(encoding="utf-8"))
+            fired = None
+            if not suites:
+                fired = "05 has no 'Suite:' line (item 082)"
+            elif len(suites) > 1:
+                fired = f"05 has {len(suites)} 'Suite:' lines, needs exactly 1 (item 082)"
+            elif suites[0] != field:
+                fired = f"05 Suite line does not equal the last I2 log tests field (item 082): '{suites[0]}' vs '{field}'"
+            if fired:                                       # item 084 gate, only when one fires
+                seen, sha7 = _rule_seen(item_dir, "05", "SUITE_FROM", env)
+                if seen is False:                           # below SUITE_FROM there is no Suite check
+                    not_seen.append((item_dir.name, "05", sha7, "SUITE_FROM", "082", "no Suite check"))
+                else:
+                    missing += [fired] + ([sha7] if seen is None and sha7 else [])
     if ver.exists():                                        # item 071 (a)-(d)
         verdict, target = i3_verdict(ver)
         if int(item_dir.name) >= VERDICT_FROM:

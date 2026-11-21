@@ -28,7 +28,8 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
           logged=True, verdict="PASS", sent_back="auto"):
     """A fixture item. Its 06 carries the step-0 line and each step gets its log line (item 043).
     Item 071: 06 starts with `Verdict: <verdict> (round 1)` (none when verdict is None) and
-    `Sent back to: <t>` (auto: none on PASS, I2 on FAIL; none when sent_back is None)."""
+    `Sent back to: <t>` (auto: none on PASS, I2 on FAIL; none when sent_back is None).
+    Item 082: 05 is `x` plus a `Suite:` line equal to the tests part of this item's I2 field."""
     if scope == "FAST":
         scope = "FAST (person, 2026-10-31)"
     d = root / "work" / item
@@ -39,6 +40,8 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
     (d / "request.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     for f in files:
         body = f"x\n{a1}\n" if f == "07-audit-task.md" and a1 else "x\n"
+        if f == "05-build-report.md":                         # item 082: the Suite line equals the I2 tests field
+            body = f"x\nSuite: {_field('I2', item).split(' | tests ', 1)[1]}\n"
         if f == "06-verification.md":
             t = {"PASS": "none", "FAIL": "I2"}.get(verdict) if sent_back == "auto" else sent_back
             body = (f"Verdict: {verdict} (round 1)\n" if verdict is not None else "") \
@@ -883,8 +886,8 @@ def test_uncommitted_step_with_lookalike_log_lines_is_listed(tmp_path):
     _item(repo, "151", ["01-research.md"], logged=False)
     log = repo / "logs" / "research" / "2026-11-11.md"
     log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text("12:00 | R1 | 1510 | x\n12:00 | R2 | 151 | see R1 notes\n12:00 | I2 | 151 | R1 x\n",
-                   encoding="utf-8")
+    log.write_text("12:00 | R1 | 1510 | x\n12:00 | R2 | 151 | see R1 notes\n12:00 | I2 | 151 | R1 x\n"
+                   "12:00 | XR1 | 151 | x\n", encoding="utf-8")       # item 082: `_logged` needs the left `|`
     code, out, line, _ = _uncommitted(repo, cutoff)
     assert line == P5A, out
     assert code == 1, out
@@ -998,7 +1001,7 @@ def _untracked(repo, cutoff):
 def test_completed_item_note_with_config_is_untracked(tmp_path):
     """The 3ba835e shape: a note in a completed item's 05 plus config and test edits."""
     repo, cutoff = _history(tmp_path)
-    _write(repo, "work/150/05-build-report.md", "x\n## Follow-up\n")
+    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed\n## Follow-up\n")
     _write(repo, "config/x.json", '{"a": 1}\n')
     _write(repo, "tests/t.py")
     c = _commit(repo, "follow-up")
@@ -1028,7 +1031,7 @@ def test_new_item_step_file_covers_code(tmp_path):
 def test_merge_bringing_untracked_commit_is_flagged(tmp_path):
     repo, cutoff = _history(tmp_path)
     _git(repo, "checkout", "-q", "-b", "side")
-    _write(repo, "work/150/05-build-report.md", "x\n## Follow-up\n")
+    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed\n## Follow-up\n")
     _write(repo, "config/x.json", '{"a": 1}\n')
     _write(repo, "tests/t.py")
     side = _commit(repo, "follow-up")
@@ -1080,7 +1083,7 @@ def test_cutoff_missing_in_full_repo_fails(tmp_path):
 @NO_GIT
 def test_commits_before_cutoff_ignored(tmp_path):
     repo, _ = _history(tmp_path)
-    _write(repo, "work/150/05-build-report.md", "x\n## Follow-up\n")
+    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed\n## Follow-up\n")
     _write(repo, "config/x.json", '{"a": 1}\n')
     later = _commit(repo, "follow-up, before the cutoff")
     code, line = _untracked(repo, later)
@@ -1118,13 +1121,13 @@ def test_a1_fail_item_covers_its_rework(tmp_path):
     repo, cutoff = _history(tmp_path)
     _item(repo, "153", ALL, date="2026-11-11", a1="A1 result: PASS (test)\nA1 result: FAIL (test)")
     _commit(repo, "153 sent back")
-    _write(repo, "work/153/05-build-report.md", "x\nrework\n")
+    _write(repo, "work/153/05-build-report.md", "x\nSuite: 1 passed\nrework\n")
     _write(repo, "ccbot/x.py")
     _commit(repo, "153 rework")
     assert _untracked(repo, cutoff)[1] == f"UNTRACKED CHANGE: none (cutoff {cutoff[:7]} from --untracked-from)"
     _write(repo, "work/153/07-audit-task.md", "x\nA1 result: FAIL (test)\nA1 result: PASS (test)\n")
     _commit(repo, "153 passes")
-    _write(repo, "work/153/05-build-report.md", "x\nrework\nmore\n")
+    _write(repo, "work/153/05-build-report.md", "x\nSuite: 1 passed\nrework\nmore\n")
     _write(repo, "ccbot/x.py", "y\n")
     c = _commit(repo, "after PASS")
     line = _untracked(repo, cutoff)[1]
@@ -1624,6 +1627,10 @@ def test_shallow_file_unreadable_not_checked(tmp_path, monkeypatch):
     assert cp._shallow_boundaries() == "unreadable"
     assert cp._walk(c) == want
     (repo / ".git" / "shallow").write_text(c + "\nzz\n", encoding="utf-8")
+    assert cp._shallow_boundaries() == "unreadable"
+    (repo / ".git" / "shallow").write_text(c + "\n" + c + "x\n", encoding="utf-8")    # item 082: 40 hex + x
+    assert cp._shallow_boundaries() == "unreadable"
+    (repo / ".git" / "shallow").write_text(c + "\n" + "a" * 41 + "\n", encoding="utf-8")   # 41 hex
     assert cp._shallow_boundaries() == "unreadable"
     # the malformed line's _walk result is pinned with real git, unpatched, in the next test
 
@@ -2185,6 +2192,7 @@ UNFILLED = "Verdict: PASS | FAIL (round <n>; earlier rounds: <verdicts>)\n"
     # item 077: CommonMark 0.31.2 §4.5 fences (_md_lines)
     pytest.param("~~~\nVerdict: FAIL (pasted)\n~~~\nVerdict: PASS (round 1)\n", ("PASS", None), id="tilde"),
     pytest.param("````\n```\nVerdict: FAIL (pasted)\n````\nVerdict: PASS (round 1)\n", ("PASS", None), id="longer"),
+    pytest.param("```\nVerdict: FAIL (pasted)\n`````\nVerdict: PASS (round 1)\n", ("PASS", None), id="longer-close"),
     pytest.param("    ```\nVerdict: PASS (round 1)\n    ```\n", ("PASS", None), id="4-space"),
     pytest.param("\t```\nVerdict: PASS (round 1)\n", ("PASS", None), id="tab"),
     pytest.param("```\n```py\nVerdict: FAIL (pasted)\n```\nVerdict: PASS (round 1)\n", ("PASS", None), id="info"),
@@ -2821,7 +2829,8 @@ def _batch_item(root, item, research=(), impl=(), t05=None, t06=None, full=False
     """A rule-C fixture: request.md, log lines (research / implementation: (date, HH:MM, agent, fields)),
     05 with a `## Test output` section and 06 with a `## Tests re-run` section holding the given text
     (None = no file). full=True also writes 01-04 and a complete 06/07, so check_pipeline's other checks
-    pass and its exit code is LOG BATCH's."""
+    pass and its exit code is LOG BATCH's. Item 082: with full=True, 05 also gets a `Suite:` line (above
+    `## Test output`) equal to the tests part of the last I2 field in `impl`."""
     d = root / "work" / item
     d.mkdir(parents=True, exist_ok=True)
     (d / "request.md").write_text(f"# Work item {item}\nScope: FULL\nDate: 2026-11-20\n", encoding="utf-8")
@@ -2832,7 +2841,9 @@ def _batch_item(root, item, research=(), impl=(), t05=None, t06=None, full=False
             with log.open("a", encoding="utf-8") as fh:
                 fh.write(f"{hhmm} | {agent} | {item} | {fields}\n")
     if t05 is not None:
-        (d / "05-build-report.md").write_text(f"# 05\n## Test output (pasted, not summarized)\n{t05}\n"
+        i2 = [f for _, _, agent, f in impl if agent == "I2"]
+        suite = f"Suite: {i2[-1].split(' | tests ', 1)[1]}\n" if full and i2 else ""   # item 082 (full only)
+        (d / "05-build-report.md").write_text(f"# 05\n{suite}## Test output (pasted, not summarized)\n{t05}\n"
                                               f"## Deviations from plan\n", encoding="utf-8")
     if t06 is not None:
         head = "Verdict: PASS (round 1)\nSent back to: none\nRecurring issues checked: RI-010\n" if full else ""
@@ -3277,3 +3288,178 @@ def test_main_ahead_non_digit_count(monkeypatch):
     monkeypatch.setattr(cp, "_git", lambda *a: ("refs/remotes/origin/main " + "a" * 40 + "\n", 0)
                         if a[0] == "for-each-ref" else ("", 0))
     assert cp.main_ahead() == "git rev-list gave no count (item 081)"
+
+
+
+# Item 082 (RI-006): from SUITE_FROM on, 05 has exactly one column-0 `Suite:` line equal to the tests
+# field of the item's last I2 log line, compared as a whole string.
+SUITE_DAY = "2026-11-11"
+NO_SUITE = "05 has no 'Suite:' line (item 082)"
+
+
+def _suite_item(root, suite05, i2=("1 files changed | tests 1 passed",), item="151"):
+    """Item `item` with every step and log line (_item), then 05 replaced by `suite05` and its one I2
+    log line replaced by the lines `i2`, in that order (an empty tuple: no I2 line)."""
+    _item(root, item, ALL, date=SUITE_DAY)
+    (root / "work" / item / "05-build-report.md").write_text(suite05, encoding="utf-8")
+    log = root / "logs" / "implementation" / f"{SUITE_DAY}.md"
+    text = log.read_text(encoding="utf-8")
+    old = f"12:00 | I2 | {item} | {FIELDS['I2']}\n"
+    assert old in text
+    log.write_text(text.replace(old, "".join(f"12:00 | I2 | {item} | {f}\n" for f in i2)), encoding="utf-8")
+
+
+def _inc(root):
+    code, out = _run(root, "check_pipeline.py", "--today", SUITE_DAY)
+    return code, _pick(out, "INCOMPLETE:")
+
+
+def _mismatch(suite, field):
+    return f"05 Suite line does not equal the last I2 log tests field (item 082): '{suite}' vs '{field}'"
+
+
+SF = _cp().SUITE_FROM
+S_FULL = "411 passed, 1 skipped in 1.00s"
+
+
+def test_suite_line_absent_is_incomplete(tmp_path):
+    """S0: 05 with no Suite line at all."""
+    _suite_item(tmp_path, "x\n")
+    code, inc = _inc(tmp_path)
+    assert inc == f"INCOMPLETE: 151 ({NO_SUITE})" and code == 1
+
+
+def test_suite_line_equal_to_field_passes(tmp_path):
+    """S1: the boundary ID SF, Suite = the field as a whole line."""
+    _suite_item(tmp_path, f"x\nSuite: {S_FULL}\n", i2=(f"1 files changed | tests {S_FULL}",), item=f"{SF:03d}")
+    code, inc = _inc(tmp_path)
+    assert inc == "INCOMPLETE: none" and code == 0
+
+
+def test_suite_line_dropped_middle_is_incomplete(tmp_path):
+    """S2 (probe target RI-006-082-suite): the field dropped `, 1 skipped`, at the boundary ID SF."""
+    _suite_item(tmp_path, f"x\nSuite: {S_FULL}\n", i2=("1 files changed | tests 411 passed in 1.00s",),
+                item=f"{SF:03d}")
+    code, inc = _inc(tmp_path)
+    assert inc == f"INCOMPLETE: {SF:03d} ({_mismatch(S_FULL, '411 passed in 1.00s')})" and code == 1
+
+
+@pytest.mark.parametrize("field", ["411 passed, 1 skipped", S_FULL + " (note)"], ids=["S3-tail", "S4-note"])
+def test_suite_line_part_of_field_is_incomplete(tmp_path, field):
+    """S3: the field dropped the time (kills `field in suite`); S4: it added a note (kills `suite in field`)."""
+    _suite_item(tmp_path, f"x\nSuite: {S_FULL}\n", i2=(f"1 files changed | tests {field}",))
+    _, inc = _inc(tmp_path)
+    assert inc == f"INCOMPLETE: 151 ({_mismatch(S_FULL, field)})"
+
+
+def test_suite_line_inside_fence_is_not_read(tmp_path):
+    """S5: the only Suite line is inside a code fence."""
+    _suite_item(tmp_path, "x\n```\nSuite: 1 passed\n```\n")
+    _, inc = _inc(tmp_path)
+    assert inc == f"INCOMPLETE: 151 ({NO_SUITE})"
+
+
+def test_two_suite_lines_are_incomplete(tmp_path):
+    """S6: two identical Suite lines, both equal to the field (kills first-wins and last-wins)."""
+    _suite_item(tmp_path, "x\nSuite: 1 passed\nSuite: 1 passed\n")
+    _, inc = _inc(tmp_path)
+    assert inc == "INCOMPLETE: 151 (05 has 2 'Suite:' lines, needs exactly 1 (item 082))"
+
+
+def test_unfilled_template_suite_line_is_incomplete(tmp_path):
+    """S7: 05 is templates/build-report.md as shipped: its placeholder is not the field."""
+    template = (REPO / "templates" / "build-report.md").read_text(encoding="utf-8")
+    _suite_item(tmp_path, template)
+    _, inc = _inc(tmp_path)
+    holder = [l for l in template.splitlines() if l.startswith("Suite:")][0][len("Suite:"):].strip()
+    assert inc == f"INCOMPLETE: 151 ({_mismatch(holder, '1 passed')})"
+
+
+def test_suite_with_no_i2_line_adds_no_suite_entry(tmp_path):
+    """S8: no I2 line: 043's entry only."""
+    _suite_item(tmp_path, "x\n", i2=())
+    _, inc = _inc(tmp_path)
+    assert inc == "INCOMPLETE: 151 (no log line for I2)"
+
+
+def test_suite_with_malformed_last_i2_line_never_falls_back(tmp_path):
+    """S9: the last I2 line is malformed: 045's entry only, the earlier well-formed line is never used."""
+    _suite_item(tmp_path, "x\nSuite: 411 passed\n",
+                i2=("1 files changed | tests 410 passed", "1 files changed | tests 411/411"))
+    _, inc = _inc(tmp_path)
+    assert inc.startswith("INCOMPLETE: 151 (log line for I2 does not match its format (item 045)"), inc
+    assert "Suite" not in inc, inc
+
+
+def test_suite_below_cutoff_not_checked(tmp_path):
+    """S10: ID SF - 1 with a mismatch: no Suite entry."""
+    _suite_item(tmp_path, "x\nSuite: 2 passed\n", item=f"{SF - 1:03d}")
+    _, inc = _inc(tmp_path)
+    assert inc == "INCOMPLETE: none"
+
+
+def test_suite_compared_with_last_i2_line(tmp_path):
+    """S11: two I2 lines, the last equals Suite: no entry. S12: only the first does: mismatch."""
+    _suite_item(tmp_path / "a", "x\nSuite: 2 passed\n",
+                i2=("1 files changed | tests 1 passed", "1 files changed | tests 2 passed"))
+    assert _inc(tmp_path / "a")[1] == "INCOMPLETE: none"
+    _suite_item(tmp_path / "b", "x\nSuite: 1 passed\n",
+                i2=("1 files changed | tests 1 passed", "1 files changed | tests 2 passed"))
+    assert _inc(tmp_path / "b")[1] == f"INCOMPLETE: 151 ({_mismatch('1 passed', '2 passed')})"
+
+
+@NO_GIT
+@pytest.mark.parametrize("rules, seen", [
+    ("TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\n", False),
+    ("TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\nSUITE_FROM = 87\n", True),
+], ids=["S13-not-seen", "S13b-seen"])
+def test_suite_gate_follows_rule_file_of_05_commit(tmp_path, rules, seen):
+    """S13: 05 (no Suite line) was added in a commit whose rule file has no SUITE_FROM: listed in RULE NOT
+    SEEN, not INCOMPLETE (item 084 gate). S13b: the same with SUITE_FROM there: INCOMPLETE."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", rules)
+    _suite_item(repo, "x\n")
+    root = _commit(repo, "151 built")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", SUITE_DAY)
+    if seen:
+        assert _pick(out, "INCOMPLETE:") == f"INCOMPLETE: 151 ({NO_SUITE})", out
+        assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+    else:
+        assert "151 (" not in _pick(out, "INCOMPLETE:"), out
+        assert _pick(out, "RULE NOT SEEN:") == (f"RULE NOT SEEN: 151 (05 added in {root[:7]} without SUITE_FROM "
+                                                "(082): judged by no Suite check; item 084)"), out
+
+
+def test_suite_label_in_template_and_i2_text():
+    """Item 082: the template has exactly one column-0 `Suite: <` line outside fences and comments, and
+    i2-builder.md names the Suite line (text pin)."""
+    cp = _cp()
+    rows, _ = cp._md_lines((REPO / "templates" / "build-report.md").read_text(encoding="utf-8"))
+    assert len([l for l, st in rows if st == "out" and l.startswith("Suite: <")]) == 1
+    i2 = (REPO / ".claude" / "agents" / "i2-builder.md").read_text(encoding="utf-8")
+    assert "05 has exactly one column-0 `Suite:` line" in i2 and "(item 082)" in i2
+
+
+UNSHALLOW = ("If `git rev-parse --is-shallow-repository` prints true, run `git fetch --unshallow`, then test "
+             "again. If it is still true, report UNTRACKED CHANGE, RESEARCH CODE and REAL-DATA FIELD as "
+             "'not checked', never 'none' (item 079).")
+
+
+def test_unshallow_sentence_same_in_three_files():
+    """Item 082 (RI-014): the unshallow sentences, byte for byte, once in each of the three files (text pin)."""
+    for f in (".claude/commands/run-item.md", ".claude/commands/daily-audit.md", ".claude/agents/a1-auditor.md"):
+        assert (REPO / f).read_text(encoding="utf-8").count(UNSHALLOW) == 1, f
+
+
+def test_run_item_commit_subject_rule():
+    """Item 082: run-item.md states the commit-subject rule for the orchestrator's step (5) and for I2
+    (text pin only; no check reads commit text)."""
+    text = (REPO / ".claude" / "commands" / "run-item.md").read_text(encoding="utf-8")
+    assert text.count("(5) commit the step file and its log line. The commit that adds a step's log line has "
+                      "the subject `Item <ID>: ` followed by the line `--log` printed for that step, copied "
+                      "unchanged, never reworded (item 082); a commit made before that step's `--log` line "
+                      "has no such subject rule.") == 1
+    assert text.count("I2 commits each code change together with its 05 change. Its commit that adds the I2 "
+                      "log line follows the same subject rule (item 082).") == 1

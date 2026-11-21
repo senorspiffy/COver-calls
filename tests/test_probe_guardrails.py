@@ -94,7 +94,7 @@ def test_holds_exits_0(tmp_path, capsys, monkeypatch):
     code, out = _main(root, capsys, [_probe("a", module="pkg.mod", recorded="99 failed")])
     line = _line(out, "a")
     assert "HOLDS" in line and "1 failed, 1 passed, 0 errors" in line, out
-    assert "recorded 99 failed" in line
+    assert "recorded 99 failed (recorded unreadable)" in line       # item 082: not RECORDED's shape
     assert "    FAILED tests.test_mod::test_f" in out
     assert "PYTEST_ADDOPTS ignored" in out
     assert out.splitlines()[0].startswith("ref HEAD = ")
@@ -125,6 +125,7 @@ def test_mixed_run_reports_every_probe(tmp_path, capsys):
     assert "ANCHOR MISSING (count 0)" in _line(out, "c1") and "pytest not run" in _line(out, "c1")
     assert "HOLDS" in _line(out, "a")
     assert "NOT HELD" in _line(out, "b") and "recorded: none" in _line(out, "b")
+    assert not any(m in _line(out, "b") for m in ("(live differs)", "(recorded unreadable)", "(live n/a)"))
     assert "code check: n/a (fixture: tests/test_mod.py imports pkg/mod.py" in _line(out, "b")
     assert "NOT HELD" in _line(out, "b2") and "    FAILED tests.test_mod::test_g" in out
     assert "ANCHOR MISSING (count 2)" in _line(out, "c2")
@@ -248,10 +249,11 @@ def test_unrestored_worktree_stops(tmp_path, capsys, monkeypatch):
 def test_shipped_probes_well_formed():
     """C12, 078: every shipped anchor occurs once in the working tree, every target def exists,
     and every entry has exactly one of module / no_module_reason."""
-    assert len(pg.PROBES) == 9
-    assert len({p["id"] for p in pg.PROBES}) == 9
+    assert len(pg.PROBES) == 10
+    assert len({p["id"] for p in pg.PROBES}) == 10
     for p in pg.PROBES:
         assert all(p.get(k) for k in pg.REQUIRED), p["id"]
+        assert pg.RECORDED.fullmatch(p.get("recorded", "")), p["id"]     # item 082
         text = (REPO / p["file"]).read_bytes().decode("utf-8")
         assert text.count(p["anchor"]) == 1, p["id"]
         name = p["target"].split("::")[-1]
@@ -273,4 +275,45 @@ def test_shipped_probes_well_formed():
         "tests/test_pipeline_check.py::test_same_id_on_main_and_open_branch_is_a_clash",
         "tests/test_pipeline_check.py::test_rules_branch_is_reported",
         "tests/test_pipeline_check.py::test_criss_cross_branch_lists_only_its_own_changes",
-        "tests/test_webull_sandbox.py::test_429_inside_other_text_is_not_retried"]
+        "tests/test_webull_sandbox.py::test_429_inside_other_text_is_not_retried",
+        "tests/test_pipeline_check.py::test_suite_line_dropped_middle_is_incomplete"]
+
+
+@NO_GIT
+def test_recorded_failed_count_differs_is_marked(tmp_path, capsys):
+    """Item 082 X: the live failed count (1) is not the recorded one (2): `(live differs)`, still HOLDS."""
+    root = _fixture(tmp_path)
+    code, out = _main(root, capsys, [_probe("x", recorded="2026-01-01: 2 failed, 1 passed")])
+    line = _line(out, "x")
+    assert "HOLDS" in line and "recorded 2026-01-01: 2 failed, 1 passed (live differs)" in line, out
+    assert code == 0
+
+
+@NO_GIT
+def test_recorded_failed_count_same_is_not_marked(tmp_path, capsys):
+    """Item 082 Y: only the failed count is compared (live passed 1, recorded 99): no marker."""
+    root = _fixture(tmp_path)
+    code, out = _main(root, capsys, [_probe("y", recorded="2026-01-01: 1 failed, 99 passed")])
+    line = _line(out, "y")
+    assert "HOLDS" in line, out
+    assert not any(m in line for m in ("(live differs)", "(recorded unreadable)", "(live n/a)")), out
+    assert "recorded 2026-01-01: 1 failed, 99 passed;" in line, out
+    assert code == 0
+
+
+@NO_GIT
+def test_recorded_without_live_results_is_na(tmp_path, capsys):
+    """Item 082 W: no pytest run (ANCHOR MISSING): the recorded count is not compared, `(live n/a)`."""
+    root = _fixture(tmp_path)
+    code, out = _main(root, capsys, [_probe("w", anchor="nosuch", replacement="x",
+                                            recorded="2026-01-01: 1 failed, 1 passed")])
+    line = _line(out, "w")
+    assert "ANCHOR MISSING" in line and "recorded 2026-01-01: 1 failed, 1 passed (live n/a)" in line, out
+    assert code == 1
+
+
+def test_a1_text_marks_probe_markers_as_information():
+    """Item 082: a1-auditor.md says the three markers are not findings (text pin)."""
+    text = (REPO / ".claude" / "agents" / "a1-auditor.md").read_text(encoding="utf-8")
+    assert text.count("`(live differs)`, `(recorded unreadable)` and `(live n/a)` are information, not "
+                      "findings; the verdict word decides (item 082).") == 1

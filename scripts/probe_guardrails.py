@@ -22,7 +22,8 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# Strings copied byte for byte from 074/03 step 1 and 078/03 step 5. `recorded` is printed only.
+# Strings copied byte for byte from 074/03 step 1 and 078/03 step 5. `recorded` is printed and compared on
+# its failed count only (item 082: information, never a verdict).
 # An entry with no `module` names in `no_module_reason` how its test reaches the file (078).
 _CP_REASON = ("tests/test_pipeline_check.py runs scripts/check_pipeline.py as"
               " REPO/scripts/check_pipeline.py (_run) and imports check_pipeline after"
@@ -90,9 +91,17 @@ PROBES = [
      "test_file": "tests/test_webull_sandbox.py",
      "target": "tests/test_webull_sandbox.py::test_429_inside_other_text_is_not_retried",
      "module": "ccbot.broker.webull_sandbox", "recorded": "2026-11-20 (078/05): 1 failed, 17 passed"},
+    {"id": "RI-006-082-suite", "ri": "RI-006", "file": "scripts/check_pipeline.py",
+     "anchor": "            elif suites[0] != field:",
+     "replacement": "            elif False:",
+     "test_file": "tests/test_pipeline_check.py",
+     "target": "tests/test_pipeline_check.py::test_suite_line_dropped_middle_is_incomplete",
+     "no_module_reason": _CP_REASON, "recorded": "2026-11-21 (082/05): 5 failed, 299 passed"},
 ]
 
 REQUIRED = ("id", "ri", "file", "anchor", "replacement", "test_file", "target")
+# Item 082: the shape of a `recorded` value (.fullmatch); group 2 is the failed count.
+RECORDED = re.compile(r"\d{4}-\d{2}-\d{2}( \(\d{3}/05\))?: (\d+) failed, (\d+) passed")
 
 
 class JunitError(Exception):
@@ -202,6 +211,22 @@ def _counts(results):
         return "counts n/a"
     n = {s: sum(1 for v in results.values() if v == s) for s in _RANK}
     return f"{n['failed']} failed, {n['passed']} passed, {n['error']} errors, {n['skipped']} skipped"
+
+
+def _recorded_marker(p, results):
+    """Item 082: the text after `recorded <value>`: "" with no `recorded`; " (recorded unreadable)" when
+    it does not fullmatch RECORDED; " (live n/a)" with no live results; " (live differs)" when the live
+    failed count (as _counts prints it) is not the recorded one; else "". Information, never a verdict."""
+    if not p.get("recorded"):
+        return ""
+    m = RECORDED.fullmatch(p["recorded"])
+    if not m:
+        return " (recorded unreadable)"
+    if results is None:
+        return " (live n/a)"
+    if sum(1 for v in results.values() if v == "failed") != int(m[2]):
+        return " (live differs)"
+    return ""
 
 
 def _bad_lines(results):
@@ -363,7 +388,7 @@ def _probe_all(probes, args, wt, scratch, sha, t_start):
             hit = "yes" if results.get(junit_key(target)) == "failed" else "no"
         else:
             hit = "n/a"
-        rec = f"recorded {p['recorded']}" if p.get("recorded") else "recorded: none"
+        rec = f"recorded {p['recorded']}{_recorded_marker(p, results)}" if p.get("recorded") else "recorded: none"
         parts = [counts, f"target {target} failed: {hit}", verdict, rec]
         if code:
             parts.append(code)
