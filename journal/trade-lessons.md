@@ -3,6 +3,10 @@
 Lessons from the paper bot's real trades, newest first. Each line: date, lesson, evidence. UNCONFIRMED = seen once; CONFIRMED = seen 3+ times.
 Paper only, research, not financial advice. Lessons are notes only: no setting is tuned from paper results; any change waits for the Sunday review.
 
+## 2026-11-20
+- **The bug loop worked in one day.** The 11-19 freeze was found by the recap, fixed (PR #34, item 083) and pulled before the next run. Keep the morning recap watching for odd banners and NaN equity.
+- **Week 2 result: -11.2% on two falling stocks, with $50 of premium earned.** VALE is -21% from its basis. Repeats the CONFIRMED lesson; strongest input for the Sunday review (stock choice and how many names to hold matter more than the call rules).
+
 ## 2026-11-19
 - **BUG: one missing option quote froze the whole bot.** The VALE 13C dropped out of the quote chain once it was far out of the money (stock $9.83). The open call couldn't be priced, equity became NaN, and every ticker failed CAPITAL_UNKNOWN. A far-OTM call that is near zero should fall back to its last mark (or $0.01), not block trading. Sent to the bug pipeline.
 - **The drawdown keeps growing.** Shares -$532, calls ~+$50. VALE is -18% from its basis. Repeats the CONFIRMED lesson.
