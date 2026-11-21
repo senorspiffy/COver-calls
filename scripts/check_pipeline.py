@@ -259,7 +259,10 @@ scripts/check_pipeline.py (item 084)`) keeps them and adds that entry (exit 1). 
 cutoff make no git call. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
 items today); the 06 verdict vs last I3 line cross-check stays at CHECKLIST_FROM by decision;
 CHECKLIST_FROM, LOG_CHECK_FROM and their checks stay numeric; --log (write_log) stays numeric, so a
-new log line is never judged by an old rule.
+new log line is never judged by an old rule. The constant counts only at the start of a line, so a
+comment, a longer name (OLD_TESTS_FORMAT_FROM = 76) or a string is not it (RI-012, round 2 test);
+a column-0 `<CONST> = ` line inside a triple-quoted string would still read as seen (strict: the
+new rule is kept, never a false "not seen").
 """
 import datetime as dt
 import os

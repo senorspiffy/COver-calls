@@ -2769,6 +2769,39 @@ def test_rule_seen_positive_control_on_head(monkeypatch):
     assert cp._rule_seen(Path("work/083"), "06", "VERDICT_FROM", None) == (False, "cfc0634")
 
 
+# Item 084 round 2 (RI-012): the constant inside other text is not the constant (F1 in work/084/06).
+EMBEDDED_RULES = {
+    "comment": "CHECKLIST_FROM = 41\n# VERDICT_FROM = 71 is item 071\n# TESTS_FORMAT_FROM = 76 is item 076\n",
+    "longer name": "CHECKLIST_FROM = 41\nOLD_VERDICT_FROM = 71\nOLD_TESTS_FORMAT_FROM = 76\n",
+    "string": 'CHECKLIST_FROM = 41\nx = "VERDICT_FROM = 71"\ny = "TESTS_FORMAT_FROM = 76"\n',
+    "all three": ('CHECKLIST_FROM = 41\n# VERDICT_FROM = 71 is item 071\nOLD_VERDICT_FROM = 71\n'
+                  'OLD_TESTS_FORMAT_FROM = 76\nx = "VERDICT_FROM = 71"\n'),
+}
+
+
+@NO_GIT
+@pytest.mark.parametrize("form", sorted(EMBEDDED_RULES))
+def test_rule_seen_ignores_constant_inside_other_text(tmp_path, monkeypatch, form):
+    """(i) the anchor's RULE_FILE names each constant only in a comment, a longer name or a string:
+    (False, sha7) for both, 150 is listed in RULE NOT SEEN and not INCOMPLETE (M6 no ^/re.M, M7 plain `in`).
+    Known gap (docstring): a column-0 `<CONST> = ` line inside a triple-quoted string still reads as seen."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", EMBEDDED_RULES[form])
+    root = _commit(repo, "root")
+    _defective(repo, "150")
+    added = _commit(repo, "150 on main")
+    cp = _cp()
+    monkeypatch.chdir(repo)
+    assert cp._rule_seen(Path("work/150"), "05", "TESTS_FORMAT_FROM", None) == (False, added[:7])
+    assert cp._rule_seen(Path("work/150"), "06", "VERDICT_FROM", None) == (False, added[:7])
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", "2026-11-02")
+    assert _pick(out, "RULE NOT SEEN:") == SEEN_150.format(sha=added[:7]), out
+    assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+    assert code == 0, out
+
+
 def test_write_log_stays_numeric(tmp_path):
     """(g) --log never applies an old rule: 083's old-form I2 line is still refused (exit 2)."""
     _request(tmp_path, "083")

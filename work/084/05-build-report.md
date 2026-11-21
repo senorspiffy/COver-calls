@@ -170,3 +170,109 @@ not required (git diff --stat: .claude/commands/run-item.md, scripts/check_pipel
 3. `test_git_call_census`'s `assert sum(seen.values()) == 41` becomes `== 46`. The plan says no existing assertion is edited, but 081's census (comment: "A new git call adds or bumps one entry with its reason (items 084, 086 build on this)") needs the total bumped for the 5 new calls; the caller's brief asked for this update.
 4. `_rule_seen` makes one raw `_git("rev-parse", "--verify", "-q", "HEAD")` call to tell an unborn HEAD (exit 1, strict, no note) from a git failure (other non-zero, note), instead of parsing `_git_ok`'s reason string (RI-012). Recorded in GIT_CENSUS with that reason.
 5. `_anchor_env`'s no-git probe is `_git("rev-parse", "--git-dir")` (the plan says "when `_git` gives None" without naming the command).
+
+---
+
+# Round 2 (I3 FAIL F1, work/084/06-verification.md; 2026-11-21, base HEAD 416835f)
+
+Scope of this round: only F1. Files changed: scripts/check_pipeline.py (module docstring only) and tests/test_pipeline_check.py (one new parametrized test). 086's code in HEAD (LOG BATCH, rule D) was not touched.
+
+## Round 2 changes (file: what changed)
+- tests/test_pipeline_check.py: `EMBEDDED_RULES` (4 rule-file texts) and `test_rule_seen_ignores_constant_inside_other_text[form]` (RI-012 negative test, placed after `test_rule_seen_positive_control_on_head`). Each case builds a tmp repo: root commit has `scripts/check_pipeline.py` = `CHECKLIST_FROM = 41` plus both constants only inside other text; a second commit adds item 150 (`_defective`: old-form I2 line, no Sent-back line). Forms: `comment` (`# VERDICT_FROM = 71 ...`, `# TESTS_FORMAT_FROM = 76 ...`), `longer name` (`OLD_VERDICT_FROM = 71`, `OLD_TESTS_FORMAT_FROM = 76`), `string` (`x = "VERDICT_FROM = 71"`, `y = "TESTS_FORMAT_FROM = 76"`), and `all three` (I3's exact probe text: comment, `OLD_VERDICT_FROM = 71`, `OLD_TESTS_FORMAT_FROM = 76`, `x = "VERDICT_FROM = 71"`). Asserts: `_rule_seen(work/150, "05", "TESTS_FORMAT_FROM", None) == (False, sha7)` and `_rule_seen(work/150, "06", "VERDICT_FROM", None) == (False, sha7)`; the CLI's `RULE NOT SEEN:` line equals `SEEN_150` with that sha7 (both pairs listed); `INCOMPLETE: none`; exit 0.
+- scripts/check_pipeline.py: module docstring, end of the RULE NOT SEEN paragraph, names the rule and the remaining gap: "The constant counts only at the start of a line, so a comment, a longer name (OLD_TESTS_FORMAT_FROM = 76) or a string is not it (RI-012, round 2 test); a column-0 `<CONST> = ` line inside a triple-quoted string would still read as seen (strict: the new rule is kept, never a false "not seen")." No code line changed.
+
+File counts (from commands):
+```
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'
+0
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'
+2
+$ git diff --stat
+ scripts/check_pipeline.py    |  5 ++++-
+ tests/test_pipeline_check.py | 33 +++++++++++++++++++++++++++++++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+```
+
+## Round 2 deviation from plan
+6. (F1, I3 round 1) The plan's test list had no RI-012 negative test for the `^<CONST> = ` match; added as above at I3's request. It is parametrized over the three forms plus I3's combined text, so each form is pinned on its own (a mutation that only handled one form would still fail the others).
+
+## Round 2 connectivity check
+- The new test is collected and run by the suite (4 cases pass). It calls `_rule_seen` directly and the CLI (`_run`), so both the return value and the `RULE NOT SEEN` / `INCOMPLETE` output are its consumers.
+- No new function or branch in scripts/check_pipeline.py; docstring only. No TODO in the diff (`git diff -U0 | grep -E "^\+" | grep TODO`: no hit).
+- Missing-data grep: `grep -rnE "fillna|nan_to_num|or 0|else 0|pd\.notna\(.*\) and|is not None and|max\(1,|min\(1,|\.get\([^)]*, 0\)" ccbot/ | wc -l` -> 38, all pre-existing; this round changes no ccbot/ file and the diff's added lines have no hit. No dataclass field or `>`/`<` test was added (014). No feasibility test is named by the plan for this round.
+- `python3.11 -m py_compile scripts/check_pipeline.py tests/test_pipeline_check.py` -> OK (no output).
+
+## Round 2 test output (pasted)
+New test alone (repo):
+```
+$ python3 -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py -k "constant_inside"
+....                                                                     [100%]
+4 passed, 273 deselected in 3.11s
+```
+Full suite (repo, round-2 tree):
+```
+$ python3 -m pytest -q -p no:cacheprovider
+...
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_old_06_without_round_headers_unchanged
+FAILED tests/test_pipeline_check.py::test_i3_fail_target_not_stated - Asserti...
+FAILED tests/test_pipeline_check.py::test_pass_without_sent_back_none_is_incomplete
+4 failed, 637 passed, 1 skipped in 80.69s (0:01:20)
+```
+The 4 failures are pre-existing at HEAD 416835f, not from this round. Shown in the scratch copy with both round-2 files reset to HEAD (`git checkout -- scripts/check_pipeline.py tests/test_pipeline_check.py` there, never in the repo):
+```
+== HEAD 416835f, no round-2 edits
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_old_06_without_round_headers_unchanged
+FAILED tests/test_pipeline_check.py::test_i3_fail_target_not_stated
+FAILED tests/test_pipeline_check.py::test_pass_without_sent_back_none_is_incomplete
+4 failed, 269 passed in 33.64s
+```
+- `test_old_06_without_round_headers_unchanged`, `test_i3_fail_target_not_stated`, `test_pass_without_sent_back_none_is_incomplete`: 086's round-1 text (its own 05 says 3 tests conflict with planned text; 086 is back with I1). 086's, not 084's.
+- `test_repo_pipeline_has_no_skipped_items`: the repo's own pipeline state, not code. `python3 scripts/check_pipeline.py` in the repo exits 1 with `I3 FAIL: 081, 084, 086` (the open send-backs, 084 included, until a later PASS round); `INCOMPLETE: none`, and its `RULE NOT SEEN:` line is the expected 083 pair. It fails identically at HEAD.
+
+## Round 2 mutations (scratch copy, never the repo)
+Scratch copy: `cp -a /home/claude/cover-calls /tmp/claude-0/-home-claude/8f94cbd2-523d-52d1-8971-85df3e672dc0/scratchpad/i2-084-r2-mut/repo`. Each mutation edits line 644 of that copy's scripts/check_pipeline.py from a saved original; after the runs the file was restored and `cmp` with the repo file was identical (`restored-identical`).
+```
+== M6
+    return re.search(rf"{const} = ", text) is not None, sha[:7]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[all three]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[comment]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[longer name]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[string]
+4 failed, 7 passed, 266 deselected in 2.00s
+== M7
+    return (const in text), sha[:7]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[all three]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[comment]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[longer name]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[string]
+4 failed, 7 passed, 266 deselected in 2.07s
+restored-identical
+```
+(`-k "constant_inside or rule_not_seen or unseen or rule_anchor or rule_seen"`.) Whole tests/test_pipeline_check.py under each mutation (I3 ran this and got 247 passed, i.e. both survived):
+```
+== M6 (whole tests/test_pipeline_check.py)
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_old_06_without_round_headers_unchanged
+FAILED tests/test_pipeline_check.py::test_i3_fail_target_not_stated
+FAILED tests/test_pipeline_check.py::test_pass_without_sent_back_none_is_incomplete
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[all three]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[comment]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[longer name]
+FAILED tests/test_pipeline_check.py::test_rule_seen_ignores_constant_inside_other_text[string]
+8 failed, 269 passed in 33.54s
+== M7 (whole tests/test_pipeline_check.py)
+(same 8 FAILED lines)
+8 failed, 269 passed in 33.72s
+restored-identical
+```
+The 4 extra failures are the pre-existing ones above; the 4 new ones are this round's test. M6 and M7 no longer survive.
+
+## Round 2 recurring issues checked
+Read logs/recurring-issues.md first. Open/ESCALATED entries checked: RI-001, RI-010, RI-014; also RI-012 (the subject of F1) and RI-002.
+RI-001: ESCALATED, unchanged; this round computes nothing from a window or rule set.
+RI-002: GUARDED, unchanged; no value defaulted; the new test's (False, sha7) is only reached on a read rule file, and the docstring gap is strict (reads as seen, keeps the new rule).
+RI-010: ESCALATED, unchanged by this round; 084's guardrail now also pinned against embedded-constant false "not seen" (the 083-style false INCOMPLETE in reverse).
+RI-012: GUARDED; 084's constant match now has its negative test (comment, longer name, string); M6 and M7 each fail it. Remaining gap named in the docstring (column-0 line in a triple-quoted string, strict).
+RI-014: OPEN, unchanged; the new test runs in a full tmp repo (not shallow); shallow behaviour is (e1)'s, untouched.
