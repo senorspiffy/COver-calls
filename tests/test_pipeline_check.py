@@ -170,12 +170,21 @@ def test_repo_pipeline_has_no_skipped_items(tmp_path):
     """The committed work/ folder: no item may skip a step (RI-007). Runs on a detached worktree of
     HEAD, so another item's uncommitted step files in this tree don't fail it (item 066); run
     check_pipeline.py in the tree for uncommitted files (run-item.md)."""
+    flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=REPO, capture_output=True,
+                          text=True, encoding="utf-8")
+    if flag.returncode != 0 or flag.stdout.strip() != "false":
+        pytest.skip("REPO is a shallow clone: 083 is judged strictly (item 084); run git fetch --unshallow")
     code, out = _run_head(REPO, tmp_path, "check_pipeline.py")
     assert code == 0, out
     assert "RESEARCH CODE: none" in out                 # item 062
     assert "061: complete" in out                      # item 064: 061 stays complete with work/ .py as code
     assert "I3 FAIL: none" in out  # item 071
     assert "UNCOMMITTED STEP: none" in out             # item 077
+    lines = out.splitlines()                           # item 084: the exempt set is exactly {083}
+    assert [l for l in lines if l.startswith("RULE NOT SEEN:")] == [
+        "RULE NOT SEEN: 083 (05 added in cfc0634 without TESTS_FORMAT_FROM (076): judged by I2_BEFORE; "
+        "06 added in cfc0634 without VERDICT_FROM (071): judged by no Sent-back check; item 084)"], out
+    assert "INCOMPLETE: none" in lines, out
 
 
 def test_no_tracked_pycache():
@@ -2369,6 +2378,10 @@ GIT_CENSUS = {
     ("next_id", "_git_ok"): (2, "refusal, exit 2"),
     ("_inbox_gate", "_git"): (4, "flag 128 loud (081); log failure loud (069); show failure -> not checked"),
     ("main", "_git"): (2, "no-git probes"),
+    ("_anchor_env", "_git"): (1, "084: no-git probe -> RULE NOT SEEN: not checked (no git), strict"),
+    ("_rule_seen", "_git"): (1, "084: rev-parse --verify exit 1 = unborn HEAD (strict, no anchor); any other "
+                                "non-zero -> 'anchor: git failed' entry"),
+    ("_rule_seen", "_git_ok"): (3, "084: log/ls-tree/show failure -> 'anchor: git failed' entry, strict"),
 }
 
 
@@ -2404,7 +2417,7 @@ def test_git_call_census():
     walk(tree, None)
     assert dict(seen) == {k: v[0] for k, v in GIT_CENSUS.items()}
     assert all(reason.strip() for _, reason in GIT_CENSUS.values())
-    assert sum(seen.values()) == 41
+    assert sum(seen.values()) == 46                    # 41 (081) + 5 (084)
 
 
 def test_all_git_fails_no_line_says_none(tmp_path, monkeypatch, capsys):
@@ -2577,3 +2590,187 @@ def test_check_handoff_open_branches_states(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cp, "open_branches", lambda *a: None)
     assert check_handoff.check_all(tmp_path / "work") == 0
     assert "150: no hand-off" in capsys.readouterr().out
+
+
+# Item 084 (RI-010, RI-014): an item is judged by the rule in the tree of the commit that added its 05/06.
+OLD_RULES = "CHECKLIST_FROM = 41\n"
+NEW_RULES = "CHECKLIST_FROM = 41\nVERDICT_FROM = 71\nTESTS_FORMAT_FROM = 76\n"
+SEEN_150 = ("RULE NOT SEEN: 150 (05 added in {sha} without TESTS_FORMAT_FROM (076): judged by I2_BEFORE; "
+            "06 added in {sha} without VERDICT_FROM (071): judged by no Sent-back check; item 084)")
+NEW_I2_WANT = 'I2 wants "<n> files changed | tests <last line of python3 -m pytest -q, as printed>"'
+NO_SENT_BACK = "06 Verdict is PASS but has no 'Sent back to: none' line (item 071)"
+
+
+def _defective(root, item, i2="1 files changed | tests 9/9", date="2026-10-31"):
+    """Item `item` with every step and log line, but 06 has no Sent back line and its I2 log line is `i2`."""
+    _item(root, item, ALL, sent_back=None, date=date)
+    log = root / "logs" / "implementation" / f"{date}.md"
+    text = log.read_text(encoding="utf-8")
+    old = f"12:00 | I2 | {item} | {FIELDS['I2']}\n"
+    assert old in text
+    log.write_text(text.replace(old, f"12:00 | I2 | {item} | {i2}\n"), encoding="utf-8")
+
+
+def _rules_repo(tmp_path, i2="1 files changed | tests 9/9"):
+    """The PR #33 + main shape. Root: RULE_FILE without the constants. main: item 150 (both defects).
+    Branch rules off the root: the constants, then item 151 (both defects). Returns repo, root sha,
+    150's add commit on main, and the rules commit; main is checked out."""
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", OLD_RULES)
+    root = _commit(repo, "root")
+    _defective(repo, "150", i2)
+    added = _commit(repo, "150 on main")
+    _git(repo, "checkout", "-q", "-b", "rules", root)
+    _write(repo, "scripts/check_pipeline.py", NEW_RULES)
+    rules = _commit(repo, "rules")
+    _defective(repo, "151", date="2026-11-01")              # own log files: the merge has no conflict
+    _commit(repo, "151 on rules")
+    _git(repo, "checkout", "-q", "main")
+    return repo, root, added, rules
+
+
+def _merge_main_into_rules(repo):
+    _git(repo, "checkout", "-q", "rules")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+
+
+def _pick(out, prefix):
+    lines = [l for l in out.splitlines() if l.startswith(prefix)]
+    assert len(lines) == 1, out
+    return lines[0]
+
+
+@NO_GIT
+def test_rule_not_seen_item_merged_beside_rules_branch(tmp_path):
+    """(a) 150 was built on main under a rule file without the constants: listed, not INCOMPLETE,
+    before and after `rules` merges main. 151, built on `rules`, is still checked (M1, M2, M4)."""
+    repo, root, added, _ = _rules_repo(tmp_path)
+    args = ("--untracked-from", root, "--today", "2026-11-02")
+    _, out = _run(repo, "check_pipeline.py", *args)
+    assert _pick(out, "RULE NOT SEEN:") == SEEN_150.format(sha=added[:7]), out
+    assert "150 (" not in _pick(out, "INCOMPLETE:"), out
+    _merge_main_into_rules(repo)
+    _, out = _run(repo, "check_pipeline.py", *args)
+    assert _pick(out, "RULE NOT SEEN:") == SEEN_150.format(sha=added[:7]), out
+    inc = _pick(out, "INCOMPLETE:")
+    assert "150 (" not in inc, out
+    assert f"151 (log line for I2 does not match its format (item 045): {NEW_I2_WANT}; {NO_SENT_BACK})" in inc, out
+
+
+@NO_GIT
+def test_rule_not_seen_still_checks_old_rule(tmp_path):
+    """(b) 150's I2 line fails the old rule too (10/9): INCOMPLETE with the old hint; only its 06 pair is listed."""
+    repo, root, added, _ = _rules_repo(tmp_path, i2="1 files changed | tests 10/9")
+    _merge_main_into_rules(repo)
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", "2026-11-02")
+    assert _pick(out, "RULE NOT SEEN:") == (f"RULE NOT SEEN: 150 (06 added in {added[:7]} without VERDICT_FROM "
+                                            "(071): judged by no Sent-back check; item 084)"), out
+    inc = _pick(out, "INCOMPLETE:")
+    assert ('150 (log line for I2 does not match its format (item 045): I2 wants "<n> files changed | '
+            'tests <pass>/<total> (pass <= total)")') in inc, out
+    assert NO_SENT_BACK not in inc.split("151 (")[0], out
+
+
+@NO_GIT
+def test_unseen_item_that_passes_is_not_listed(tmp_path):
+    """(c) the 073 case: added under the old rule file but its lines pass the new rules: not listed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", OLD_RULES)
+    _item(repo, "152", ALL)
+    root = _commit(repo, "root")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", "2026-11-02")
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+    assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+
+
+@NO_GIT
+def test_rule_anchor_git_failure_is_incomplete(tmp_path, monkeypatch):
+    """(d1) a failed add-commit log or show is strict plus an entry, never 'not seen' (M3)."""
+    cp = _cp()
+    repo, _, added, _ = _rules_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    item = Path("work/150")
+    log = ("log", "--no-renames", "--diff-filter=A", "--format=%H", "-1", "--", "work/150/05-build-report.md")
+    for table in ({log: ("", 128)}, {("show", f"{added}:scripts/check_pipeline.py"): ("", 128)}):
+        _patched_git(monkeypatch, cp, table)
+        assert cp._rule_seen(item, "05", "TESTS_FORMAT_FROM", None) == (None, "05 anchor: git failed (item 084)")
+        ns = []
+        gaps = cp.incomplete(item, Path("logs"), env=None, not_seen=ns)
+        assert f"log line for I2 does not match its format (item 045): {NEW_I2_WANT}" in gaps, gaps
+        assert "05 anchor: git failed (item 084)" in gaps, gaps
+        assert not [p for p in ns if p[1] == "05"], ns
+        monkeypatch.undo()
+        monkeypatch.chdir(repo)
+
+
+@NO_GIT
+def test_rule_anchor_without_rule_file(tmp_path):
+    """(d2) the anchor commit has no scripts/check_pipeline.py: its own entry, strict, not listed.
+    Pins that `git ls-tree <A> -- <path>` exits 0 with empty output for an absent path."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _defective(repo, "150")
+    sha = _commit(repo, "no rule file")
+    ls = subprocess.run(["git", "ls-tree", "--name-only", sha, "--", "scripts/check_pipeline.py"], cwd=repo,
+                        capture_output=True, text=True)
+    assert (ls.returncode, ls.stdout) == (0, "")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", sha, "--today", "2026-11-02")
+    inc = _pick(out, "INCOMPLETE:")
+    assert f"05 anchor {sha[:7]} has no scripts/check_pipeline.py (item 084)" in inc, out
+    assert f"06 anchor {sha[:7]} has no scripts/check_pipeline.py (item 084)" in inc, out
+    assert NEW_I2_WANT in inc and NO_SENT_BACK in inc, out
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_rule_not_seen_shallow_and_no_git(tmp_path):
+    """(e1) a shallow clone is not checked and strict (M5); unshallowed it is the control.
+    (e2) without git: not checked, and 150's INCOMPLETE text is today's exactly."""
+    repo, root, _, rules = _rules_repo(tmp_path / "g")
+    _merge_main_into_rules(repo)
+    args = ("--untracked-from", root, "--today", "2026-11-02")
+    _shallow(repo, rules)
+    _, out = _run(repo, "check_pipeline.py", *args)
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: not checked (shallow clone; run git fetch --unshallow)", out
+    assert "150 (" in _pick(out, "INCOMPLETE:"), out
+    _unshallow(repo)
+    _, out = _run(repo, "check_pipeline.py", *args)
+    assert "150 (" not in _pick(out, "INCOMPLETE:"), out
+    assert _pick(out, "RULE NOT SEEN:").startswith("RULE NOT SEEN: 150 ("), out
+
+    plain = tmp_path / "plain"
+    _defective(plain, "150")
+    code, out = _run(plain, "check_pipeline.py", "--today", "2026-11-02")
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: not checked (no git)", out
+    assert _pick(out, "INCOMPLETE:") == (f"INCOMPLETE: 150 (log line for I2 does not match its format (item 045): "
+                                         f"{NEW_I2_WANT}; {NO_SENT_BACK})"), out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_rule_seen_positive_control_on_head(monkeypatch):
+    """(f1) on this repo: 076's 05 and 06 were added under both constants; 083's under neither (M2)."""
+    flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=REPO, capture_output=True,
+                          text=True, encoding="utf-8")
+    if flag.returncode != 0 or flag.stdout.strip() != "false":
+        pytest.skip("REPO is a shallow clone: no anchor is read (item 084); run git fetch --unshallow")
+    cp = _cp()
+    monkeypatch.chdir(REPO)
+    assert cp._rule_seen(Path("work/076"), "05", "TESTS_FORMAT_FROM", None)[0] is True
+    assert cp._rule_seen(Path("work/076"), "06", "VERDICT_FROM", None)[0] is True
+    assert cp._rule_seen(Path("work/083"), "05", "TESTS_FORMAT_FROM", None) == (False, "cfc0634")
+    assert cp._rule_seen(Path("work/083"), "06", "VERDICT_FROM", None) == (False, "cfc0634")
+
+
+def test_write_log_stays_numeric(tmp_path):
+    """(g) --log never applies an old rule: 083's old-form I2 line is still refused (exit 2)."""
+    _request(tmp_path, "083")
+    code, err = _log(tmp_path, "I2", "083", "2 files changed | tests 344/344")
+    assert code == 2 and "as printed" in err, err
+    assert not (tmp_path / "logs").exists()

@@ -214,6 +214,23 @@ not that A1 read the channels; I3 and A1 spot-check that. (u) a report written b
 before a pull that brings the new template is judged by the new template: commit the daily report
 before pulling. (v) removing `## Inbox` from the template later switches the check off for reports
 added after that; this is intended, the rule follows the template.
+RULE NOT SEEN (item 084, RI-010): an item is judged by the rule it was built under. When the I2
+tests-field check (TESTS_FORMAT_FROM) or the 06 verdict-line checks (VERDICT_FROM) would fire, the
+commit that added its 05 or 06 (`git log --no-renames --diff-filter=A -1`, default history
+simplification, never --first-parent) is the anchor; if RULE_FILE in that commit's tree has no
+`^<CONST> = ` line, the rule was not seen: the I2 lines are judged by I2_BEFORE (and stay INCOMPLETE
+with its hint if they fail it), and the verdict checks are dropped (below VERDICT_FROM there are
+none). Each such pair is printed after INCOMPLETE as `RULE NOT SEEN: <ID> (<step> added in <sha7>
+without <CONST> (<rule item>): judged by <old rule>; item 084)`, or `none`; the exit code is
+unchanged. No git or a shallow clone (079's _shallow_boundaries) prints `RULE NOT SEEN: not checked
+(no git)` / `not checked (shallow clone; run git fetch --unshallow)` and keeps the numeric cutoffs.
+An uncommitted 05/06 or an unborn HEAD keeps them too; a failed git call (`<step> anchor: git failed
+(item 084)`) or an anchor tree without RULE_FILE (`<step> anchor <sha7> has no
+scripts/check_pipeline.py (item 084)`) keeps them and adds that entry (exit 1). Items below either
+cutoff make no git call. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
+items today); the 06 verdict vs last I3 line cross-check stays at CHECKLIST_FROM by decision;
+CHECKLIST_FROM, LOG_CHECK_FROM and their checks stay numeric; --log (write_log) stays numeric, so a
+new log line is never judged by an old rule.
 """
 import datetime as dt
 import os
@@ -264,6 +281,7 @@ WHOLE_DIFF_FROM = 70
 # column-0 `Verdict:` / `Sent back to:` line outside code fences and HTML comments decides; never
 # a later one, never a substring (RI-012). From VERDICT_FROM on an unreadable value is INCOMPLETE.
 VERDICT_FROM = 71
+RULE_FILE = "scripts/check_pipeline.py"   # item 084: the file whose copy in an anchor commit's tree is read
 VERDICT_LINE = re.compile(r"Verdict:[ \t]*(?:\*\*)?(PASS|FAIL)\b(?![ \t*]*[|/])")   # .match on the line
 SENT_BACK_LINE = re.compile(r"Sent back to:[ \t]*(I1 I2|I1|I2|none)[ \t]*")         # .fullmatch on the line
 # Item 070: realtest's decision path: ccbot/realtest.py, the ccbot modules it imports and the config
@@ -482,19 +500,23 @@ def classify(item_dir, today):
     return "in progress", f"{scope}: next {need[len(have)]}{extra}"
 
 
-def log_fields_ok(agent, item, fields) -> bool:
+def log_fields_ok(agent, item, fields, new_rule=True) -> bool:
     """Item 076: whether a log line's fields fit its agent's format for this item. I2 lines of items
-    before TESTS_FORMAT_FROM use I2_BEFORE and need pass <= total; every other line LOG_FORMAT."""
-    if agent == "I2" and int(item) < TESTS_FORMAT_FROM:
+    before TESTS_FORMAT_FROM use I2_BEFORE and need pass <= total; every other line LOG_FORMAT.
+    Item 084: new_rule=False (the item's 05 was added under a rule file without TESTS_FORMAT_FROM)
+    applies I2_BEFORE too; write_log never passes it."""
+    if agent == "I2" and (int(item) < TESTS_FORMAT_FROM or not new_rule):
         m = re.fullmatch(I2_BEFORE, fields.strip())
         return bool(m) and int(m[1]) <= int(m[2])
     return bool(re.fullmatch(LOG_FORMAT[agent], fields.strip()))
 
 
-def log_hint(agent, item) -> str:
+def log_hint(agent, item, new_rule=True) -> str:
     """Item 076: the plain-words format that applies to this agent and item (LOG_HINT_BEFORE first).
-    An ID that is not 3 digits (refused by write_log) gets the current form, never a traceback."""
-    if agent in LOG_HINT_BEFORE and re.fullmatch(r"\d{3}", item) and int(item) < TESTS_FORMAT_FROM:
+    An ID that is not 3 digits (refused by write_log) gets the current form, never a traceback.
+    Item 084: new_rule=False gives LOG_HINT_BEFORE, as in log_fields_ok."""
+    if agent in LOG_HINT_BEFORE and re.fullmatch(r"\d{3}", item) and (int(item) < TESTS_FORMAT_FROM
+                                                                      or not new_rule):
         return LOG_HINT_BEFORE[agent][0]
     return LOG_HINT[agent][0]
 
@@ -534,8 +556,56 @@ def uncommitted_steps(logs=Path("logs")):
     return "; ".join(entries) or "none", bool(entries)
 
 
-def incomplete(item_dir, logs=Path("logs")):
-    """Item 043: what is missing from a step's own checklist ([] = nothing)."""
+def _anchor_env():
+    """Item 084 (RI-014): None when git can give the commit that added a step file; "no git", or
+    "shallow clone; run git fetch --unshallow" when _shallow_boundaries (079) gives boundaries or
+    "unreadable". Then no anchor is read and every item keeps the numeric cutoffs (strict)."""
+    if _git("rev-parse", "--git-dir") is None:
+        return "no git"
+    s = _shallow_boundaries()
+    if s == "unreadable" or (isinstance(s, list) and s):
+        return "shallow clone; run git fetch --unshallow"
+    return None
+
+
+def _rule_seen(item_dir, step, const, env):
+    """Item 084 (RI-010): whether `const` (`^<const> = `) is in RULE_FILE in the tree of the commit
+    that added work/<ID>/<step file> (default history simplification, no --first-parent).
+    (True|False, sha7) when read; (None, "") with env set, an unborn HEAD or an uncommitted file;
+    (None, "<step> anchor: git failed (item 084)") on any failed git call and (None, "<step> anchor
+    <sha7> has no RULE_FILE (item 084)") when the file is absent there. None keeps the strict rule."""
+    if env is not None:
+        return None, ""
+    head = _git("rev-parse", "--verify", "-q", "HEAD")
+    if head is None or head[1] == 1:                        # no git, or unborn HEAD: nothing to anchor
+        return None, ""
+    failed = f"{step} anchor: git failed (item 084)"
+    if head[1] != 0:
+        return None, failed
+    sha, why = _git_ok("log", "--no-renames", "--diff-filter=A", "--format=%H", "-1", "--",
+                       f"work/{item_dir.name}/{STEPS[step]}")
+    if why:
+        return None, failed
+    sha = sha.strip()
+    if not sha:
+        return None, ""
+    ls, why = _git_ok("ls-tree", "--name-only", sha, "--", RULE_FILE)
+    if why:
+        return None, failed
+    if not ls.strip():
+        return None, f"{step} anchor {sha[:7]} has no {RULE_FILE} (item 084)"
+    text, why = _git_ok("show", f"{sha}:{RULE_FILE}")
+    if why:
+        return None, failed
+    return re.search(rf"^{const} = ", text, re.M) is not None, sha[:7]
+
+
+def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
+    """Item 043: what is missing from a step's own checklist ([] = nothing). Item 084: a TESTS or
+    VERDICT check that would fire is dropped only if the item's 05 / 06 was added under a rule file
+    without that constant (_rule_seen False) and, for I2, every I2 line passes I2_BEFORE; each such
+    pair is appended to `not_seen` as (ID, step, sha7, constant, rule item, old rule)."""
+    not_seen = [] if not_seen is None else not_seen
     if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
         return []
     missing = []
@@ -550,18 +620,38 @@ def incomplete(item_dir, logs=Path("logs")):
     if int(item_dir.name) >= LOG_CHECK_FROM:
         bad = sorted({m[3] for m in (LOG_LINE.match(l) for l in text.splitlines())
                       if m and m[4] == item_dir.name and not log_fields_ok(m[3], m[4], m[5])})
+        new_rule, note = True, ""
+        if "I2" in bad and int(item_dir.name) >= TESTS_FORMAT_FROM:    # item 084: TESTS gate
+            seen, sha7 = _rule_seen(item_dir, "05", "TESTS_FORMAT_FROM", env)
+            note = sha7 if seen is None else ""             # a git-failed or no-file note; "" otherwise
+            if seen is False:
+                new_rule = False
+                if all(log_fields_ok("I2", m[4], m[5], new_rule=False)
+                       for m in (LOG_LINE.match(l) for l in text.splitlines())
+                       if m and m[3] == "I2" and m[4] == item_dir.name):
+                    bad.remove("I2")
+                    not_seen.append((item_dir.name, "05", sha7, "TESTS_FORMAT_FROM", "076", "I2_BEFORE"))
         if bad:
-            wants = "; ".join(f'{a} wants "{log_hint(a, item_dir.name)}"' for a in bad)
+            wants = "; ".join(f'{a} wants "{log_hint(a, item_dir.name, new_rule)}"' for a in bad)
             missing.append(f"log line for {' '.join(bad)} does not match its format (item 045): {wants}")
+        if note:
+            missing.append(note)
     if ver.exists():                                        # item 071 (a)-(d)
         verdict, target = i3_verdict(ver)
         if int(item_dir.name) >= VERDICT_FROM:
+            fired = []
             if verdict is None:
-                missing.append("06 has no readable 'Verdict: PASS' or 'Verdict: FAIL' line (item 071)")
+                fired.append("06 has no readable 'Verdict: PASS' or 'Verdict: FAIL' line (item 071)")
             elif verdict == "FAIL" and target not in ("I1", "I2", "I1 I2"):
-                missing.append("06 Verdict is FAIL but has no 'Sent back to: I1, I2 or I1 I2' line (item 071)")
+                fired.append("06 Verdict is FAIL but has no 'Sent back to: I1, I2 or I1 I2' line (item 071)")
             elif verdict == "PASS" and target != "none":
-                missing.append("06 Verdict is PASS but has no 'Sent back to: none' line (item 071)")
+                fired.append("06 Verdict is PASS but has no 'Sent back to: none' line (item 071)")
+            if fired:                                       # item 084: VERDICT gate, only when one fires
+                seen, sha7 = _rule_seen(item_dir, "06", "VERDICT_FROM", env)
+                if seen is False:                           # below VERDICT_FROM there is no verdict-line check
+                    not_seen.append((item_dir.name, "06", sha7, "VERDICT_FROM", "071", "no Sent-back check"))
+                else:
+                    missing += fired + ([sha7] if seen is None and sha7 else [])
         if verdict is not None:
             last = None                                     # the item's last I3 line: by file date, then line order
             impl = logs / "implementation"
@@ -1160,6 +1250,7 @@ def main(argv):
     branches = open_branches(today)
     blist = branches if isinstance(branches, list) else []  # item 081: None (no git) or a git error
     walked = _walk(cutoff) if _git("rev-parse", "HEAD") is not None else None
+    env, not_seen = _anchor_env(), []                       # item 084: computed once
     untracked = untracked_changes(cutoff, walked)
     research = research_code(cutoff, walked)
     real = real_data_field(cutoff, walked)                  # item 070
@@ -1190,7 +1281,7 @@ def main(argv):
             failed.append(d.name)
         if status == "I3 FAIL":
             i3_failed.append(d.name)
-        gaps = incomplete(d) + (real[1].get(d.name, []) if real else [])
+        gaps = incomplete(d, env=env, not_seen=not_seen) + (real[1].get(d.name, []) if real else [])
         if gaps:
             unfinished.append(f"{d.name} ({'; '.join(gaps)})")
     for item in sorted(set(flagged) - {d.name for d in listed}):   # item 062: no request.md here
@@ -1235,6 +1326,11 @@ def main(argv):
     print(f"I3 FAIL: {', '.join(i3_failed) or 'none'}")
     print(f"A1 FAIL: {', '.join(failed) or 'none'}")
     print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
+    by_id = {}                                              # item 084: information, exit unchanged
+    for item, step, sha7, const, rule, old in not_seen:
+        by_id.setdefault(item, []).append(f"{step} added in {sha7} without {const} ({rule}): judged by {old}")
+    seen_text = ", ".join(f"{i} ({'; '.join(p)}; item 084)" for i, p in by_id.items())
+    print(f"RULE NOT SEEN: {f'not checked ({env})' if env else seen_text or 'none'}")
     late = late_log_lines()
     excepted = "; ".join(f"{i}: {why}" for i, why in sorted(LOG_TIME_EXCEPT.items())
                          if (work / i / "request.md").exists())
