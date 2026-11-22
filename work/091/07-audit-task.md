@@ -23,3 +23,4 @@ Evidence: I3 round-2 dir `/tmp/claude-0/-home-claude/6b779538-e393-5b21-a85a-072
 - cp_before.txt and cp_after.txt (check_pipeline output).
 
 Round 1: `.../scratchpad/i3-091-r1-dpe6hf15`. The worktrees under `/tmp/claude-0/scratch/i3-091r2-UxQ8` were removed after the runs.
+A1 result: PASS (2026-11-22, logs/audit/2026-11-22-091.md)
