@@ -504,7 +504,7 @@ FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
 ```
 The one failure is `test_repo_pipeline_has_no_skipped_items`, from `INCOMPLETE: 091 (no log line for I2)`: the I2 line can only be written after this run, since its `tests` field is this run's last line (the same transient state as 087's I2 line `1 failed, 761 passed, 1 skipped`). No `I3 FAIL:` / `A1 FAIL:` item is open (`I3 FAIL: none`, `A1 FAIL: none`).
 
-Suite: 1 failed, 804 passed, 1 skipped in 107.81s (0:01:47)
+Round 1's `Suite:` line (replaced by round 2's below): 1 failed, 804 passed, 1 skipped in 107.81s (0:01:47)
 
 Other checks:
 ```
@@ -530,6 +530,217 @@ $ grep -nE "091|INCOMPLETE|FAIL:|UNTRACKED|LOG TIME|LOG BATCH|SKIPPED" out.txt
 ```
 091 shows no INCOMPLETE or SKIPPED, and LOG TIME and LOG BATCH do not name it. Before the I2 line the same run gave exit 1 with only `INCOMPLETE: 091 (no log line for I2)`.
 
+## Round 2 (I3 FAIL round 1: 06 F1, F2, F3)
+Base of round 2: d39d811 (`Item 091: 02:28 | I3 | 091 | FAIL | sent to audit: no`), on daily-fixes/2026-11-21. Scratch dir made with `mktemp -d /tmp/claude-0/scratch/i2-091r2-XXXX` → `/tmp/claude-0/scratch/i2-091r2-LpYi` (worktree `wt` of d39d811 + the 2 round-2 files; removed after the probes, `git worktree list` shows only the main checkout, `git stash list | wc -l` gives 0). No `git stash` used.
+
+### Changes made, round 2 (file: what changed)
+- scripts/commit_step.py (F1): new `repo_relative(p, top)`: the named path is made absolute from the cwd (`os.path.abspath`), its parent directory resolved (`.resolve()`, the name itself is not, so a named symlink stays a symlink), then `relative_to(top)`; outside the top → Refused `<p> is outside the repo top; name files inside it (item 091)`. `commit()` keeps the resolved top (`topdir`) from `rev-parse --show-toplevel` and runs every named path through `repo_relative` before the log-dir, missing and directory checks; `update-index` and the closing `reset` get that relative form. Module text (i) says so.
+- tests/test_commit_step.py (F1, F2): 6 new test cases:
+  - `test_t3_absolute_log_path_is_refused[with-own-line]` and `[no-own-line]` (absolute log path refused, `rev-parse HEAD` and `.git/index` bytes unchanged; `no-own-line` is I3's probe B shape: the working log gains only 151's line);
+  - `test_t3_absolute_named_path_is_committed_relative` (absolute non-log path accepted, committed as `work/150/05-build-report.md`, x.txt still staged and out of the commit);
+  - `test_t3_absolute_path_through_symlinked_dir` (absolute path through a symlink to the repo: inside, committed relative);
+  - `test_t3_path_outside_repo_is_refused[absolute]` and `[relative]` (`../outside.md`);
+  - `test_filter_log_pattern_inside_other_text` (F2: `01:05 | I2 | 151 | see 150 | I3 | 150 | x` dropped and not 150's; `note: 01:06 | I2 | 151 | quoted` kept and not counted; `own == [L150]`).
+- work/091/05-build-report.md (F3): this section, Deviations 9-11, round 1's `Suite:` line moved out of column 0.
+
+### Mutation probes, round 2 (scratch worktree above; whole tests/test_commit_step.py each; one after another, file restored after each)
+```
+== F1-noresolve: 4 failed, 24 passed in 1.87s
+    FAILED tests/test_commit_step.py::test_t3_absolute_log_path_is_refused[with-own-line]
+    FAILED tests/test_commit_step.py::test_t3_absolute_log_path_is_refused[no-own-line]
+    FAILED tests/test_commit_step.py::test_t3_path_outside_repo_is_refused[absolute]
+    FAILED tests/test_commit_step.py::test_t3_path_outside_repo_is_refused[relative]
+== F1-noparentresolve: 1 failed, 27 passed in 1.83s
+    FAILED tests/test_commit_step.py::test_t3_absolute_path_through_symlinked_dir
+== F2-search: 28 passed in 1.84s
+== F2-search-noanchor: 1 failed, 27 passed in 1.99s
+    FAILED tests/test_commit_step.py::test_filter_log_pattern_inside_other_text
+== F2-substr: 1 failed, 27 passed in 2.03s
+    FAILED tests/test_commit_step.py::test_filter_log_pattern_inside_other_text
+```
+- F1-noresolve: `n = repo_relative(p, topdir)` → round 1's `n = Path(os.path.normpath(p)).as_posix()` (06 F1's mutant row: "resolution removed → the absolute-log row fails"). Killed by both absolute-log rows.
+- F1-noparentresolve: `(a.parent.resolve() / a.name).relative_to(top)` → `a.relative_to(top)`. Killed by the symlink row (before that row was added it survived: 27 passed; the row was added for it).
+- F2-search: `LOG_LINE.match` → `LOG_LINE.search`. Survives, and is equivalent: LOG_LINE starts with `^` and has no `re.M`, so `.search` can match only at position 0, the same as `.match`.
+- F2-search-noanchor: `LOG_LINE.search` with the leading `^` removed (the mutant 06 F2 means: a match anywhere in the line). Killed by the new test (the `note:` line is dropped as 151's).
+- F2-substr: owner by `f"| {item} |" in line` instead of group 4. Killed by the new test (the 151 line with `| 150 |` is kept and counted as 150's).
+The harness is at /tmp/claude-0/-home-claude/6b779538-e393-5b21-a85a-072369e659f6/scratchpad/i2-091r2-mut.py.
+
+### Connectivity, round 2
+- `repo_relative` is called by `commit()` for every named path and reached by the 6 new T3 cases; its Refused ends in exit 2 with nothing written (the T3 asserts check `.git/index` and HEAD).
+- `topdir` is the resolved top that the cwd check already compared; no new input.
+- `grep -n TODO scripts/commit_step.py tests/test_commit_step.py` prints nothing.
+- Missing-data policy: `grep -rnE "fillna|nan_to_num|or 0|else 0|pd\.notna\(.*\) and|is not None and|max\(1,|min\(1,|\.get\([^)]*, 0\)" ccbot/ | wc -l` gives 38, none new (`git diff --stat 7e537c2 -- ccbot/ config/ data/` is empty). The same grep on scripts/commit_step.py gives the round-1 L130 hit (unchanged, reason above). The new `topdir = ... if top[1] == 0 else None` is not a default: None is refused on the next line (`not the top of a git work tree`). No dataclass, no new `>`/`<`.
+- `python3.11 -m py_compile` on scripts/commit_step.py and tests/test_commit_step.py: `ok scripts/commit_step.py`, `ok tests/test_commit_step.py`.
+- Feasibility (06 F1): I3's probe B shape is the `no-own-line` row; it passes on the fix (exit 2, state unchanged) and fails on F1-noresolve.
+
+## Test output (round 2, pasted)
+`python3 -m pytest -q tests/test_commit_step.py`: `28 passed in 1.86s`.
+
+`python3 -m pytest -q` from the repo root, at d39d811 with the 2 round-2 files and this 05 in the working tree, before the I2 log line (whole output, as printed):
+```
+........................................................................ [  8%]
+..................................................................s..... [ 17%]
+........................................................................ [ 26%]
+.................................F...................................... [ 35%]
+........................................................................ [ 44%]
+........................................................................ [ 53%]
+........................................................................ [ 61%]
+........................................................................ [ 70%]
+........................................................................ [ 79%]
+........................................................................ [ 88%]
+........................................................................ [ 97%]
+.....................                                                    [100%]
+=================================== FAILURES ===================================
+___________________ test_repo_pipeline_has_no_skipped_items ____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-338/test_repo_pipeline_has_no_skip0')
+
+    @NO_GIT
+    def test_repo_pipeline_has_no_skipped_items(tmp_path):
+        """The committed work/ folder: no item may skip a step (RI-007). Runs on a detached worktree of
+        HEAD, so another item's uncommitted step files in this tree don't fail it (item 066); run
+        check_pipeline.py in the tree for uncommitted files (run-item.md)."""
+        flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=REPO, capture_output=True,
+                              text=True, encoding="utf-8")
+        if flag.returncode != 0 or flag.stdout.strip() != "false":
+            pytest.skip("REPO is a shallow clone: 083 is judged strictly (item 084); run git fetch --unshallow")
+        code, out = _run_head(REPO, tmp_path, "check_pipeline.py")
+>       assert code == 0, out
+E       AssertionError: 001: LEGACY (RESEARCH ONLY before 07-audit-task existed (item 021))
+E         002: complete (FULL)
+E         003: complete (FULL)
+E         004: LEGACY (07 is combined in work/003/07-audit-task.md)
+E         005: LEGACY (07 is combined in work/003/07-audit-task.md)
+E         006: LEGACY (07 is combined in work/003/07-audit-task.md)
+E         007: LEGACY (07 is combined in work/003/07-audit-task.md)
+E         008: LEGACY (07 is combined in work/003/07-audit-task.md)
+E         009: complete (FULL)
+E         010: complete (FULL)
+E         011: complete (FULL)
+E         012: complete (FULL)
+E         013: complete (FULL)
+E         014: complete (FULL)
+E         015: complete (FULL)
+E         016: complete (FULL)
+E         017: complete (FULL)
+E         018: complete (FULL)
+E         019: complete (FULL)
+E         020: complete (FULL)
+E         021: complete (FULL)
+E         022: complete (FULL)
+E         023: complete (RESEARCH ONLY; Waived: 02 (A1, 2026-10-31, item 026: the screen was already delivered; R3's fact check was run afterwards in 026; the person can ask for the R2 language search))
+E         024: complete (FULL; Waived: 01 02 03 04 (person, 2026-10-31: approved by merging PR #6, which asked for this waiver by name. Written by A1 in item 026: built and merged before the step check existed; the rule is the person's own decision in 001; I3 ran afterwards in 026. Who-field updated in item 031.))
+E         025: complete (FULL)
+E         026: complete (FULL)
+E         027: complete (FULL)
+E         028: complete (FULL)
+E         029: complete (FULL)
+E         030: complete (FULL)
+E         031: complete (FULL)
+E         032: complete (FULL)
+E         033: complete (FULL)
+E         034: complete (FULL)
+E         035: complete (FULL)
+E         036: complete (FULL)
+E         037: complete (FULL)
+E         038: complete (FULL)
+E         039: complete (FULL)
+E         040: complete (FAST)
+E         041: complete (FULL)
+E         042: complete (FULL)
+E         043: complete (FULL)
+E         044: complete (FULL)
+E         045: complete (FULL)
+E         046: complete (FULL)
+E         047: complete (FULL)
+E         048: complete (FULL)
+E         049: complete (FULL)
+E         050: complete (FULL)
+E         051: complete (FULL)
+E         052: complete (FULL)
+E         053: complete (FULL)
+E         054: complete (FULL)
+E         055: complete (FULL)
+E         056: complete (FULL)
+E         057: complete (RESEARCH ONLY)
+E         058: complete (FULL)
+E         059: complete (FULL)
+E         060: complete (FULL)
+E         061: complete (FULL)
+E         062: complete (FULL)
+E         063: complete (FULL)
+E         064: complete (FULL)
+E         065: complete (FULL)
+E         066: complete (FULL)
+E         067: complete (FULL)
+E         068: complete (FULL)
+E         069: complete (FULL)
+E         070: complete (FULL)
+E         071: complete (FULL)
+E         072: complete (FULL)
+E         073: complete (FULL)
+E         074: complete (FULL)
+E         075: complete (FULL)
+E         076: complete (FULL)
+E         077: complete (FULL)
+E         078: complete (FULL)
+E         079: complete (FULL)
+E         080: complete (FULL)
+E         081: complete (FULL)
+E         082: complete (FULL)
+E         083: complete (FULL)
+E         084: complete (FULL)
+E         085: complete (FULL)
+E         086: complete (FULL)
+E         087: complete (FULL)
+E         088: complete (FULL)
+E         089: complete (FULL)
+E         090: complete (FULL)
+E         091: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))
+E         STUCK: none
+E         AWAITING A1: none
+E         IN PR: none
+E         OPEN BRANCHES (not merged into HEAD):
+E           origin/claude/project-thread-f64g3k: items none; merges cleanly; last commit 2026-11-21 (1 days)
+E         RULES BRANCH: none
+E         ID CLASH: none
+E         I3 FAIL: 091
+E         A1 FAIL: none
+E         INCOMPLETE: none
+E         RULE NOT SEEN: 083 (05 added in cfc0634 without TESTS_FORMAT_FROM (076): judged by I2_BEFORE; 06 added in cfc0634 without VERDICT_FROM (071): judged by no Sent-back check; item 084)
+E         LOG TIME: none (not checked: 048: built before 045's --log rule reached main; times typed by hand, not recoverable (item 049))
+E         LOG BATCH: none (not checked: 083: six lines written in one batch at 10:15 after the build (commit cfc0634 10:15:48); real times not recoverable (item 086)); not computable: 048: no pytest time in 05/06/I2 line; 054: no pytest time in 05/06/I2 line; 055: no pytest time in 05/06/I2 line; 056: no pytest time in 05/06/I2 line; 058: no pytest time in 05/06/I2 line; 059: no pytest time in 05/06/I2 line; 060: no pytest time in 05/06/I2 line
+E         UNTRACKED CHANGE: none
+E         RESEARCH CODE: none
+E         REAL-DATA FIELD: none
+E         UNCOMMITTED STEP: none
+E         ORPHAN LOG: none
+E         UNREADABLE: none
+E         INBOX: not checked (2026-11-21.md added in 0d94a94; its templates/daily-audit.md has no ## Inbox)
+E         SKIPPED: none
+E         
+E       assert 1 == 0
+
+tests/test_pipeline_check.py:182: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 811 passed, 1 skipped in 111.62s (0:01:51)
+```
+The one failure is `test_repo_pipeline_has_no_skipped_items`. Its only failing lines are `091: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))` and `I3 FAIL: 091`: 091 is in I3 FAIL with its 06 committed (d39d811), so this is expected (item 071), not a defect of this build. `INCOMPLETE: none`, `A1 FAIL: none`, `SKIPPED: none` in the same output.
+
+Suite: 1 failed, 811 passed, 1 skipped in 111.62s (0:01:51)
+
+`python3 scripts/check_pipeline.py` after the I2 `--log` line, before the commit: exit 1; `091: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))`, `I3 FAIL: 091`, `A1 FAIL: none`, `INCOMPLETE: none`, `SKIPPED: none`, LOG TIME and LOG BATCH do not name 091. The exit 1 is the expected FAIL-round state (item 071). Before the line: the same plus `INCOMPLETE: 091 (05 Suite line does not equal the last I2 log tests field ...)`, gone once the line was written.
+
+### File counts, round 2 (item 012)
+```
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'
+0
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'
+2
+```
+The log field uses 2 (scripts/commit_step.py, tests/test_commit_step.py).
+
 ## Real-data effect (diff_reports output, pasted)
 not required (`git diff --stat 7e537c2 -- ccbot/ config/ data/` is empty: no file under ccbot/, config/ or data/ changes)
 
@@ -553,6 +764,10 @@ Whole item, (A)+(B)+(C): `git diff --name-only 7e537c2 -- . ':!work' ':!logs' | 
 7. 04 says commit_step's output for (C) is pasted in 05. 05 is inside commit (C), so the helper's output for that commit cannot be in it; it is in I2's hand-off, and `git show --stat <C>` (05, the 5 files and only 091's I2 log line) is the record for I3.
 8. 04 row "`_section_flags` closer `#{1,3} ` → N1 and an existing LOG BATCH test": N1 and the new `test_section_flags_match_run_seconds_rule` fail; no pre-existing LOG BATCH test does (above).
 
+9. (Round 1, 06 F3) Commit (C) was made by `scripts/commit_step.py` as 66f0fcf and then amended to 4990002 with `git commit --amend --only` to add the session trailers (the helper takes no trailer argument). Tree and parent are unchanged: `66f0fcf^{tree}` = `4990002^{tree}` = a6cdc2c..., both parents 8dec4f6 (I3 checked; reflog `66f0fcf commit_step: Item 091: 01:53 | I2 | ...` then `4990002 commit (amend)`). `--only` with no paths commits the same tree as HEAD and does not take the shared index; a plain `--amend` would. Round 1's helper output, as `commit()` prints it (`<sha7> <subject>`), rebuilt from the reflog entry because the terminal copy was not kept: `66f0fcf Item 091: 01:53 | I2 | 091 | 12 files changed | tests 1 failed, 804 passed, 1 skipped in 107.81s (0:01:47)`.
+10. Round 2's commit is made the same way: `commit_step.py 091 "Item 091: <the --log line>" scripts/commit_step.py tests/test_commit_step.py work/091/05-build-report.md` (relative paths), then `git commit --amend --only` for the trailers only. Its own output cannot be in this file (it is inside that commit, Deviations 7); it is in I2's hand-off, and I3 can check the tree with `git rev-parse <helper sha>^{tree} <amended sha>^{tree}` from the reflog.
+11. Round 2 extras beyond 06's list: an `outside the repo top` refusal for `../` and absolute paths (06 F1 asks for it in the fix text, with no row: rows added), and the symlinked-dir row with its mutant (F1-noparentresolve), so the parent `.resolve()` is pinned. F2-search (`.match` → `.search`) is equivalent and survives (above); the anchor-free form is the one killed.
+
 ## Residuals
 - runs with no heading (076/05 L29-59) are not seen by the round-heading check;
 - headings indented 1-3 spaces are not matched (`.match` at column 0);
@@ -564,6 +779,7 @@ Whole item, (A)+(B)+(C): `git diff --name-only 7e537c2 -- . ':!work' ':!logs' | 
 - RI-010 (ESCALATED): new duties get a check where one can (5b INCOMPLETE; commit_step refuses a wrong subject or a batch, and makes this item's own commit). 5a and 7 are text only, stated above. The I2 log line is written with `--log`, never typed.
 - RI-014 (OPEN): no new depth-dependent reader; 5b uses the 084 gate (strict when shallow); UNSHALLOW names RULE NOT SEEN.
 - Also checked (GUARDED): RI-002 (missing-data grep above; no default on a failed read), RI-006 (file counts from commands), RI-008 (py_compile 3.11 on the 5 .py files; no prefixmatch; no backslash in an f-string expression), RI-009 (mutations only in the scratch worktree; stash incident in Deviations 5), RI-012 (anchored `.match`, N2 negative; commit_step classifies git results by exit code only), RI-013 (whole-output diff of check_pipeline before/after (B): IDENTICAL).
+Round 2 re-check: RI-001 (counts measured: 6 new cases, 5 mutants, 4/1/0/1/1 failures as printed), RI-010 (the F1 bypass of commit_step is closed and pinned by a killed mutant), RI-012 (filter_log's owner match now has its negative test; equivalent `.search` noted), RI-009 (mutants in a mktemp scratch worktree only, no stash), RI-002 (grep above, no default), RI-008 (py_compile 3.11), RI-006 (file counts from commands), RI-014 (no git-depth reader added), RI-013 (no report effect: ccbot/config/data unchanged).
 RI-001: ESCALATED, unchanged by 091.
 RI-010: ESCALATED; 091 adds commit_step (086 F4) and the round-heading check (086 F3); GUARDED condition unchanged (086 merged and its 083 fixture flagged).
 RI-014: OPEN, unchanged; UNSHALLOW now names RULE NOT SEEN.

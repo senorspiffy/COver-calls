@@ -8,9 +8,10 @@ of several items at once. `git add` of such a file would commit another item's u
 (91ade51 carried 081's I3 line). This helper builds the commit in a temporary index, never touching
 the shared one until the commit is made:
   (i)   refuses (exit 2, nothing written) when git is missing, the cwd is not the repo top, HEAD is
-        unborn, the ID is not 3 digits, a named path is missing (deletions are not supported) or a
-        directory, or a named path is a log file under logs/research/ or logs/implementation/ (the
-        helper finds those itself);
+        unborn, the ID is not 3 digits, a named path is outside the repo top, missing (deletions are
+        not supported) or a directory, or a log file under logs/research/ or logs/implementation/ (the
+        helper finds those itself). Every named path, relative or absolute, is first made relative to
+        the repo top (repo_relative); the checks and `update-index` use that form (06 F1);
   (ii)  for each log file in the working tree, keeps HEAD's lines and every added line except a LOG_LINE
         (check_pipeline) of another item, in working-tree order. HEAD's lines must be an in-order
         subsequence of the working lines, and both texts strict UTF-8; else refused, never a whole-file
@@ -85,6 +86,17 @@ def filter_log(work, head, item, name="log file"):
     return "".join(out).encode("utf-8"), own
 
 
+def repo_relative(p, top):
+    """The repo-relative posix form of a named path, relative or absolute (item 091 r2, 06 F1): made
+    absolute from the cwd and normalized, its parent directory resolved (symlinks) but not the name
+    itself, so a named symlink stays a symlink. Raises Refused when the path is outside `top`."""
+    a = Path(os.path.abspath(p))
+    try:
+        return (a.parent.resolve() / a.name).relative_to(top).as_posix()
+    except ValueError:
+        raise Refused(f"{p} is outside the repo top; name files inside it (item 091)") from None
+
+
 def _git(run, args, env=None, input=None):
     """stdout bytes of a git command that must succeed, else Refused with the command and code."""
     r = run(args, env=env, input=input)
@@ -126,7 +138,8 @@ def commit(item, subject, paths, run=run, old=None):
         top = run(["rev-parse", "--show-toplevel"])
         if top is None:
             raise Refused("no git (item 091)")
-        if top[1] != 0 or Path(os.fsdecode(top[0].strip())).resolve() != Path.cwd().resolve():
+        topdir = Path(os.fsdecode(top[0].strip())).resolve() if top[1] == 0 else None
+        if topdir is None or topdir != Path.cwd().resolve():
             raise Refused("not the top of a git work tree; run from the repo top (item 091)")
         head = run(["rev-parse", "--verify", "-q", "HEAD"])
         if head is None:
@@ -142,7 +155,7 @@ def commit(item, subject, paths, run=run, old=None):
             raise Refused("no path named (item 091)")
         named = []
         for p in paths:
-            n = Path(os.path.normpath(p)).as_posix()
+            n = repo_relative(p, topdir)
             if any(n == d or n.startswith(d + "/") for d in LOG_DIRS):
                 raise Refused(f"{p}: log files are found by the helper; do not name them (item 091)")
             if not os.path.lexists(n):

@@ -119,6 +119,51 @@ def test_t3_refusals_write_nothing(repo, setup, args, why):
     assert _state(repo) == before
 
 
+@pytest.mark.parametrize("own", [True, False], ids=["with-own-line", "no-own-line"])
+def test_t3_absolute_log_path_is_refused(repo, own):
+    """T3 (06 F1): the log file named by its absolute path is refused like the relative form, HEAD and
+    .git/index unchanged. no-own-line is I3's probe B: the working log gains only 151's line, so a
+    whole-file stage would not be overridden by a filtered blob and would carry 151's line."""
+    if not own:
+        (repo / LOG).write_bytes((H + L_HEAD + "\n" + L151 + "\n").encode("utf-8"))
+    before = _state(repo)
+    code, out, err = _cli(repo, "150", f"Item 150: {L150}" if own else "Item 150: note", R05, str(repo / LOG))
+    assert code == 2, (out, err)
+    assert f"{repo / LOG}: log files are found by the helper" in err, err
+    assert _state(repo) == before
+
+
+def test_t3_absolute_named_path_is_committed_relative(repo):
+    """T3 (06 F1): a non-log file named by its absolute path is committed under its repo-relative name;
+    x.txt stays staged and out of the commit."""
+    code, out, err = _cli(repo, "150", f"Item 150: {L150}", str(repo / R05))
+    assert code == 0, err
+    assert set(_g(repo, "show", "--name-only", "--format=", "HEAD").split()) == {R05, LOG}
+    assert _g(repo, "show", f"HEAD:{R05}") == "05\n"
+    assert _g(repo, "diff", "--cached", "--name-only").split() == ["x.txt"]
+
+
+def test_t3_absolute_path_through_symlinked_dir(repo, tmp_path):
+    """T3 (06 F1): an absolute path that reaches the repo through a symlinked directory is inside the
+    repo top (the parent is resolved), and is committed under its repo-relative name."""
+    (tmp_path / "link").symlink_to(repo, target_is_directory=True)
+    code, out, err = _cli(repo, "150", f"Item 150: {L150}", str(tmp_path / "link" / R05))
+    assert code == 0, err
+    assert set(_g(repo, "show", "--name-only", "--format=", "HEAD").split()) == {R05, LOG}
+
+
+@pytest.mark.parametrize("form", ["absolute", "relative"])
+def test_t3_path_outside_repo_is_refused(repo, tmp_path, form):
+    """T3 (06 F1): a path outside the repo top, absolute or `../`, is refused; nothing written."""
+    (tmp_path / "outside.md").write_text("o\n", encoding="utf-8")
+    arg = str(tmp_path / "outside.md") if form == "absolute" else "../outside.md"
+    before = _state(repo)
+    code, out, err = _cli(repo, "150", f"Item 150: {L150}", R05, arg)
+    assert code == 2, (out, err)
+    assert f"{arg} is outside the repo top" in err, err
+    assert _state(repo) == before
+
+
 def test_t3_head_moved_is_refused(repo, capsys):
     """T3: `old` is not HEAD (HEAD moved after it was read): update-ref refuses, HEAD unchanged."""
     _g(repo, "commit", "-q", "-m", "x committed")           # HEAD moves past the root
@@ -194,6 +239,18 @@ def test_filter_log_rule():
     assert cs.filter_log(work, None, "150") == ((H + L150 + "\r\n").encode("utf-8"), [L150])
     with pytest.raises(cs.Refused):
         cs.filter_log(H.encode("utf-8"), (H + L150 + "\n").encode("utf-8"), "150")
+
+
+def test_filter_log_pattern_inside_other_text():
+    """06 F2 (RI-012): the owner is group 4 of a whole-line LOG_LINE match. A 151 line that holds
+    `| 150 |` later in its text is 151's (dropped, not 150's); a line that quotes a log line after
+    other text (`note: ...`) is no log line (kept, not counted)."""
+    inner = "01:05 | I2 | 151 | see 150 | I3 | 150 | x"
+    note = "note: 01:06 | I2 | 151 | quoted"
+    work = (H + inner + "\n" + note + "\n" + L150 + "\n").encode("utf-8")
+    out, own = cs.filter_log(work, H.encode("utf-8"), "150")
+    assert out == (H + note + "\n" + L150 + "\n").encode("utf-8")
+    assert own == [L150]
 
 
 # Text pins (item 091 step 6): the run-item sentence and the two agent pointers, once each.
