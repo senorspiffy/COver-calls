@@ -1,6 +1,6 @@
 # 06 Verification - 091
-Verdict: FAIL (round 1)
-Sent back to: I2
+Verdict: PASS (round 2; earlier rounds: FAIL round 1)
+Sent back to: none
 
 Verified by I3 on 2026-11-22 in my own worktree of the head commit 4990002 (`git worktree add /tmp/claude-0/scratch/i3-091/wt 4990002`, path given by the orchestrator; removed after the runs). My outputs, the mutation harness and the commit_step probe repo are in my own mkdtemp dir `/tmp/claude-0/-home-claude/6b779538-e393-5b21-a85a-072369e659f6/scratchpad/i3-091-r1-dpe6hf15` (step 7's SCRATCH rule). Base 7e537c2 (087 A1 PASS). I used no `git stash`. Rules: I judged by the I3 rules at base (7e537c2). The new 091 lines in i3-verifier.md (SCRATCH sentence, commit_step pointer) were followed too; whether they hold is under "New rules" below.
 
@@ -168,3 +168,103 @@ Proposed follow-ups (for A1 to open; not part of 091's fix):
 2. SCRATCH vs the orchestrator: run-item should tell the orchestrator to hand out mkdtemp-made dirs (or let agents with a shell make their own), not fixed paths like `/tmp/claude-0/scratch/i3-091/wt`.
 3. RI-009 scratch rule: add "no `git stash` in a scratch worktree (refs/stash is shared by all worktrees); use `git checkout -- <file>` or a copy".
 4. 088 A1 finding 1's remainder: the `not checked (unborn HEAD)` label for an unresolvable HEAD (05 Deviations 4).
+
+# Round 2 (I3, 2026-11-22)
+Verified at head 1293415 (I2 round 2), base of the round d39d811 (my round-1 FAIL). Worktrees `wt` (suite) and `wt2` (mutants) of 1293415 under `/tmp/claude-0/scratch/i3-091r2-UxQ8`, made with `mktemp -d` as the orchestrator asked; my outputs, harness and probe repo are in my own dir made with step 3's mkdtemp command: `/tmp/claude-0/-home-claude/6b779538-e393-5b21-a85a-072369e659f6/scratchpad/i3-091-r2-mz28r6tf`. Both worktrees were removed after the runs. I used no `git stash` (`git stash list | wc -l` = 0 before and after).
+
+## I1 audit, round 2
+No change to 04 in round 2, and none was needed: F1-F3 were inside 04 step 6 (i) and I3 step 3. Nothing goes back to I1.
+
+## I2 audit, round 2 (build vs my round-1 list)
+`git diff --stat d39d811 1293415`: scripts/commit_step.py, tests/test_commit_step.py, work/091/05-build-report.md, and one log line (`02:34 | I2 | 091 | ...`, the only line the commit adds to logs/implementation/2026-11-22.md). No other file. `git diff --stat d39d811 1293415 -- ccbot config data` is empty.
+- **F1 (fixed).** New `repo_relative(p, top)`: `os.path.abspath`, the parent `.resolve()`d (the name is not, so a named symlink stays a symlink), then `relative_to(top)`. Outside the top gives Refused, exit 2. `commit()` keeps the resolved `topdir` (the same value the cwd check compares) and runs every named path through it before the log-dir, missing and directory checks. `update-index` and the final `reset` get the relative form. The 6 new T3 cases are the rows I asked for (absolute log path refused, in 2 shapes; absolute non-log path committed relative), plus the outside-top and symlinked-dir rows (05 Deviations 11, sourced from F1's fix text). `topdir = ... else None` is no default: None is refused on the next line.
+- **F2 (fixed).** `test_filter_log_pattern_inside_other_text` has my two lines plus the item's own line. It asserts the exact output bytes and `own == [L150]`.
+- **F3 (fixed).** 05 Deviations 9 records the round-1 amend: 66f0fcf to 4990002, tree a6cdc2c, parent 8dec4f6. Its helper output was rebuilt from the reflog and 05 says so. Round 2 is under `## Test output (round 2, pasted)`, and the single column-0 `Suite:` line is round 2's.
+- **Round-2 commit made by the helper.** Reflog: `c01d0d5 commit_step: Item 091: 02:34 | I2 ...`, then `1293415 commit (amend)`. `c01d0d5^{tree}` = `1293415^{tree}` = e6769854bb5e, and both parents are d39d811. The amend changed only the message (05 Deviations 10).
+- **F2-search survives (05 Deviations 11).** Accepted as equivalent. check_pipeline's `LOG_LINE` is `^(\d{2}):(\d{2}) \| ... \| (.*)$`, compiled with no flags. So `.search` can only match at position 0, and that is `.match`. The non-equivalent forms (anchor dropped, substring owner) are killed below.
+- Connectivity, re-done: `repo_relative` is called once, at L158 (`n = repo_relative(p, topdir)`). It is reached by the 6 new cases and by my CLI probes below. There is no TODO in either file.
+
+## Tests re-run (round 2)
+`python3 -m pytest -q -rs` in `wt` at 1293415 (my own run, made after 05 round 2 existed), tail as printed:
+```
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+SKIPPED [1] tests/test_calendar.py:110: could not import 'exchange_calendars': No module named 'exchange_calendars'
+1 failed, 811 passed, 1 skipped in 113.51s (0:01:53)
+```
+The only failure is the expected item-071 state. Its assertion output names `091: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))` and `I3 FAIL: 091`, from my committed round-1 FAIL. INCOMPLETE, SKIPPED and A1 FAIL are all none in the same output. Round 1 had 805 passed; adding the 6 new cases gives 811. tests/test_safety.py: `9 passed in 1.34s`. python3.11 is on PATH and python3.10 is not, so the oldest-Python compile test ran with 3.11 and did not skip.
+
+`python3 scripts/check_handoff.py 091` (main checkout), exit 0:
+```
+sources count (unique URLs in 01-research.md): 11
+fact-check rows: 79
+totals line: 79 rows -> 61 as-is, 17 fixed, 1 removed
+PASS
+```
+
+My F1 probe, re-run with the round-2 helper (`$CS` = wt's scripts/commit_step.py) in a fresh probe repo in my dir. HEAD log = title + `01:00 | I1 | 149 | x`, and x.txt is staged.
+```
+== probe B (working log + `01:05 | I2 | 151 | foreign` only; absolute log path)
+commit_step refused: <R>/logs/implementation/2026-11-22.md: log files are found by the helper; do not name them (item 091)
+exit 2   HEAD unchanged   index unchanged (sha1sum of .git/index)
+== probe A (+ `01:06 | I2 | 150 | mine`; absolute log path)
+commit_step refused: ... log files are found by the helper ...   exit 2
+== absolute non-log path ($R/work/150/05.md)
+a581fe1 Item 150: 01:06 | I2 | 150 | mine      exit 0
+  commit files: logs/implementation/2026-11-22.md, work/150/05.md
+  HEAD log: # log / 01:00 | I1 | 149 | x / 01:06 | I2 | 150 | mine      (151's line dropped)
+  still staged: x.txt
+== /etc/hostname                      -> is outside the repo top ... exit 2
+== ./logs/implementation/...          -> log files are found by the helper ... exit 2
+== ../probe_repo/logs/implementation/... -> log files are found by the helper ... exit 2   (round 1: update-index exit 128)
+== L -> logs symlink in repo: L/implementation/2026-11-22.md and $R/L/implementation/... -> log files are found by the helper ... exit 2
+```
+The last row is my extra: a symlinked directory inside the repo that leads to logs/ is caught because the parent is resolved.
+
+Direct `filter_log` call (my extra lines). The work text was `01:05 | I2 | 151 | see 150 | I3 | 150 | x`, `note: 01:06 | I2 | 151 | quoted`, `01:07 | I3 | 150 | real` and `150 | I2 | 151 | y`. The output keeps the note, the 150 line and the `150 | I2 ...` line (not a LOG_LINE), and drops the 151 line. `own == ['01:07 | I3 | 150 | real']`.
+
+Mutants: one text replacement each in `wt2`, the whole tests/test_commit_step.py run, and the file restored after each. Harness `.../i3-091-r2-mz28r6tf/mut.py`, output `mut.txt`. `git status --porcelain` after: empty.
+```
+== F1-noresolve: 4 failed, 24 passed in 2.24s
+    FAILED tests/test_commit_step.py::test_t3_absolute_log_path_is_refused[with-own-line]
+    FAILED tests/test_commit_step.py::test_t3_absolute_log_path_is_refused[no-own-line]
+    FAILED tests/test_commit_step.py::test_t3_path_outside_repo_is_refused[absolute]
+    FAILED tests/test_commit_step.py::test_t3_path_outside_repo_is_refused[relative]
+== F1-noparentresolve: 1 failed, 27 passed in 4.36s
+    FAILED tests/test_commit_step.py::test_t3_absolute_path_through_symlinked_dir
+== F2-search-equiv: 28 passed in 1.92s
+== F2-search-noanchor: 1 failed, 27 passed in 1.73s
+    FAILED tests/test_commit_step.py::test_filter_log_pattern_inside_other_text
+== F2-substr: 1 failed, 27 passed in 1.78s
+    FAILED tests/test_commit_step.py::test_filter_log_pattern_inside_other_text
+```
+- F1-noresolve: round 1's `Path(os.path.normpath(p)).as_posix()` put back.
+- F1-noparentresolve: `a.relative_to(top)`.
+- F2-search-noanchor: `re.search(LOG_LINE.pattern[1:], ...)`.
+- F2-substr: `f"| {item} |" not in line` as the drop test.
+
+Every count matches 05's round-2 table. The equivalent mutant survives, as 05 says.
+
+## Real-data effect (diff_reports output, pasted)
+not required (`git diff --stat 7e537c2 1293415 -- ccbot/ config/ data/` is empty: no TRIGGER or TRIGGER_DIRS file changes)
+
+## Recurring issues checked (round 2)
+Recurring issues checked: RI-001, RI-010, RI-014, RI-002, RI-008, RI-009, RI-012 (round 2). What I checked for each:
+- RI-001 (ESCALATED): I measured every number myself. 811 = 805 + 6 new cases. The mutant failures were 4/1/0/1/1, the same as 05. Probe B is refused with HEAD and the index unchanged.
+- RI-010 (ESCALATED): the bypass of the new guardrail (F1) is closed and pinned by F1-noresolve (4 killed). Both round-2 commits were made by the helper; the reflog and the trees show this. The I2 line was written by `--log`.
+- RI-014 (OPEN): no new git reader. `repo_relative` is path arithmetic on the top that the code already read.
+- RI-002 (GUARDED): `topdir ... else None` is refused at once, never used as a value.
+- RI-008 (GUARDED): the 3.11 compile test ran (test_safety 9 passed). `os.path.abspath`, `Path.resolve` and `relative_to` all exist on 3.10.
+- RI-009 (GUARDED): mutants ran only in a scratch worktree. No stash was used. Both worktrees were removed.
+- RI-012 (GUARDED): filter_log now has its negative test. The substring and unanchored mutants are killed.
+
+## Pipeline line (step 2, round 2)
+check_pipeline line: `091: awaiting A1 (FULL)`
+
+Run after this file, 07 and the `--log` line (`02:39 | I3 | 091 | PASS | sent to audit: yes`), before the commit: exit 0. `AWAITING A1: 091`, `I3 FAIL: none`, `A1 FAIL: none`, `INCOMPLETE: none`, `SKIPPED: none`, `UNTRACKED CHANGE: none`; LOG TIME and LOG BATCH do not name 091 (RULE NOT SEEN names only 083, as before).
+
+## Sent back / sent to Audit (round 2)
+PASS. Nothing is sent back. Sent to Audit: `work/091/07-audit-task.md`. Round 1's follow-ups 1-4 still stand:
+1. a trailer option in commit_step: round 2 needed `--amend --only` again, for I2 and for this commit;
+2. orchestrator scratch paths: this round was `mktemp -d`-made and unique, but it is not step 3's mkdtemp form or location, so I made both;
+3. no `git stash` in a scratch worktree;
+4. 088's unborn-HEAD label.
