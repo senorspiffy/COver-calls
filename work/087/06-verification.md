@@ -1,6 +1,84 @@
 # 06 Verification - 087
-Verdict: FAIL (round 1)
-Sent back to: I1 I2
+Verdict: PASS (round 2; earlier rounds: FAIL round 1)
+Sent back to: none
+
+Head verified: 7389962 (I2 round 2), base 0ad4d62. Rules followed: current .claude/agents/i3-verifier.md and .claude/commands/run-item.md (after 8caffda). Every test, mutation and probe below ran in my own worktree /tmp/claude-0/scratch/i3-087r2/wt (`git worktree add --detach` at 7389962) or the base copy /tmp/claude-0/scratch/i3-087r2/base (`git archive 0ad4d62`), never in the main checkout; both removed afterwards. `git rev-parse --is-shallow-repository` → `false`. Commits after 7389962 on the branch (b82ebb4, 090 I3) change only logs/ and work/090/, so 7389962 is the code head.
+
+## I1 audit (plan vs research)
+- 04 `## Round 2` takes exactly round 1's four fixes (F1 items 1-4) and nothing else: q29, q30, q31 with my proposed lines, M39-M41 = I3-a/b/d, counts 92 / +33, tally 25 / 64. Rule trace table maps each fix to a plan line; no DROPPED row. No parser change, no new file.
+- Sourcing: the negative side cites round 1's sources (perl.org quoting guide: `[ ] { }` only forbidden at the start of a plain scalar; PyYAML docs on `---`/`...` as document separators). The YAML 1.2.2 `c-forbidden` production is marked UNVERIFIED, and the fixtures are said to pin the head's own rule, not that production. No unsourced addition.
+- Counts checked by running (below): 92 in the file, base 25 failed / 67 passed, base file alone 59 → +33.
+- Note N1 (no code effect, does not change the verdict; sent to Audit): 04 calls the q30 lines "valid" ("why these lines are valid and must read as a tool set"). For q29 and q31 that holds; for q30 it does not. PyYAML 6.0.3 `safe_load`:
+```
+q29 {'description': 'Wait... then --- more', 'tools': 'Read, Write'}
+q30 ERR ScannerError while scanning a simple key
+q31 {'description': 'see [a and {b', 'tools': 'Read, Write'}
+```
+  q30's `...x` / `---x` are column-0 lines with no `key:`, which YAML cannot read at all. The fixture was my own round-1 proposal, so the error is mine first. It still does its job (it is the only test M41 kills, and its pattern is inside other text), and the checker's pass on a no-key line is not new: the base parser also returns `({'Read', 'Write'}, None)` for `_fm("name: x", "foo", TOOLS)` (my probe in the base copy). A YAML-valid fixture that kills M41 the same way: `_fm("name: x", "...x: y", "---x: z", TOOLS)` (PyYAML: `{'name': 'x', '...x': 'y', '---x': 'z', 'tools': 'Read, Write'}`; head checker → {Read, Write}; under M41 `...x: y` matches DOC at column 0). The wider gap (a column-0 line with no key passes the checker while YAML fails the whole frontmatter) is outside 087's request (values that swallow a later `tools:` line) and goes to A1 as a possible new item.
+
+## I2 audit (build vs plan)
+`git show --stat 7389962`: logs/implementation/2026-11-22.md (+1, I2's own line), tests/test_agent_tools.py (+3), work/087/05-build-report.md. `git diff --stat fd73de1 7389962 -- tests/test_agent_tools.py` → `1 file changed, 3 insertions(+)`: the parser and every round-1 fixture are byte-identical to the build I verified in round 1.
+- The 3 added lines are 04's code form verbatim, after q28, in order: q29 `_fm("description: Wait... then --- more", TOOLS)`, q30 `_fm("name: x", "...x", "---x", TOOLS)`, q31 `_fm("description: see [a and {b", TOOLS)`, each `{"Read", "Write"}, None`.
+- 05 Round 2: Changes, Connectivity, Base-failure check (25 failed, 67 passed), Mutations M39-M41, Test output, one column-0 `Suite:` line (`1 failed, 761 passed, 1 skipped in 84.74s (0:01:24)`) equal to the I2 log field, Deviations none, RI lines. The one suite failure is `test_repo_pipeline_has_no_skipped_items`, caused only by `I3 FAIL: 087` (item 071); I got the same (below).
+- Connectivity re-done: q29-q31 are keys of CASES, which `test_agent_tools_parser` parametrizes (they appear by id in the mutation output below); each goes `agent_tools` → `_frontmatter_error` → `_field`. No TODO, no default, no new file.
+
+## Tests re-run (output)
+Full suite, my worktree at 7389962, `PYTHONDONTWRITEBYTECODE=1 python3 -B -m pytest -q -p no:cacheprovider -rs`, tail as printed:
+```
+E         SKIPPED: none
+E         
+E       assert 1 == 0
+
+tests/test_pipeline_check.py:181: AssertionError
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_calendar.py:110: could not import 'exchange_calendars': No module named 'exchange_calendars'
+1 failed, 761 passed, 1 skipped in 85.95s (0:01:25)
+```
+Same totals as 05. The failure, re-run alone: `087: I3 FAIL (FULL; sent back to I1 I2, needs a later PASS round in 06 (item 071))`, `I3 FAIL: 087`, `A1 FAIL: none`; the expected state before this round's PASS.
+
+Other checks (same worktree):
+```
+$ python3 -B -m pytest -q -p no:cacheprovider tests/test_agent_tools.py
+92 passed in 0.06s
+$ python3 -B -m pytest -q -p no:cacheprovider -rs tests/test_safety.py -k oldest
+1 passed, 8 deselected in 0.13s
+$ python3.11 -m py_compile tests/test_agent_tools.py && echo ok311
+ok311
+```
+python3.11 is on PATH (/usr/bin/python3.11), python3.10 is not; the oldest-Python test ran, it did not skip.
+
+Base-failure check (base copy of 0ad4d62, parser above `def _fm(` + head fixtures from 7389962): `25 failed, 67 passed in 0.25s`; q29, q30, q31 are not among the failures (same 25 ids as round 1). The guardrail still catches the original error: every A1 shape from request.md fails on the base and passes on head only as a named error (round 1 probes; parser unchanged since).
+
+Mutations M39-M41 (my script /tmp/claude-0/scratch/i3-087r2/tools/mut.py: asserts each anchor occurs once, one mutation at a time, file restored in a `finally`; `git status --porcelain` empty and `git diff --quiet` after):
+```
+M39 = I3-a DOC .match -> .search | 1 failed, 91 passed in 0.08s | q29_mid_value_markers
+M40 = I3-b flow [/{ searched anywhere | 1 failed, 91 passed in 0.08s | q31_mid_value_bracket
+M41 = I3-d DOC terminator dropped | 1 failed, 91 passed in 0.08s | q30_marker_prefix_text
+```
+M40 is 04's form: `elif re.search(r"[\[{]", line) and not line.startswith(FLOW_KEYS):` with `s = re.search(r"[\[{]", line).start()` before `_flow_end`. All three equal 05's rows. In round 1 these three left all 89 tests green; each now fails its named fixture, which closes F1. Round 1's M25-M38 were not re-run: the parser text is unchanged since fd73de1 (diff above), and the 3 new fixtures can only add failures to them.
+
+check_handoff (main checkout, 2026-11-22, exit 0):
+```
+sources count (unique URLs in 01-research.md): 5
+fact-check rows: 84
+totals line: 84 rows -> 64 as-is, 19 fixed, 1 removed
+PASS
+```
+
+## Real-data effect (diff_reports output, pasted)
+not required (`git show --stat 7389962`: logs/implementation/2026-11-22.md, tests/test_agent_tools.py, work/087/05-build-report.md; over the item, `git diff --stat 0ad4d62 7389962 -- ccbot/ config/ data/` is empty: 087 changes no TRIGGER file)
+
+## Recurring issues checked (step 0)
+Recurring issues checked: RI-012 (GUARDED: F1 closed; DOC `.match`, DOC terminator and flow start each have a mid-text negative, q29/q30/q31, killed by M39/M41/M40; START pinned since round 1 by q21/q22/M26), RI-001 (ESCALATED: real-tree test passes, 0 of 21 real frontmatter lines fire; no new rule), RI-002 (GUARDED: base fails the 25 firing fixtures; negatives do not turn valid lines into errors; N1: q30's lines are not valid YAML, passed by base and head alike, sent to A1), RI-010 (ESCALATED: my log line written by `check_pipeline.py --log` right after this file; suite line copied as printed), RI-014 (OPEN: not touched; repo not shallow), RI-006 (totals copied from pytest), RI-008 (3.11 compile ok, 3.10 absent), RI-009/011 (own worktree only; staged only my files), RI-004/005 (04's hand traces for q29-q31 and the three mutations match my runs, except N1's "valid" claim for q30)
+
+## Pipeline line (step 2)
+check_pipeline line: `087: awaiting A1 (FULL)` (run in /home/claude/cover-calls after this file, 07 and the I3 log line 01:04; exit 0, `I3 FAIL: none`, `INCOMPLETE: none`, `SKIPPED: none`, `LOG TIME: none`, `LOG BATCH: none` (087 not named), `UNTRACKED CHANGE: none`). Before this round the line was `087: I3 FAIL (FULL; sent back to I1 I2, needs a later PASS round in 06 (item 071))`.
+
+## Sent back / sent to Audit
+PASS, round 2. Sent to Audit: work/087/07-audit-task.md. Nothing sent back. N1 (q30 fixture is not valid YAML; the wider no-key-line gap) goes to A1.
+
+# Round 1 (FAIL, kept as written)
+Round 1 top lines were: verdict FAIL (round 1), sent back to I1 I2.
 
 Head verified: fd73de1 (I2), base 0ad4d62. All runs below in my own worktrees of fd73de1 (/tmp/claude-0/scratch/i3-087/wt for the suite, /tmp/claude-0/scratch/i3-087/mut for mutations and probes), never in the main checkout. `git rev-parse --is-shallow-repository` → `false`.
 
