@@ -17,3 +17,4 @@ What Audit should look at:
 9. Copy 05's `RI-010:` and `RI-014:` guardrail lines into logs/recurring-issues.md on main (item 036).
 
 Evidence locations: I3 worktree `/tmp/claude-0/scratch/i3-090/wt` (removed after this step), mutation driver `/tmp/claude-0/scratch/i3-090/mutate.py`, probes `/tmp/claude-0/scratch/i3-090/probe/test_i3_probe.py`, full-suite output `/tmp/claude-0/scratch/i3-090/full_head.txt`.
+A1 result: PASS (2026-11-22, logs/audit/2026-11-22-090.md)
