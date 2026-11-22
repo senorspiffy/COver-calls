@@ -19,6 +19,19 @@ are a tab in the leading whitespace, a quoted value (at line start, after
 quote other than spaces or ` #...`. This says nothing about what Claude Code
 does with such a file. Known fail-closed false errors: a tab at the start of
 block-scalar content and a whitespace-only line containing a tab.
+
+Item 087: a frontmatter line is also an error when its value starts with
+`&`, `!`, `*`, `?` or `:` (anchor, tag, alias, explicit key), when a tab
+comes before the value, when a `[` or `{` value is not closed on its own
+line or is followed by text other than spaces or ` #...`, or when the line
+is a YAML document marker (`...`, or `---` followed by a space or tab).
+`tools:` and `disallowedTools:` lines are left to `_field`. This says
+nothing about what Claude Code does with such a file. Known fail-closed
+false errors: valid properties, aliases and explicit keys, plain values
+starting with `?` or `:`, a tab after `-` or `key:`, a quote or apostrophe
+inside a plain scalar inside a flow collection (`[it's]`), valid multi-line
+flow collections, and block-scalar content lines that start with one of
+these characters.
 """
 import re
 
@@ -29,7 +42,9 @@ from conftest import REPO
 NO_SHELL = {"r1-researcher", "r2-improver", "r3-fact-checker", "i1-reviewer"}
 NO_SHELL_ALLOWED = {"Read", "Write", "Glob", "Grep", "WebSearch", "WebFetch"}
 ENTRY_RE = re.compile(r"[A-Za-z]+(\([^()]*\))?")
-QUOTE_START_RE = re.compile(r"""[ ]*(?:-[ ]+)*(?:[^\s"'#][^:]*:[ \t]+)?(["'])""")
+VALUE_START_RE = re.compile(r"""[ ]*(?:-[ \t]+)*(?:[^\s"'#&!*\[{?:][^:]*:[ \t]+)?(\S)""")
+DOC_MARKER_RE = re.compile(r"(?:---|\.\.\.)(?:[ \t]|$)")
+FLOW_KEYS = ("tools:", "disallowedTools:")
 AFTER_CLOSE_RE = re.compile(r"( +#.*)? *")
 
 
@@ -128,20 +143,58 @@ def _quote_end(line, start):
     return None
 
 
+def _flow_end(line, start):
+    """Return the index just past the closer matching the `[` or `{` at `start`, or None."""
+    want = []
+    i = start
+    while i < len(line):
+        ch = line[i]
+        if ch in "\"'":
+            i = _quote_end(line, i)
+            if i is None:
+                return None
+            continue
+        if ch == "#" and line[i - 1] in " \t":
+            return None
+        if ch in "[{":
+            want.append("]" if ch == "[" else "}")
+        elif ch in "]}":
+            if want.pop() != ch:
+                return None
+            if not want:
+                return i + 1
+        i += 1
+    return None
+
+
 def _frontmatter_error(front):
-    """Return the first frontmatter line the test cannot read on its own (item 080)."""
+    """Return the first frontmatter line the test cannot read on its own (items 080, 087)."""
     for i, line in enumerate(front):
         n = i + 2
+        if DOC_MARKER_RE.match(line):
+            return DOC.format(n)
         lead = line[:len(line) - len(line.lstrip(" \t"))]
         if "\t" in lead:
             return f"tab in indentation on frontmatter line {n} (item 080)"
-        m = QUOTE_START_RE.match(line)
+        m = VALUE_START_RE.match(line)
         if m:
-            end = _quote_end(line, m.start(1))
-            if end is None:
-                return f"unclosed quoted value on frontmatter line {n} (item 080)"
-            if not AFTER_CLOSE_RE.fullmatch(line[end:]):
-                return f"text after closing quote on frontmatter line {n} (item 080)"
+            s, c = m.start(1), m.group(1)
+            if "\t" in line[:s]:
+                return TAB_BEFORE.format(n)
+            if c in "&!*?:":
+                return START.format(c, n)
+            if c in "\"'":
+                end = _quote_end(line, s)
+                if end is None:
+                    return f"unclosed quoted value on frontmatter line {n} (item 080)"
+                if not AFTER_CLOSE_RE.fullmatch(line[end:]):
+                    return f"text after closing quote on frontmatter line {n} (item 080)"
+            elif c in "[{" and not line.startswith(FLOW_KEYS):
+                end = _flow_end(line, s)
+                if end is None:
+                    return FLOW_OPEN.format(n)
+                if not AFTER_CLOSE_RE.fullmatch(line[end:]):
+                    return FLOW_AFTER.format(n)
     return None
 
 
@@ -209,6 +262,12 @@ NO_TOOLS = "no tools: line (inherits every tool incl. Bash, item 072)"
 UNCLOSED = "unclosed quoted value on frontmatter line {} (item 080)"
 TAB = "tab in indentation on frontmatter line {} (item 080)"
 AFTER = "text after closing quote on frontmatter line {} (item 080)"
+START = "value starts with '{}' on frontmatter line {} (item 087)"
+FLOW_OPEN = "unclosed flow collection on frontmatter line {} (item 087)"
+FLOW_AFTER = "text after closing bracket on frontmatter line {} (item 087)"
+TAB_BEFORE = "tab before the value on frontmatter line {} (item 087)"
+DOC = "document marker on frontmatter line {} (item 087)"
+TOOLS = "tools: Read, Write"
 
 CASES = {
     "a_no_frontmatter": ("tools: Read\nbody\n", None, "no frontmatter"),
@@ -277,7 +336,7 @@ CASES = {
                                {"Read", "Write"}, None),
     "p10_closed_sq_comment": (_fm("description: 'it''s' # c", "tools: Read, Write"),
                               {"Read", "Write"}, None),
-    "p11_tab_after_colon": (_fm("tools:\tRead, Write"), {"Read", "Write"}, None),
+    "p11_tab_after_colon": (_fm("tools:\tRead, Write"), None, TAB_BEFORE.format(2)),
     "p12_plain_inner_quote": (_fm('description: Use "this', "tools: Read, Write"),
                               {"Read", "Write"}, None),
     "p13_doc_hooks_example": (_fm("name: db-reader",
@@ -293,6 +352,54 @@ CASES = {
     "p14_nested_open_quote": (_fm("hooks:", '  - matcher: "Bash', "tools: Read", 'x"'),
                               None, UNCLOSED.format(3)),
     "p15_quoted_key": (_fm('"tools": Read, Bash'), None, AFTER.format(2)),
+    "q1_anchor_dq": (_fm('description: &d "Research team,', TOOLS, 'end"'),
+                     None, START.format("&", 2)),
+    "q2_tag_dq": (_fm('description: !!str "Research team,', TOOLS, 'end"'),
+                  None, START.format("!", 2)),
+    "q3_tag_sq": (_fm("description: !!str 'Research team,", TOOLS, "end'"),
+                  None, START.format("!", 2)),
+    "q4_anchor_tag_dq": (_fm('description: &a !!str "Research team,', TOOLS, 'end"'),
+                         None, START.format("&", 2)),
+    "q5_item_anchor": (_fm("hooks:", '  - &a "x,', TOOLS, 'y"'), None, START.format("&", 3)),
+    "q6_item_open_quote": (_fm("hooks:", '  - "x,', TOOLS, 'y"'), None, UNCLOSED.format(3)),
+    "q7_open_seq": (_fm("description: [a,", TOOLS, "]"), None, FLOW_OPEN.format(2)),
+    "q8_open_map": (_fm("description: {a: b,", TOOLS, "}"), None, FLOW_OPEN.format(2)),
+    "q9_quoted_closer": (_fm('description: ["]",', TOOLS, "]"), None, FLOW_OPEN.format(2)),
+    "q10_comment_closer": (_fm("description: [a, # ]", TOOLS, "]"), None, FLOW_OPEN.format(2)),
+    "q11_wrong_closer": (_fm("description: [a}", TOOLS), None, FLOW_OPEN.format(2)),
+    "q12_text_after_flow": (_fm('description: [a] "x,', TOOLS, 'y"'),
+                            None, FLOW_AFTER.format(2)),
+    "q13_flow_next_line": (_fm("description:", "  [a,", TOOLS, "]"), None, FLOW_OPEN.format(3)),
+    "q14_anchor_alone": (_fm("description: &d", '  "x,', TOOLS, 'y"'),
+                         None, START.format("&", 2)),
+    "q15_item_open_map": (_fm("hooks:", "  - {a: b,", TOOLS, "}"), None, FLOW_OPEN.format(3)),
+    "q16_explicit_key": (_fm("? description", ': "Research team,', TOOLS, 'end"'),
+                         None, START.format("?", 2)),
+    "q17_colon_start": (_fm(': "Research team,', TOOLS, 'end"'), None, START.format(":", 2)),
+    "q18_dash_tab": (_fm("hooks:", '  -\t"x,', TOOLS, 'y"'), None, TAB_BEFORE.format(3)),
+    "q19_alias": (_fm("description: *d", TOOLS), None, START.format("*", 2)),
+    "q20_tag_on_tools": (_fm("tools: !!str Read"), None, START.format("!", 2)),
+    "q21_mid_value_amp": (_fm("description: Audit & Efficiency team", TOOLS),
+                          {"Read", "Write"}, None),
+    "q22_quoted_amp": (_fm('description: "&x"', TOOLS), {"Read", "Write"}, None),
+    "q23_doc_mcp_example": (_fm("name: browser-tester",
+                                "description: Tests features in a real browser using Playwright",
+                                "tools: Read",
+                                "mcpServers:",
+                                "  # Inline definition: scoped to this subagent only",
+                                "  - playwright:",
+                                "      type: stdio",
+                                "      command: npx",
+                                '      args: ["-y", "@playwright/mcp@latest"]',
+                                "  # Reference by name: reuses an already-configured server",
+                                "  - github"),
+                            {"Read"}, None),
+    "q24_closed_flow_comment": (_fm('description: [a, "b]"] # c', TOOLS), {"Read", "Write"}, None),
+    "q25_open_flow_last_line": (_fm(TOOLS, "description: [a,"), None, FLOW_OPEN.format(3)),
+    "q26_disallowed_open": (_fm("tools: Read, Bash", "disallowedTools: [Bash,"), None,
+                            "unclosed [ in disallowedTools: (item 075)"),
+    "q27_doc_end_marker": (_fm("name: x", "...", TOOLS), None, DOC.format(3)),
+    "q28_doc_start_marker": (_fm("name: x", "--- # c", TOOLS), None, DOC.format(3)),
 }
 
 
@@ -339,6 +446,12 @@ TREE = {
     "n9_tab_list": ({"r1-researcher": "---\ntools:\n"
                      + "".join(f"\t- {t}\n" for t in SIX.split(", ")) + "---\n"},
                     None, [f"{R1}: {TAB.format(3)}"], NO_SHELL - {"r1-researcher"}),
+    "n10_anchor_description": ({"r1-researcher": f'---\ndescription: &d "Research team,\n'
+                                                  f'tools: {SIX}\nend"\n---\n'},
+                               None, [f"{R1}: {START.format('&', 2)}"],
+                               NO_SHELL - {"r1-researcher"}),
+    "n11_open_flow": ({"r1-researcher": f"---\ndescription: [a,\ntools: {SIX}\n]\n---\n"},
+                      None, [f"{R1}: {FLOW_OPEN.format(2)}"], NO_SHELL - {"r1-researcher"}),
 }
 
 
