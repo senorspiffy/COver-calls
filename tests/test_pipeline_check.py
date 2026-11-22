@@ -3392,6 +3392,111 @@ def test_unrelated_branch_with_work_is_branch_error(tmp_path):
     assert _run(repo, "check_pipeline.py", "--next-id") == (0, "151\n")
 
 
+# Item 091 step 1 (081 F1, A1-A3): one orphan per isolable entry of the unrelated ref's ls-tree pathspec.
+UNRELATED_GROUPS = {"w": "work/150/request.md", "ri": "logs/recurring-issues.md", "cl": ".claude/agents/x.md",
+                    "tp": "templates/x.md", "cb": "ccbot/x.py", "cf": "config/x.json", "sc": "scripts/x.py",
+                    "ts": "tests/test_x.py"}
+
+
+@NO_GIT
+def test_unrelated_branch_each_checked_group_is_branch_error(tmp_path):
+    """Item 091 step 1: 8 orphans, each holding one file under a different pathspec entry (work/,
+    RECURRING, RULE_PATHS .claude/ and templates/, RESEARCH_CODE_PATHS): one BRANCH ERROR line each, so
+    dropping any group (or any one of these entries) from the ls-tree list loses a line. Exit 1."""
+    repo = _repo_with_open_branch(tmp_path)
+    for name, path in UNRELATED_GROUPS.items():
+        _orphan(repo, name, {path: "x\n"})
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-02")
+    assert code == 1, out
+    for name, path in UNRELATED_GROUPS.items():
+        assert (f"BRANCH ERROR: origin/{name} (no common history with HEAD; 1 file(s) on checked paths "
+                f"(first: {path}) not checked (item 081))") in out.splitlines(), (name, out)
+    assert subprocess.run(["git", "merge-base", "--all", "HEAD", "origin/w"], cwd=repo,
+                          capture_output=True).returncode == 1
+
+
+def test_rule_path_files_are_inside_research_code_dirs():
+    """Item 091 step 1 premise: the two RULE_PATHS file entries (scripts/check_pipeline.py,
+    scripts/check_handoff.py) also match the `scripts/` entry of RESEARCH_CODE_PATHS, so an orphan
+    cannot isolate them, and dropping them from the unrelated-ref ls-tree is an equivalent mutant only
+    while this holds. If a RULE_PATHS file leaves those dirs, this fails and the gap becomes real."""
+    cp = _cp()
+    assert all(any(f.startswith(d) for d in cp.RESEARCH_CODE_PATHS) for f in cp.RULE_PATHS if not f.endswith("/"))
+
+
+# Item 091 step 2 (081 F1, A8, A9, A13): one patched git call per exit-code term, each with its control.
+_BRANCH_LIST = ("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
+
+
+@NO_GIT
+def test_branch_list_failure_exits_1(tmp_path, monkeypatch, capsys):
+    """A8: `git branch -r` failing is the only change from an exit-0 control, so only the
+    `isinstance(branches, str)` term can make the exit 1."""
+    cp = _cp()
+    repo = _repo_with_open_branch(tmp_path)
+    monkeypatch.chdir(repo)
+    args = ["--untracked-from", _root(repo), "--today", "2026-11-02"]
+    assert cp.main(args) == 0, capsys.readouterr().out
+    capsys.readouterr()
+    _patched_git(monkeypatch, cp, {_BRANCH_LIST: ("", 128)})
+    code = cp.main(args)
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "OPEN BRANCHES: git branch failed (exit 128) (item 081)" in out.splitlines(), out
+
+
+@NO_GIT
+def test_main_ref_lookup_failure_exits_1(tmp_path, monkeypatch, capsys):
+    """A9a: the origin/main for-each-ref failing gives the MAIN AHEAD error and exit 1."""
+    cp = _cp()
+    repo = _repo_with_open_branch(tmp_path)
+    monkeypatch.chdir(repo)
+    args = ["--untracked-from", _root(repo), "--today", "2026-11-02"]
+    assert cp.main(args) == 0, capsys.readouterr().out
+    capsys.readouterr()
+    _patched_git(monkeypatch, cp, {("for-each-ref", "--format=%(refname) %(objectname)",
+                                    "refs/remotes/origin/main"): ("", 128)})
+    code = cp.main(args)
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "MAIN AHEAD: git for-each-ref failed (exit 128) (item 081)" in out.splitlines(), out
+
+
+@NO_GIT
+def test_main_ahead_count_failure_exits_1(tmp_path, monkeypatch, capsys):
+    """A9b: the HEAD..origin/main rev-list count failing gives the MAIN AHEAD error and exit 1."""
+    cp = _cp()
+    repo = _repo_with_open_branch(tmp_path)
+    monkeypatch.chdir(repo)
+    sha = subprocess.run(["git", "rev-parse", "origin/main"], cwd=repo, capture_output=True, text=True,
+                         check=True).stdout.strip()
+    args = ["--untracked-from", _root(repo), "--today", "2026-11-02"]
+    assert cp.main(args) == 0, capsys.readouterr().out
+    capsys.readouterr()
+    _patched_git(monkeypatch, cp, {("rev-list", "--count", f"HEAD..{sha}"): ("", 128)})
+    code = cp.main(args)
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "MAIN AHEAD: git rev-list failed (exit 128) (item 081)" in out.splitlines(), out
+
+
+@NO_GIT
+def test_next_id_branch_listing_failure_refuses(tmp_path, monkeypatch, capsys):
+    """A13: a failed per-branch ls-tree is never read as an empty listing: --next-id refuses (exit 2,
+    empty stdout) instead of printing HEAD's next ID."""
+    cp = _cp()
+    repo = _repo_with_open_branch(tmp_path)
+    monkeypatch.chdir(repo)
+    assert cp.main(["--next-id"]) == 0
+    assert capsys.readouterr().out == "041\n"
+    _patched_git(monkeypatch, cp, {("ls-tree", "-d", "--name-only", "origin/fix", "--", "work/"): ("", 128)})
+    code = cp.main(["--next-id"])
+    out, err = capsys.readouterr()
+    assert code == 2, out
+    assert out == "", out
+    assert "--next-id refused: git ls-tree failed (exit 128)" in err, err
+
+
 @NO_GIT
 def test_merge_base_die_is_branch_error(tmp_path, monkeypatch, capsys):
     """R2-d: only merge-base exit 1 is the no-common-history answer; 128 is a BRANCH ERROR and the

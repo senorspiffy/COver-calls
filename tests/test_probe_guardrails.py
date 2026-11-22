@@ -317,3 +317,20 @@ def test_a1_text_marks_probe_markers_as_information():
     text = (REPO / ".claude" / "agents" / "a1-auditor.md").read_text(encoding="utf-8")
     assert text.count("`(live differs)`, `(recorded unreadable)` and `(live n/a)` are information, not "
                       "findings; the verdict word decides (item 082).") == 1
+
+
+@NO_GIT
+def test_recorded_with_trailing_text_is_unreadable(tmp_path, capsys):
+    """Item 091 step 3 (082 A1 F1, M11): a well-formed `recorded` prefix followed by extra text is
+    unreadable (fullmatch), never compared by its prefix (live 1 failed would equal recorded 1)."""
+    root = _fixture(tmp_path)
+    code, out = _main(root, capsys, [_probe("z", recorded="2026-01-01: 1 failed, 1 passed x")])
+    assert "recorded 2026-01-01: 1 failed, 1 passed x (recorded unreadable)" in _line(out, "z"), out
+    assert code == 0
+
+
+def test_recorded_trailing_newline_is_unreadable():
+    """Item 091 step 3 (M11b): a trailing newline is not RECORDED's full shape; a `$`-anchored .match
+    would accept it (`$` matches before a final newline), fullmatch does not."""
+    assert pg._recorded_marker({"recorded": "2026-01-01: 1 failed, 1 passed\n"}, {"t": "failed"}) \
+        == " (recorded unreadable)"
