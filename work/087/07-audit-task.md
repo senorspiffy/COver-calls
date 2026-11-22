@@ -9,3 +9,4 @@ What Audit should look at:
 5. Re-run round 1's mutation table (M25-M38, I3-c) on the merged tree; all should fail at least their named fixtures (06 round 1).
 6. Whole suite: I3 `1 failed, 761 passed, 1 skipped in 85.95s (0:01:25)` at 7389962; the failure is test_repo_pipeline_has_no_skipped_items from `I3 FAIL: 087` only, which this PASS round clears. Skip = exchange_calendars not installed. python3.11 compile ok, python3.10 absent.
 7. Guardrail status for recurring-issues.md on main (item 036): RI-012 GUARDED (087 round 2: DOC and flow classifiers have mid-text negatives q29-q31; M39-M41 each fail one). RI-002 GUARDED, the 087 near miss (anchor/tag before open quote, open flow list) fixed by this item.
+A1 result: PASS (2026-11-22, logs/audit/2026-11-22-087.md)
