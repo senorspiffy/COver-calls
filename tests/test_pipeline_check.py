@@ -2363,7 +2363,8 @@ def test_agent_texts_name_item_071(path, must, must_not):
 
 # Item 081 (RI-014): a failed git read is an error or "not checked", never none, 0 or [].
 GIT_LINES = ("LOG TIME:", "OPEN BRANCHES", "IN PR:", "RULES BRANCH:", "ID CLASH:", "MAIN AHEAD:",
-             "UNTRACKED CHANGE:", "RESEARCH CODE:", "REAL-DATA FIELD:", "UNCOMMITTED STEP:", "INBOX:")
+             "UNTRACKED CHANGE:", "RESEARCH CODE:", "REAL-DATA FIELD:", "UNCOMMITTED STEP:", "INBOX:",
+             "RULE NOT SEEN:")   # item 089 (E1, from 088): after 089's shallow decode change
 # Every _git / _git_ok call in scripts/check_pipeline.py by (innermost function, callee): (count, reason).
 # A new git call adds or bumps one entry with its reason (items 084, 086 build on this).
 GIT_CENSUS = {
@@ -2484,6 +2485,12 @@ def test_non_utf8_shallow_line_no_traceback(tmp_path):
     assert r.returncode == 1, out
     for lines in _git_lines(out).values():
         assert not any(l.rstrip().endswith(": none") for l in lines), out
+    # item 089: the shallow file is unreadable (not UTF-8), so the reason is shallow clone, never squash/rebase
+    lines = out.splitlines()
+    assert (f"UNTRACKED CHANGE: not checked (shallow clone; run git fetch --unshallow) (cutoff {c[:7]} from "
+            f"--untracked-from)") in lines, out
+    assert any(l.startswith("UNREADABLE: ") and "shallow (not UTF-8 at byte 41)" in l for l in lines), out
+    assert "RULE NOT SEEN: not checked (shallow clone; run git fetch --unshallow)" in lines, out
 
 
 @NO_GIT
@@ -3163,6 +3170,14 @@ def test_batch_unreadable_log_file_makes_every_item_not_computable(tmp_path):
     res = _bl(tmp_path)
     assert res["flagged"] == [] and [i for i, _ in res["not_computable"]] == ["998", "999"], res
     assert all(why.endswith(f"{bad.as_posix()} unreadable") for _, why in res["not_computable"]), res
+    # 089 6f: the same tree through the CLI: no traceback, exit 1, the file on UNREADABLE (item 089)
+    code, out, err = _run3(tmp_path, "--today", "2026-11-20")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    assert "UNREADABLE: logs/implementation/2026-11-19.md (not UTF-8 at byte 0)" in out.splitlines(), out
+    batch = [l for l in out.splitlines() if l.startswith("LOG BATCH:")][0]
+    assert ("not computable: 998: logs/implementation/2026-11-19.md unreadable; "
+            "999: logs/implementation/2026-11-19.md unreadable") in batch, out
 
 
 def test_batch_invalid_log_time_is_not_computable(tmp_path):
@@ -3583,3 +3598,351 @@ def test_run_item_commit_subject_rule():
                       "has no such subject rule.") == 1
     assert text.count("I2 commits each code change together with its 05 change. Its commit that adds the I2 "
                       "log line follows the same subject rule (item 082).") == 1
+
+
+# Item 089 (RI-014): every repo read goes through _read; an unreadable file is listed on UNREADABLE and
+# each consumer says not checked, never a traceback, a "" computation or a bare none.
+LOG = "logs/implementation/2026-11-19.md"
+BAD = b"\xff\xfe"
+CLEAN_LOG = b"# Implementation log\n"
+
+
+def _run3(root, *args):
+    """(exit code, stdout decoded with replace, stderr bytes) of check_pipeline.py in `root` (item 089)."""
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), *args], cwd=root,
+                       capture_output=True)
+    return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr
+
+
+def _tree(root, log=CLEAN_LOG):
+    """6a's tree: work/150/request.md only (FULL, opened 2026-11-21) and one implementation log file."""
+    d = root / "work" / "150"
+    d.mkdir(parents=True)
+    (d / "request.md").write_text("# Work item 150\nScope: FULL\nDate: 2026-11-21\n", encoding="utf-8")
+    f = root / LOG
+    f.parent.mkdir(parents=True, exist_ok=True)
+    if log is not None:
+        f.write_bytes(log)
+    return f
+
+
+def _pick1(out, prefix):
+    return [l for l in out.splitlines() if l.startswith(prefix)]
+
+
+def test_read_contract(tmp_path, monkeypatch):
+    """089 step 1: _read's results and the _UNREAD record (detail, never content)."""
+    cp = _cp()
+    monkeypatch.setattr(cp, "_UNREAD", {})
+    ok = tmp_path / "ok.md"
+    ok.write_text("x\ny\n", encoding="utf-8")
+    assert cp._read(ok) == ("x\ny\n", None) and cp._UNREAD == {}
+    bad = tmp_path / "bad.md"
+    bad.write_bytes(BAD)
+    assert cp._read(bad) == (None, f"{bad.as_posix()} unreadable")
+    assert cp._UNREAD == {bad.as_posix(): "not UTF-8 at byte 0"}
+    cp._UNREAD.clear()
+    folder = tmp_path / "dir.md"
+    folder.mkdir()
+    assert cp._read(folder) == (None, f"{folder.as_posix()} unreadable")
+    assert cp._UNREAD == {folder.as_posix(): "IsADirectoryError"}
+    cp._UNREAD.clear()
+    gone = tmp_path / "gone.md"
+    assert cp._read(gone, missing_ok=True) == (None, None) and cp._UNREAD == {}
+    assert cp._read(gone) == (None, f"{gone.as_posix()} unreadable")
+    assert cp._UNREAD == {gone.as_posix(): "FileNotFoundError"}
+    cr = tmp_path / "cr.md"
+    cr.write_bytes(b"a\rb\r\nc")
+    assert cp._read(cr) == ("a\nb\nc", None)
+
+
+def test_read_census():
+    """089 step 7: every file read in check_pipeline.py by (innermost function, call): only the reader
+    and write_log's append. A raw read_text anywhere else fails here (M5)."""
+    import ast
+    import collections
+    tree = ast.parse((REPO / "scripts" / "check_pipeline.py").read_text(encoding="utf-8"))
+    seen = collections.Counter()
+
+    def walk(node, fn):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, ast.Call):
+                if isinstance(ch.func, ast.Attribute) and ch.func.attr in ("read_text", "read_bytes", "open"):
+                    seen[(fn, ch.func.attr)] += 1
+                elif isinstance(ch.func, ast.Name) and ch.func.id == "open":
+                    seen[(fn, "open")] += 1
+            walk(ch, ch.name if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)) else fn)
+
+    walk(tree, None)
+    census = {("_read", "read_bytes"): (1, "the reader (item 089)"),
+              ("write_log", "open"): (1, "append write, item 045")}
+    assert dict(seen) == {k: v[0] for k, v in census.items()}
+    assert all(reason.strip() for _, reason in census.values())
+    assert sum(seen.values()) == 2
+
+
+def test_unreadable_log_exits_1_alone(tmp_path):
+    """089 6a: a non-UTF-8 log file, no git: the clean twin exits 0, the bad twin exits 1 only because of
+    UNREADABLE (M3), and ORPHAN LOG is never a bare none (M9). No traceback (M1)."""
+    clean, bad = tmp_path / "clean", tmp_path / "bad"
+    _tree(clean)
+    _tree(bad, BAD)
+    code, out, err = _run3(clean, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert code == 0, out
+    assert "UNREADABLE: none" in out.splitlines() and "ORPHAN LOG: none" in out.splitlines(), out
+    code, out, err = _run3(bad, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    lines = out.splitlines()
+    assert f"UNREADABLE: {LOG} (not UTF-8 at byte 0)" in lines, out
+    assert f"ORPHAN LOG: not checked ({LOG} unreadable; item 089)" in lines, out
+    order = [l.split(":")[0] for l in lines]
+    assert order.index("ORPHAN LOG") + 1 == order.index("UNREADABLE") == order.index("INBOX") - 1, out
+
+
+def test_unreadable_log_directory(tmp_path):
+    """089 6b: a log path that is a directory is IsADirectoryError, exit 1 (M2)."""
+    f = _tree(tmp_path, None)
+    f.mkdir()
+    code, out, err = _run3(tmp_path, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    assert f"UNREADABLE: {LOG} (IsADirectoryError)" in out.splitlines(), out
+
+
+def test_unreadable_06(tmp_path):
+    """089 6c: a non-UTF-8 06 is one INCOMPLETE entry in place of its checks; exit 1 (SKIPPED fires too).
+    I2 addition (M14): a complete item 151 whose 06 is unreadable is `151: UNREADABLE`, never a status
+    computed with verdict None."""
+    _tree(tmp_path)
+    (tmp_path / "work" / "150" / "06-verification.md").write_bytes(b"# 06\n\xff")
+    _item(tmp_path, "151", ALL)
+    (tmp_path / "work" / "151" / "06-verification.md").write_bytes(b"# 06\n\xff")
+    code, out, err = _run3(tmp_path, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    lines = out.splitlines()
+    assert ("UNREADABLE: work/150/06-verification.md (not UTF-8 at byte 5), "
+            "work/151/06-verification.md (not UTF-8 at byte 5)") in lines, out
+    inc = _pick1(out, "INCOMPLETE:")[0]
+    assert "150 (06 not checked (work/150/06-verification.md unreadable; item 089); no log line for I3)" in inc, out
+    assert "151 (06 not checked (work/151/06-verification.md unreadable; item 089))" in inc, out
+    assert "151: UNREADABLE (work/151/06-verification.md unreadable)" in lines, out
+
+
+def test_unreadable_request(tmp_path):
+    """089 6d: a non-UTF-8 request.md is `150: UNREADABLE`, exit 1 from UNREADABLE alone."""
+    _tree(tmp_path)
+    (tmp_path / "work" / "150" / "request.md").write_bytes(b"Scope: FULL\n\xff")
+    code, out, err = _run3(tmp_path, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    lines = out.splitlines()
+    assert "150: UNREADABLE (work/150/request.md unreadable)" in lines, out
+    assert "UNREADABLE: work/150/request.md (not UTF-8 at byte 12)" in lines, out
+    assert "INCOMPLETE: none" in lines, out
+
+
+@NO_GIT
+def test_unreadable_log_consumers_say_not_checked(tmp_path):
+    """089 6e: with a bad log, UNCOMMITTED STEP and INCOMPLETE say not checked and never compute from ""
+    (M10); 040 is below CHECKLIST_FROM and gets no entry."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _item(repo, "150", [], date="2026-11-21", logged=False)
+    _item(repo, "040", ALL[:3], date="2026-10-30", logged=False)
+    c = _commit(repo, "cutoff")
+    _write(repo, "work/150/01-research.md")
+    (repo / LOG).parent.mkdir(parents=True, exist_ok=True)
+    (repo / LOG).write_bytes(BAD)
+    code, out, err = _run3(repo, "--untracked-from", c, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    lines = out.splitlines()
+    assert f"UNCOMMITTED STEP: not checked ({LOG} unreadable; item 089)" in lines, out
+    inc = _pick1(out, "INCOMPLETE:")[0]
+    assert inc == f"INCOMPLETE: 150 (log lines not checked ({LOG} unreadable; item 089))", out
+    assert "no log line for" not in inc and "040 (" not in inc, out
+
+
+def test_cr_only_07_reads_as_lines(tmp_path):
+    """089 6h: a 07 with lone CR line ends reads as read_text did (universal newlines): complete (M11)."""
+    _item(tmp_path, "150", ALL)
+    (tmp_path / "work" / "150" / "07-audit-task.md").write_bytes(b"# 07\rA1 result: PASS\r")
+    code, out, err = _run3(tmp_path, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert "150: complete (FULL)" in out.splitlines(), out
+
+
+def test_unreadable_cleared_between_runs(tmp_path, monkeypatch, capsys):
+    """089 6i: main twice in one process; after the log is fixed the second run is clean (M4)."""
+    cp = _cp()
+    f = _tree(tmp_path, BAD)
+    monkeypatch.chdir(tmp_path)
+    assert cp.main(["--today", "2026-11-21"]) == 1
+    assert f"UNREADABLE: {LOG} (not UTF-8 at byte 0)" in capsys.readouterr().out.splitlines()
+    f.write_bytes(CLEAN_LOG)
+    assert cp.main(["--today", "2026-11-21"]) == 0
+    assert "UNREADABLE: none" in capsys.readouterr().out.splitlines()
+
+
+def test_unreadable_printed_before_inbox_early_return(tmp_path, monkeypatch, capsys):
+    """089 6j: a failing INBOX returns early; UNREADABLE is printed before it (M6)."""
+    cp = _cp()
+    _tree(tmp_path, BAD)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cp, "inbox_section", lambda *a, **k: ("x", True))
+    assert cp.main(["--today", "2026-11-21"]) == 1
+    assert f"UNREADABLE: {LOG} (not UTF-8 at byte 0)" in capsys.readouterr().out.splitlines()
+
+
+def test_orphan_log_with_unreadable_file(tmp_path):
+    """089 6k: orphans from a readable file are listed, and the unreadable file is named (M9)."""
+    _tree(tmp_path, BAD)
+    (tmp_path / "logs" / "implementation" / "2026-11-18.md").write_text(
+        "12:00 | I2 | 777 | 1 files changed | tests 1 passed\n", encoding="utf-8")
+    code, out, err = _run3(tmp_path, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert (f"ORPHAN LOG: 777 (logs/implementation/2026-11-18.md); not checked: {LOG} unreadable (item 089)"
+            in out.splitlines()), out
+
+
+def test_unreadable_07(tmp_path):
+    """089 6l: a non-UTF-8 07 is `150: UNREADABLE`, never awaiting A1 or complete (M14)."""
+    _item(tmp_path, "150", ALL)
+    (tmp_path / "work" / "150" / "07-audit-task.md").write_bytes(BAD)
+    code, out, err = _run3(tmp_path, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    lines = out.splitlines()
+    assert "150: UNREADABLE (work/150/07-audit-task.md unreadable)" in lines, out
+    assert "UNREADABLE: work/150/07-audit-task.md (not UTF-8 at byte 0)" in lines, out
+
+
+def test_unreadable_05_at_suite_check(tmp_path):
+    """089 6m: a non-UTF-8 05 is `05 not checked` at the Suite check and not computable in LOG BATCH."""
+    _item(tmp_path, "150", ALL)
+    (tmp_path / "work" / "150" / "05-build-report.md").write_bytes(BAD)
+    code, out, err = _run3(tmp_path, "--today", "2026-11-21")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    inc = _pick1(out, "INCOMPLETE:")[0]
+    assert "150 (05 not checked (work/150/05-build-report.md unreadable; item 089))" in inc, out
+    assert "not computable: 150: work/150/05-build-report.md unreadable" in _pick1(out, "LOG BATCH:")[0], out
+
+
+@NO_GIT
+def test_shallow_file_unreadable_whatever_the_flag(tmp_path, monkeypatch):
+    """089 T-sh: a shallow file that exists but can't be read is "unreadable" even when the flag is not a
+    sure true (M7), and it is recorded (M8); a missing file or a failed --git-common-dir keeps 079's rule."""
+    cp = _cp()
+    monkeypatch.setattr(cp, "_UNREAD", {})
+    repo, c = _history(tmp_path)
+    monkeypatch.chdir(repo)
+    shallow = repo / ".git" / "shallow"
+    _patched_git(monkeypatch, cp, {("rev-parse", "--is-shallow-repository"): ("", 129)})
+    shallow.write_bytes(b"\xff")
+    assert cp._shallow_boundaries() == "unreadable"
+    assert list(cp._UNREAD.values()) == ["not UTF-8 at byte 0"], cp._UNREAD
+    cp._UNREAD.clear()
+    shallow.unlink()
+    shallow.mkdir()
+    assert cp._shallow_boundaries() == "unreadable"
+    assert list(cp._UNREAD.values()) == ["IsADirectoryError"], cp._UNREAD
+    cp._UNREAD.clear()
+    _patched_git(monkeypatch, cp, {("rev-parse", "--is-shallow-repository"): ("", 129),
+                                   ("rev-parse", "--git-common-dir"): ("", 128)})
+    assert cp._shallow_boundaries() == "full" and cp._UNREAD == {}
+    _patched_git(monkeypatch, cp, {("rev-parse", "--is-shallow-repository"): ("true\n", 0),
+                                   ("rev-parse", "--git-common-dir"): ("", 128)})
+    assert cp._shallow_boundaries() == "unreadable" and cp._UNREAD == {}
+
+
+def test_real_data_field_unreadable_request_and_05(tmp_path, monkeypatch):
+    """089 T-rd: an unreadable request.md is not checked and the item is still judged as built (M15);
+    an unreadable 05 is not checked, never a TOTAL-line verdict."""
+    cp = _cp()
+    monkeypatch.setattr(cp, "_UNREAD", {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cp, "_git", lambda *a: ("x", 0))
+    monkeypatch.setattr(cp, "_item_triggers", lambda cutoff: ({"150": ("abc1234", ["ccbot/realtest.py"])}, None))
+    d = tmp_path / "work" / "150"
+    d.mkdir(parents=True)
+    (d / "request.md").write_bytes(BAD)
+    (d / "05-build-report.md").write_bytes(BAD)
+    names, entries, failed = cp.real_data_field("c" * 40, walked=([], None, None))
+    assert "150" in names, names
+    assert entries["150"] == ["request.md not checked (work/150/request.md unreadable; item 089)",
+                              "05 not checked (work/150/05-build-report.md unreadable; item 089)"], entries
+
+
+def test_research_code_unreadable_request(tmp_path, monkeypatch):
+    """089 T-rc: an unreadable request.md is flagged with its why, strict, never counted as built (M16)."""
+    cp = _cp()
+    monkeypatch.setattr(cp, "_UNREAD", {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cp, "_git", lambda *a: ("x", 0))
+    d = tmp_path / "work" / "150"
+    d.mkdir(parents=True)
+    (d / "request.md").write_bytes(BAD)
+    walked = ([("a" * 40, ["work/150/01-research.md", "ccbot/x.py"])], None, None)
+    assert cp.research_code("c" * 40, walked) == (
+        "150", {"150": ("aaaaaaa", "RESEARCH ONLY check: work/150/request.md unreadable (item 089)")})
+
+
+@NO_GIT
+def test_unreadable_request_still_clashes(tmp_path):
+    """089 T-ob: main's 050/request.md unreadable: the clash compare is still made (listed, never dropped,
+    M13), and the file is on UNREADABLE (exit 1)."""
+    repo = _repo_with_open_branch(tmp_path)
+    _branch_adds(repo, "pr5", "050", ["05-build-report.md"], "# Work item 050\nType: IDEA\nScope: FULL\nDate: 2026-10-31\n")
+    _item(repo, "050", ALL)
+    _git(repo, "add", "-A"); _git(repo, "commit", "-q", "-m", "main 050")
+    (repo / "work" / "050" / "request.md").write_bytes(BAD)
+    code, out, err = _run3(repo, "--untracked-from", _root(repo), "--today", "2026-11-03")
+    assert b"Traceback" not in err, err
+    assert code == 1, out
+    lines = out.splitlines()
+    assert "ID CLASH: 050 (origin/pr5)" in lines, out
+    assert "050: UNREADABLE (work/050/request.md unreadable)" in lines, out
+    assert "UNREADABLE: work/050/request.md (not UTF-8 at byte 0)" in lines, out
+
+
+def test_inbox_unreadable_daily_report(tmp_path, monkeypatch):
+    """089 T-is: an unreadable newest daily report is not checked, named (listed on UNREADABLE by main)."""
+    cp = _cp()
+    monkeypatch.setattr(cp, "_UNREAD", {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cp, "_inbox_gate", lambda path: None)
+    (tmp_path / "logs" / "audit").mkdir(parents=True)
+    (tmp_path / "logs" / "audit" / "2026-11-20.md").write_bytes(BAD)
+    assert cp.inbox_section(Path("logs/audit")) == ("not checked (2026-11-20.md unreadable)", False)
+    assert cp._UNREAD == {"logs/audit/2026-11-20.md": "not UTF-8 at byte 0"}
+
+
+@NO_GIT
+def test_inbox_unreadable_working_template(tmp_path):
+    """089 T-ig: an uncommitted report whose working template can't be read is not checked, never judged
+    by a template not read; the template is on UNREADABLE."""
+    _daily(tmp_path, "2026-11-18.md", INBOX_OK.format(sha="a" * 7), template=None, commit=False)
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "daily-audit.md").write_bytes(BAD)
+    code, out, err = _run3(tmp_path, "--today", "2026-11-18")
+    assert b"Traceback" not in err, err
+    lines = out.splitlines()
+    assert ("INBOX: not checked (2026-11-18.md not committed; its templates/daily-audit.md unreadable)"
+            in lines), out
+    assert "UNREADABLE: templates/daily-audit.md (not UTF-8 at byte 0)" in lines, out
+    assert code == 1, out
+
+
+def test_sent_back_unreadable_log_is_no_send_back(tmp_path, monkeypatch):
+    """089 T-sb2: _sent_back skips an unreadable log (the refusal side), no exception."""
+    cp = _cp()
+    monkeypatch.setattr(cp, "_UNREAD", {})
+    monkeypatch.chdir(tmp_path)
+    _tree(tmp_path, BAD)
+    (tmp_path / "work" / "150" / "05-build-report.md").write_text("x\n", encoding="utf-8")
+    assert cp._sent_back("150") is False

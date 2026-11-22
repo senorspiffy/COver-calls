@@ -285,6 +285,25 @@ new log line is never judged by an old rule. The constant counts only at the sta
 comment, a longer name (OLD_TESTS_FORMAT_FROM = 76) or a string is not it (RI-012, round 2 test);
 a column-0 `<CONST> = ` line inside a triple-quoted string would still read as seen (strict: the
 new rule is kept, never a false "not seen").
+UNREADABLE (item 089, RI-014, exit 1): every repo file this script reads (work/, logs/, templates/daily-audit.md,
+the shallow file) is read by one reader, _read: the bytes decoded as strict UTF-8, "\\r\\n" and "\\r" turned
+into "\\n" (read_text's rule). A file that exists but can't be read (not UTF-8, a directory, no permission)
+never raises: it is listed once on `UNREADABLE: <path> (<detail>)`, printed between ORPHAN LOG and INBOX
+(`none` when every read worked), with the detail `not UTF-8 at byte <n>` or the exception class name (never
+file content or error text), and the run exits 1. Each reader of it says what it did not check, never
+computing from "" or printing a bare none: classify gives `<ID>: UNREADABLE (<path> unreadable)` for
+request.md, 06 or 07; INCOMPLETE gets `06 not checked (...; item 089)`, `05 not checked (...)` at the Suite
+check, and `log lines not checked (<files> unreadable; item 089)` for an item with any step file 01-06 (in
+place of the log-line, format, Suite and I3-line checks); UNCOMMITTED STEP prints `not checked (<files>
+unreadable; item 089)`; ORPHAN LOG prints `not checked (<files> unreadable; item 089)` or `<orphans>; not
+checked: <files> unreadable (item 089)`; LOG BATCH lists the item as not computable (086); REAL-DATA FIELD
+adds `request.md|05|06 not checked (...; item 089)` (an unreadable request.md counts as built, strict);
+RESEARCH CODE flags `RESEARCH ONLY check: <path> unreadable (item 089)`; ID CLASH compares an unreadable
+request.md as absent text, so the item is listed, never dropped; INBOX prints `not checked (<report>
+unreadable)` or `not checked (<report> not committed; its templates/daily-audit.md unreadable)`. A shallow
+file that exists but can't be read makes _shallow_boundaries "unreadable" even when the flag is not a sure
+true (git died on it), so UNTRACKED CHANGE and RULE NOT SEEN say `not checked (shallow clone; ...)`, never
+the squash/rebase text or none. Known gap: scripts/check_handoff.py still reads its files strictly.
 """
 import datetime as dt
 import os
@@ -414,8 +433,34 @@ INBOX_PI = re.compile(r"^project-inbox:\s*(nothing new|\d+ new|UNREAD:)", re.M)
 INBOX_HUB = re.compile(r"^hub:\s*([0-9a-f]{7,40}\b|UNREAD:)", re.M)
 
 
-def read_request(path):
-    return parse_request(path.read_text(encoding="utf-8"))
+# Item 089 (RI-014): every file that _read could not read this run, {rendered path: detail}. Reasons only,
+# never file text. main() clears it first (never rebinds it) and prints it on the UNREADABLE line.
+_UNREAD = {}
+
+
+def _shown(path):
+    """Item 089: a path as printed (as_posix), with any surrogate-escaped byte of a non-UTF-8 file name
+    shown as `\\udcXX` (backslashreplace), so printing it never raises. A UTF-8 name is unchanged."""
+    return path.as_posix().encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _read(path, missing_ok=False):
+    """Item 089 (RI-014): the one reader of repo files. (text, None) on success: the bytes decoded as
+    UTF-8 (strict), with "\\r\\n" and then "\\r" turned into "\\n", the same rule as read_text's
+    universal newlines and CPython subprocess's _translate_newlines (so text read here equals git's
+    text-mode output). With missing_ok, a missing file is (None, None) and nothing is recorded. Any
+    other OSError or UnicodeDecodeError is (None, "<path> unreadable") and records the path in _UNREAD
+    with the detail `not UTF-8 at byte <n>` (decode error) or the exception class name (e.g.
+    IsADirectoryError, PermissionError); never the error text or file content (RI-012)."""
+    try:
+        return path.read_bytes().decode("utf-8").replace("\r\n", "\n").replace("\r", "\n"), None
+    except (OSError, UnicodeDecodeError) as err:
+        if missing_ok and isinstance(err, FileNotFoundError):
+            return None, None
+        shown = _shown(path)
+        _UNREAD[shown] = (f"not UTF-8 at byte {err.start}" if isinstance(err, UnicodeDecodeError)
+                          else type(err).__name__)
+        return None, f"{shown} unreadable"
 
 
 def parse_request(text):
@@ -471,10 +516,17 @@ def _a1_results(text):
 
 
 def i3_verdict(path):
-    """Item 071: (verdict, target) from 06; the first column-0 line of each, outside code fences and
-    HTML comments, decides, never a later one; None = unreadable. Fences are CommonMark 0.31.2 §4.5
+    """Item 071: (verdict, target) from the 06 file at `path` (_i3_verdict_text). Item 089: a file
+    _read can't read gives (None, None) and is listed on the UNREADABLE line."""
+    text, why = _read(path)
+    return (None, None) if why else _i3_verdict_text(text)
+
+
+def _i3_verdict_text(text):
+    """Item 071: (verdict, target) from 06's text; the first column-0 line of each, outside code fences
+    and HTML comments, decides, never a later one; None = unreadable. Fences are CommonMark 0.31.2 §4.5
     code fences (``` or ~~~, _md_lines; item 077)."""
-    rows, _ = _md_lines(path.read_text(encoding="utf-8"))
+    rows, _ = _md_lines(text)
     verdict = target = None
     seen_verdict = seen_target = False
     for line, state in rows:
@@ -526,10 +578,14 @@ def _research_code(files, request_text_of):
 
 
 def classify(item_dir, today):
-    """(status, detail) for one work item folder."""
-    scope, opened, (waived, waived_line, who) = read_request(item_dir / "request.md")
+    """(status, detail) for one work item folder. Item 089: request.md, 06 or 07 that _read can't read
+    gives ("UNREADABLE", "<path> unreadable"), never a status computed without it."""
+    req_text, why = _read(item_dir / "request.md")
+    if why:
+        return "UNREADABLE", why
+    scope, opened, (waived, waived_line, who) = parse_request(req_text)
     extra = f"; {waived_line}" if waived_line else ""
-    if scope == "FAST" and not FAST_BY_PERSON.search((item_dir / "request.md").read_text(encoding="utf-8")):
+    if scope == "FAST" and not FAST_BY_PERSON.search(req_text):
         return "SKIPPED", f"FAST needs (person, <date>): only the person may shorten the pipeline (item 042){extra}"
     blocked = [s for s in waived if s in PERSON_ONLY and who != "person"]
     if blocked:
@@ -549,18 +605,31 @@ def classify(item_dir, today):
     if results and unchecked:
         return "SKIPPED", f"{scope}: {', '.join(results)} written before {' '.join(unchecked)}{extra}"
     if "06" in have:                                    # item 071: before A1's result (D7)
-        verdict, target = i3_verdict(item_dir / STEPS["06"])
+        ver_text, why = _read(item_dir / STEPS["06"])
+        if why:
+            return "UNREADABLE", why
+        verdict, target = _i3_verdict_text(ver_text)
         if verdict == "FAIL":
             where = f"sent back to {target}" if target in ("I1", "I2", "I1 I2") else "sent back to: not stated"
             audit = item_dir / STEPS["07"]
-            a1 = _a1_results(audit.read_text(encoding="utf-8")) if audit.exists() else []
+            a1 = []
+            if audit.exists():
+                audit_text, why = _read(audit)
+                if why:
+                    return "UNREADABLE", why
+                a1 = _a1_results(audit_text)
             if a1 and a1[-1].upper() != "FAIL":             # item 077: the item was completed
                 return "I3 FAIL", (f"{scope}; {where}; 06 FAIL after A1 PASS in 07: a follow-up to a completed "
                                    f"item is a new item (run-item, items 053, 077){extra}")
             return "I3 FAIL", f"{scope}; {where}, needs a later PASS round in 06 (item 071){extra}"
     if len(have) == len(need):
         audit = item_dir / STEPS["07"]
-        verdicts = _a1_results(audit.read_text(encoding="utf-8")) if audit.exists() else []
+        verdicts = []
+        if audit.exists():
+            audit_text, why = _read(audit)
+            if why:
+                return "UNREADABLE", why
+            verdicts = _a1_results(audit_text)
         if item_dir.name not in PRE_A1_LINE and not verdicts:
             return "awaiting A1", f"{scope}{extra}"
         if verdicts and verdicts[-1].upper() == "FAIL":
@@ -591,10 +660,19 @@ def log_hint(agent, item, new_rule=True) -> str:
 
 
 def _log_text(logs):
-    """Items 043, 077: every research and implementation log file under `logs`, joined in file order
-    ("" when the folders are absent)."""
-    return "".join(f.read_text(encoding="utf-8") for sub in ("research", "implementation")
-                   for f in sorted((logs / sub).glob("*.md")) if (logs / sub).is_dir())
+    """Items 043, 077: (text, whys): every research and implementation log file under `logs`, joined in
+    file order ("" when the folders are absent). Item 089: a file _read can't read is left out of the
+    text and its `<file> unreadable` is in whys, so a caller says not checked instead of computing from
+    what is left."""
+    texts, whys = [], []
+    for sub in ("research", "implementation"):
+        for f in (sorted((logs / sub).glob("*.md")) if (logs / sub).is_dir() else []):
+            text, why = _read(f)
+            if why:
+                whys.append(why)
+            else:
+                texts.append(text)
+    return "".join(texts), whys
 
 
 def _logged(text, agent, item):
@@ -605,14 +683,17 @@ def _logged(text, agent, item):
 def uncommitted_steps(logs=Path("logs")):
     """Item 077 (RI-010): None without git, else (text after `UNCOMMITTED STEP: `, failed). A step file
     01-06 in the working tree that is not in `git ls-tree -r HEAD -- work/` and has no `| <agent> | <ID> |`
-    log line is a cut-off run. Every item number is checked. A failing ls-tree is an error, never none."""
+    log line is a cut-off run. Every item number is checked. A failing ls-tree is an error, never none.
+    Item 089: an unreadable log file gives `not checked (<file> unreadable; item 089)`, never none."""
     if _git("rev-parse", "HEAD") is None:
         return None
     tree = _git("ls-tree", "-r", "--name-only", "HEAD", "--", "work/")
     if tree[1] != 0:
         return "git ls-tree HEAD failed (item 077)", True
     committed = set(tree[0].splitlines())
-    text = _log_text(logs)
+    text, whys = _log_text(logs)
+    if whys:                                                # item 089: a lost log line could be any step's
+        return f"not checked ({'; '.join(whys)}; item 089)", False
     entries = []
     for d in sorted(Path("work").glob("[0-9][0-9][0-9]")):
         if not d.is_dir():
@@ -679,11 +760,15 @@ def _rule_seen(item_dir, step, const, env):
 
 def _last_log_line(logs, agent, item):
     """Item 082: the item's last LOG_LINE match for `agent` in logs/implementation/????-??-??.md, by
-    sorted file name then line order, or None."""
+    sorted file name then line order, or None. Item 089: a file _read can't read is skipped here; the
+    caller (incomplete) runs this only when _log_text read every log file, so a skip is a race."""
     last = None
     impl = logs / "implementation"
     for f in (sorted(impl.glob("????-??-??.md")) if impl.is_dir() else []):
-        for l in f.read_text(encoding="utf-8").splitlines():
+        text, why = _read(f)
+        if why:
+            continue
+        for l in text.splitlines():
             m = LOG_LINE.match(l)
             if m and m[3] == agent and m[4] == item:
                 last = m
@@ -702,20 +787,30 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
     VERDICT check that would fire is dropped only if the item's 05 / 06 was added under a rule file
     without that constant (_rule_seen False) and, for I2, every I2 line passes I2_BEFORE; each such
     pair is appended to `not_seen` as (ID, step, sha7, constant, rule item, old rule). Item 082: the
-    Suite check (SUITE_FROM) is gated the same way, on 05."""
+    Suite check (SUITE_FROM) is gated the same way, on 05. Item 089: an unreadable 06 is one entry
+    `06 not checked (<why>; item 089)` in place of the RI-line, verdict-line and I3-line checks; an
+    unreadable log file, for an item with any step file 01-06, is one entry `log lines not checked
+    (<whys>; item 089)` in place of the unlogged, format, Suite and I3-line checks; an unreadable 05 at
+    the Suite check is `05 not checked (<why>; item 089)`. Nothing is computed from what is left."""
     not_seen = [] if not_seen is None else not_seen
     if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
         return []
     missing = []
     ver = item_dir / STEPS["06"]
-    if ver.exists() and not re.search(r"^.*Recurring issues checked:.*RI-\d", ver.read_text(encoding="utf-8"), re.M):
+    ver_text, ver_why = _read(ver) if ver.exists() else (None, None)
+    if ver_why:
+        missing.append(f"06 not checked ({ver_why}; item 089)")
+    elif ver_text is not None and not re.search(r"^.*Recurring issues checked:.*RI-\d", ver_text, re.M):
         missing.append("06 has no 'Recurring issues checked: RI-...' line")
-    text = _log_text(logs)
+    text, log_whys = _log_text(logs)
+    if log_whys:
+        if any((item_dir / STEPS[s]).exists() for s in AGENT):
+            missing.append(f"log lines not checked ({'; '.join(log_whys)}; item 089)")
     unlogged = [AGENT[s] for s in sorted(AGENT) if (item_dir / STEPS[s]).exists()
-                and not _logged(text, AGENT[s], item_dir.name)]
+                and not _logged(text, AGENT[s], item_dir.name)] if not log_whys else []
     if unlogged:
         missing.append(f"no log line for {' '.join(unlogged)}")
-    if int(item_dir.name) >= LOG_CHECK_FROM:
+    if int(item_dir.name) >= LOG_CHECK_FROM and not log_whys:
         bad = sorted({m[3] for m in (LOG_LINE.match(l) for l in text.splitlines())
                       if m and m[4] == item_dir.name and not log_fields_ok(m[3], m[4], m[5])})
         new_rule, note = True, ""
@@ -735,13 +830,16 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
         if note:
             missing.append(note)
     report = item_dir / STEPS["05"]
-    if int(item_dir.name) >= SUITE_FROM and report.exists():   # item 082: Suite line = last I2 tests field
+    if int(item_dir.name) >= SUITE_FROM and report.exists() and not log_whys:   # item 082: Suite = last I2 field
         last = _last_log_line(logs, "I2", item_dir.name)
         if last is not None and log_fields_ok("I2", item_dir.name, last[5]):   # else 043/045 report it
             field = last[5].strip().split(" | tests ", 1)[1]
-            suites = _suite_lines(report.read_text(encoding="utf-8"))
+            body, why05 = _read(report)
+            suites = _suite_lines(body) if why05 is None else []
             fired = None
-            if not suites:
+            if why05:
+                missing.append(f"05 not checked ({why05}; item 089)")
+            elif not suites:
                 fired = "05 has no 'Suite:' line (item 082)"
             elif len(suites) > 1:
                 fired = f"05 has {len(suites)} 'Suite:' lines, needs exactly 1 (item 082)"
@@ -753,8 +851,8 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
                     not_seen.append((item_dir.name, "05", sha7, "SUITE_FROM", "082", "no Suite check"))
                 else:
                     missing += [fired] + ([sha7] if seen is None and sha7 else [])
-    if ver.exists():                                        # item 071 (a)-(d)
-        verdict, target = i3_verdict(ver)
+    if ver_text is not None:                                # item 071 (a)-(d); item 089: 06 was read
+        verdict, target = _i3_verdict_text(ver_text)
         if int(item_dir.name) >= VERDICT_FROM:
             fired = []
             if verdict is None:
@@ -769,11 +867,14 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
                     not_seen.append((item_dir.name, "06", sha7, "VERDICT_FROM", "071", "no Sent-back check"))
                 else:
                     missing += fired + ([sha7] if seen is None and sha7 else [])
-        if verdict is not None:
+        if verdict is not None and not log_whys:           # item 089: no I3-line check on a lost log
             last = None                                     # the item's last I3 line: by file date, then line order
             impl = logs / "implementation"
             for f in (sorted(impl.glob("????-??-??.md")) if impl.is_dir() else []):
-                for l in f.read_text(encoding="utf-8").splitlines():
+                lines, why = _read(f)
+                if why:                                     # only a race: _log_text read every file above
+                    continue
+                for l in lines.splitlines():
                     m = LOG_LINE.match(l)
                     if m and m[3] == "I3" and m[4] == item_dir.name:
                         last = m
@@ -791,9 +892,8 @@ def _sent_back(item, logs=Path("logs")):
     for team in ("research", "implementation"):
         folder = logs / team
         for f in (sorted(folder.glob("????-??-??.md")) if folder.is_dir() else []):
-            try:
-                text = f.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+            text, why = _read(f)
+            if why:
                 continue
             for m in map(LOG_LINE.match, text.splitlines()):
                 if m and m[4] == item and m[3] in SEND_BACK:
@@ -802,10 +902,8 @@ def _sent_back(item, logs=Path("logs")):
                     if v and v[group] == word:
                         return True
     audit = Path("work") / item / STEPS["07"]
-    try:
-        results = _a1_results(audit.read_text(encoding="utf-8")) if audit.exists() else []
-    except (OSError, UnicodeDecodeError):
-        results = []
+    audit_text, why = _read(audit) if audit.exists() else ("", None)
+    results = _a1_results(audit_text) if why is None else []
     return any(r.upper() == "FAIL" for r in results)
 
 
@@ -842,13 +940,18 @@ def write_log(agent, item, fields, now=None):
 
 
 def orphan_log_lines():
-    """Item 047: `<ID> (<log file>)` for every agent log line whose work/<ID>/ folder is missing."""
-    orphans = []
+    """Item 047: (orphans, whys): `<ID> (<log file>)` for every agent log line whose work/<ID>/ folder is
+    missing. Item 089: a log file _read can't read is not checked; its `<file> unreadable` is in whys."""
+    orphans, whys = [], []
     for team in ("research", "implementation"):
         for f in sorted((Path("logs") / team).glob("????-??-??.md")):
-            ids = {m[4] for m in map(LOG_LINE.match, f.read_text(encoding="utf-8").splitlines()) if m}
+            text, why = _read(f)
+            if why:
+                whys.append(why)
+                continue
+            ids = {m[4] for m in map(LOG_LINE.match, text.splitlines()) if m}
             orphans += [f"{i} ({f.as_posix()})" for i in sorted(ids) if not (Path("work") / i).is_dir()]
-    return orphans
+    return orphans, whys
 
 
 def late_log_lines():
@@ -898,10 +1001,9 @@ def _item_lines(logs):
         folder = logs / team
         for f in (sorted(folder.glob("????-??-??.md")) if folder.is_dir() else []):
             index += 1
-            try:
-                text = f.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                unreadable.append(f"{f.as_posix()} unreadable")
+            text, why = _read(f)
+            if why:
+                unreadable.append(why)
                 continue
             for n, row in enumerate(text.splitlines()):
                 m = LOG_LINE.match(row)
@@ -923,10 +1025,10 @@ def _run_seconds(path, heading):
     unreadable") when it can't be read."""
     if not path.exists():
         return [], None
-    try:
-        rows, _ = _md_lines(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError):
-        return [], f"{path.as_posix()} unreadable"
+    text, why = _read(path)
+    if why:
+        return [], why
+    rows, _ = _md_lines(text)
     found, inside = [], False
     for line, state in rows:
         if state == "out" and re.match(heading, line):
@@ -1133,9 +1235,10 @@ def open_branches(today=None):
                     theirs = None
             requests[item] = theirs
             mine = Path(req)
+            mine_text, _ = _read(mine) if mine.exists() else (None, None)   # item 089: None if unreadable
             if (bases and theirs is not None and mine.exists()
                     and all(_git("cat-file", "-e", f"{b}:{req}")[1] != 0 for b in bases)
-                    and theirs != mine.read_text(encoding="utf-8")):
+                    and theirs != mine_text):                # unreadable mine: listed, never dropped
                 clashes.append(item)
             if theirs is not None and item not in LEGACY:
                 with tempfile.TemporaryDirectory() as tmp:
@@ -1197,17 +1300,21 @@ def _shallow_boundaries():
     """Item 079 (RI-014): "full", "unreadable", or the shallow boundaries S (file order, no
     duplicates; may be empty) from `<git rev-parse --git-common-dir>/shallow`, so a linked
     worktree reads its main repo's file. A flag git can't give and no file is "full"; a true flag
-    with a missing, unreadable or malformed file (SHALLOW_LINE) is "unreadable", never skipped."""
+    with a missing, unreadable or malformed file (SHALLOW_LINE) is "unreadable", never skipped.
+    Item 089: a shallow file that exists but _read can't read (not UTF-8, a directory, ...) is
+    "unreadable" whatever the flag says, and is listed on the UNREADABLE line; only a missing file or a
+    failed --git-common-dir keeps "full" when the flag is not a sure true."""
     r = _git("rev-parse", "--is-shallow-repository")
     if r is None or (r[1] == 0 and r[0].strip() == "false"):
         return "full"
     sure = r[1] == 0 and r[0].strip() == "true"
     d = _git("rev-parse", "--git-common-dir")
-    try:
-        if d is None or d[1] != 0:
-            raise OSError("git rev-parse --git-common-dir failed")
-        text = (Path.cwd() / d[0].strip() / "shallow").read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    if d is None or d[1] != 0:
+        return "unreadable" if sure else "full"
+    text, why = _read(Path.cwd() / d[0].strip() / "shallow", missing_ok=True)
+    if why:
+        return "unreadable"
+    if text is None:
         return "unreadable" if sure else "full"
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if any(SHALLOW_LINE.fullmatch(line) is None for line in lines):
@@ -1314,13 +1421,22 @@ def research_code(cutoff=UNTRACKED_FROM, walked=None):
     if any(files is None for _, files in units):            # item 079: never "none" on a failed diff
         return "not checked (see UNTRACKED CHANGE)", {}
 
+    unread = {}                                             # item 089: {ID: why} for an unreadable request.md
+
     def request_text_of(item):
         req = Path("work") / item / "request.md"
-        return req.read_text(encoding="utf-8") if req.is_file() else None
+        if not req.is_file():
+            return None
+        text, why = _read(req)
+        if why:
+            unread[item] = why
+        return text                                         # None when unreadable: strict, never built
 
     flagged = {}
     for c, files in units:
         for item, detail in _research_code(files, request_text_of):
+            if item in unread:                              # its text is None: the only flag is "no request.md"
+                detail = f"RESEARCH ONLY check: {unread[item]} (item 089)"
             if item in flagged:
                 sha, old = flagged[item]
                 flagged[item] = (sha, f"{old}; {c[:7]} {detail}")
@@ -1403,16 +1519,21 @@ def real_data_field(cutoff=UNTRACKED_FROM, walked=None):
             names.append(f"{item} (no work/{item}/request.md here)")
             failed = True
             continue
-        if read_request(req)[0] == "RESEARCH ONLY":                  # gap (r): 062's
+        req_text, req_why = _read(req)
+        if req_why is None and parse_request(req_text)[0] == "RESEARCH ONLY":   # gap (r): 062's
             continue
         what = f"{sha7} changes {' '.join(files)}"
-        gaps = []
+        gaps = [f"request.md not checked ({req_why}; item 089)"] if req_why else []   # scope unknown: built
         if not (req.parent / STEPS["05"]).is_file():
             gaps.append(f"no 05 for {what} (item 070)")
         for step in ("05", "06"):
             f = req.parent / STEPS[step]
             if f.is_file():
-                gap = _field_gap(f.read_text(encoding="utf-8"))
+                body, why = _read(f)
+                if why:                                     # item 089: never judged from a file not read
+                    gaps.append(f"{step} not checked ({why}; item 089)")
+                    continue
+                gap = _field_gap(body)
                 if gap:
                     gaps.append(f"{step} {gap} ({what}; item 070)")
         if gaps:
@@ -1488,7 +1609,10 @@ def _inbox_gate(path: Path) -> "tuple[str, bool] | None":
         where = f"added in {sha[:7]}"
     else:
         working = Path(INBOX_TEMPLATE)
-        ok = working.is_file() and INBOX_HEAD.search(working.read_text(encoding="utf-8")) is not None
+        tpl_text, why = _read(working) if working.is_file() else (None, None)
+        if why:                                             # item 089: not judged by a template not read
+            return f"not checked ({path.name} not committed; its {INBOX_TEMPLATE} unreadable)", False
+        ok = tpl_text is not None and INBOX_HEAD.search(tpl_text) is not None
         where = "not committed"
     return None if ok else (f"not checked ({path.name} {where}; its {INBOX_TEMPLATE} has no ## Inbox)", False)
 
@@ -1505,7 +1629,9 @@ def inbox_section(audit=Path("logs/audit")) -> tuple[str, bool]:
     gate = _inbox_gate(newest)
     if gate:
         return gate
-    text = newest.read_text(encoding="utf-8")
+    text, why = _read(newest)
+    if why:                                                 # item 089: listed on UNREADABLE, exit 1 there
+        return f"not checked ({newest.name} unreadable)", False
     head = INBOX_HEAD.search(text)
     if head is None:
         return f"{newest.name} (no ## Inbox)", True
@@ -1518,6 +1644,7 @@ def inbox_section(audit=Path("logs/audit")) -> tuple[str, bool]:
 
 
 def main(argv):
+    _UNREAD.clear()                                         # item 089: one run's reads; never rebound
     today = dt.datetime.now(dt.timezone.utc).date()
     if argv[:1] == ["--next-id"]:
         nid, why = next_id()
@@ -1645,9 +1772,16 @@ def main(argv):
     print(f"RESEARCH CODE: {'not checked (no git)' if research is None else research[0]}")
     print(f"REAL-DATA FIELD: {'not checked (no git)' if real is None else real[0]}")
     print(f"UNCOMMITTED STEP: {'not checked (no git)' if uncommitted is None else uncommitted[0]}")
-    orphans = orphan_log_lines()
-    print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
+    orphans, orphan_whys = orphan_log_lines()
+    if orphan_whys:                                         # item 089: never a bare none for a lost file
+        lost = "; ".join(orphan_whys)
+        print(f"ORPHAN LOG: {', '.join(orphans)}; not checked: {lost} (item 089)" if orphans
+              else f"ORPHAN LOG: not checked ({lost}; item 089)")
+    else:
+        print(f"ORPHAN LOG: {', '.join(orphans) or 'none'}")
     inbox, inbox_bad = inbox_section()  # item 069
+    print(f"UNREADABLE: {', '.join(f'{p} ({d})' for p, d in sorted(_UNREAD.items())) or 'none'}")   # item 089
+    unreadable = bool(_UNREAD)
     print(f"INBOX: {inbox}")
     if inbox_bad:
         print(f"SKIPPED: {', '.join(skipped) or 'none'}")
@@ -1655,7 +1789,7 @@ def main(argv):
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped or failed or i3_failed or unfinished or late or orphans or (untracked and untracked[1]) \
         or (real and real[2]) or (uncommitted and uncommitted[1]) or isinstance(branches, str) \
-        or branch_errors or isinstance(ahead, str) or batch["flagged"] or env_failed else 0
+        or branch_errors or isinstance(ahead, str) or batch["flagged"] or env_failed or unreadable else 0
 
 
 if __name__ == "__main__":
