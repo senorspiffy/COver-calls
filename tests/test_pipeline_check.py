@@ -1,5 +1,6 @@
 """scripts/check_pipeline.py (items 026, 029; RI-007) and check_handoff.py --all (item 028)."""
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -3705,13 +3706,14 @@ def test_suite_label_in_template_and_i2_text():
 
 UNSHALLOW = ("If `git rev-parse --is-shallow-repository` prints true, run `git fetch --unshallow`, then test "
              "again. If it is still true, report UNTRACKED CHANGE, RESEARCH CODE, REAL-DATA FIELD, LOG TIME, "
-             "MAIN AHEAD and OPEN BRANCHES as 'not checked', never 'none' (items 079, 090).")
+             "MAIN AHEAD, OPEN BRANCHES and RULE NOT SEEN as 'not checked', never 'none' (items 079, 084, 090).")
 
 
 def test_unshallow_sentence_same_in_three_files():
     """Item 082 (RI-014): the unshallow sentences, byte for byte, once in each of the three files (text pin)."""
     for f in (".claude/commands/run-item.md", ".claude/commands/daily-audit.md", ".claude/agents/a1-auditor.md"):
         assert (REPO / f).read_text(encoding="utf-8").count(UNSHALLOW) == 1, f
+    assert "RULE NOT SEEN" in UNSHALLOW                 # item 091 step 4: 084's not-checked form is named
 
 
 def test_run_item_commit_subject_rule():
@@ -3852,8 +3854,10 @@ def test_unreadable_06(tmp_path):
     assert ("UNREADABLE: work/150/06-verification.md (not UTF-8 at byte 5), "
             "work/151/06-verification.md (not UTF-8 at byte 5)") in lines, out
     inc = _pick1(out, "INCOMPLETE:")[0]
-    assert "150 (06 not checked (work/150/06-verification.md unreadable; item 089); no log line for I3)" in inc, out
-    assert "151 (06 not checked (work/151/06-verification.md unreadable; item 089))" in inc, out
+    assert ("150 (06 not checked (work/150/06-verification.md unreadable; item 089); no log line for I3; 06 round "
+            "headings not checked (work/150/06-verification.md unreadable; item 091))") in inc, out   # 091: >= 92
+    assert ("151 (06 not checked (work/151/06-verification.md unreadable; item 089); 06 round headings not checked "
+            "(work/151/06-verification.md unreadable; item 091))") in inc, out
     assert "151: UNREADABLE (work/151/06-verification.md unreadable)" in lines, out
 
 
@@ -3955,7 +3959,8 @@ def test_unreadable_05_at_suite_check(tmp_path):
     assert b"Traceback" not in err, err
     assert code == 1, out
     inc = _pick1(out, "INCOMPLETE:")[0]
-    assert "150 (05 not checked (work/150/05-build-report.md unreadable; item 089))" in inc, out
+    assert ("150 (05 not checked (work/150/05-build-report.md unreadable; item 089); 05 round headings not "
+            "checked (work/150/05-build-report.md unreadable; item 091))") in inc, out   # 091: 150 >= 92
     assert "not computable: 150: work/150/05-build-report.md unreadable" in _pick1(out, "LOG BATCH:")[0], out
 
 
@@ -4480,3 +4485,144 @@ def test_i2_and_run_item_texts_name_item_090():
     run = (REPO / ".claude" / "commands" / "run-item.md").read_text(encoding="utf-8")
     assert "it refuses a step after the sender until the sender logs again" in run and "(item 090)" in run
     assert "unless the item was sent back" not in run
+
+
+# Item 091 step 5a/5b (086 F3, RI-010): round headings LOG BATCH does not read.
+RH_TEMPLATE = {"templates/build-report.md": ("## Test output (round N, pasted)", "## Test output (round 2, pasted)"),
+                  "templates/verification.md": ("## Tests re-run (round N)", "## Tests re-run (round 2)")}
+
+
+def _rh_line(heading):
+    return (f"Each later round's runs go under their own level-2 heading `{heading}`, never under a `###` heading "
+            f"or a `Round N ...` heading (item 091).")
+
+
+def test_round_heading_template_lines():
+    """5a: each template states the round heading once; the heading parses with LOG BATCH's opener
+    (RUN_HEADING, as batch_log_items passes it) and the line itself is never a stray heading."""
+    cp = _cp()
+    for (f, (heading, example)), step in zip(RH_TEMPLATE.items(), ("05", "06")):
+        line = _rh_line(heading)
+        assert (REPO / f).read_text(encoding="utf-8").count(line) == 1, f
+        assert re.match(cp.RUN_HEADING[step], example), example
+        assert cp.STRAY_RUN_HEADING.match(line) is None
+
+
+RH_ID, RH_DAY = "150", "2026-11-21"
+RH_USE = "is not read by LOG BATCH; use '## Test output (round N, pasted)' / '## Tests re-run (round N)' (item 091)"
+RH_P1 = "## Round 2\n### Test output (round 2, pasted)\n```\n2 passed in 1.50s\n```\n"
+
+
+def _rh_item(root, body05=None, body06=None, item=RH_ID):
+    """A complete item (_item, every step and log line) with text appended to 05 and/or 06; 05 keeps
+    its Suite line, so only the round-heading check can fire."""
+    _item(root, item, ALL, date=RH_DAY)
+    d = root / "work" / item
+    for name, body in (("05-build-report.md", body05), ("06-verification.md", body06)):
+        if body is not None:
+            f = d / name
+            f.write_text(f.read_text(encoding="utf-8") + body, encoding="utf-8")
+    return d
+
+
+def _rh_inc(root):
+    code, out = _run(root, "check_pipeline.py", "--today", RH_DAY)
+    return code, _pick(out, "INCOMPLETE:"), out
+
+
+@pytest.mark.parametrize("step, body, heading", [
+    ("05", RH_P1, "### Test output (round 2, pasted)"),
+    ("05", "## Round 2 test output (pasted)\n2 passed in 1.50s\n", "## Round 2 test output (pasted)"),
+    ("06", "## Round 1\n### Tests re-run (output)\n2 passed in 1.50s\n", "### Tests re-run (output)"),
+], ids=["P1", "P2", "P3"])
+def test_stray_round_heading_is_incomplete(tmp_path, step, body, heading):
+    """RH_P1-P3: a run heading outside every read section is one INCOMPLETE entry naming it (no git: strict)."""
+    d = _rh_item(tmp_path, **{f"body{step}": body})
+    code, inc, out = _rh_inc(tmp_path)
+    assert inc == f"INCOMPLETE: {RH_ID} ({step} heading '{heading}' {RH_USE})", out
+    assert code == 1, out
+    if step == "05":                                        # why: LOG BATCH reads no time under it
+        cp = _cp()
+        assert 1.5 not in cp._run_seconds(d / "05-build-report.md", cp.RUN_HEADING["05"])[0]
+
+
+def test_stray_round_headings_one_entry_per_file(tmp_path):
+    """Two stray headings in 05 are one entry, joined by ', '."""
+    _rh_item(tmp_path, body05=RH_P1 + "## Round 3 test output\n")
+    _, inc, out = _rh_inc(tmp_path)
+    assert inc == (f"INCOMPLETE: {RH_ID} (05 heading '### Test output (round 2, pasted)', "
+                   f"'## Round 3 test output' {RH_USE})"), out
+
+
+@pytest.mark.parametrize("body05, item", [
+    ("## Test output (pasted, not summarized)\n### Test output (detail)\n```\n2 passed in 1.50s\n```\n", RH_ID),
+    ("## Notes on test output\nRound 2 runs go under ## Test output (round 2, pasted), never ### Test output.\n",
+     RH_ID),
+    (RH_P1, "091"),
+    ("## Test output (round 2, pasted)\n```\n2 passed in 1.50s\n```\n", RH_ID),
+], ids=["N1-inside-section", "N2-not-at-start", "N3-below-cutoff", "N4-round-opener"])
+def test_read_or_unnamed_heading_is_not_stray(tmp_path, body05, item):
+    """N1: a `###` run heading inside the `## Test output` section is read; N2: the name not at the line
+    start (a heading or prose) is not a run heading (anchored .match, RI-012); N3: ID below
+    ROUND_HEADING_FROM; N4: the round heading the template asks for."""
+    d = _rh_item(tmp_path, body05=body05, item=item)
+    code, inc, out = _rh_inc(tmp_path)
+    assert inc == "INCOMPLETE: none" and code == 0, out
+    if body05.startswith("## Test output (pasted"):         # N1: LOG BATCH reads its time
+        cp = _cp()
+        assert 1.5 in cp._run_seconds(d / "05-build-report.md", cp.RUN_HEADING["05"])[0]
+
+
+def test_unreadable_05_round_headings_not_checked(tmp_path):
+    """U: a non-UTF-8 05 is `not checked` with the reason (and on UNREADABLE), never a pass."""
+    d = _rh_item(tmp_path)
+    (d / "05-build-report.md").write_bytes(b"## Round 2\n\xff")
+    code, inc, out = _rh_inc(tmp_path)
+    path = f"work/{RH_ID}/05-build-report.md"
+    assert f"05 round headings not checked ({path} unreadable; item 091)" in inc, out
+    assert f"UNREADABLE: {path} (not UTF-8 at byte 11)" in out.splitlines(), out
+    assert code == 1, out
+
+
+@NO_GIT
+@pytest.mark.parametrize("seen", [False, True], ids=["G-not-seen", "G-seen"])
+def test_round_heading_gate_follows_rule_file_of_05_commit(tmp_path, seen):
+    """G: RH_P1's 05 added in a commit whose rule file has no ROUND_HEADING_FROM: RULE NOT SEEN, no entry
+    (item 084 gate). With the constant there: the INCOMPLETE entry and RULE NOT SEEN none."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    rules = "TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\nSUITE_FROM = 87\nTIMED_FROM = 90\n"
+    _write(repo, "scripts/check_pipeline.py", rules + ("ROUND_HEADING_FROM = 92\n" if seen else ""))
+    _rh_item(repo, body05=RH_P1)
+    root = _commit(repo, "150 built")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", RH_DAY)
+    if seen:
+        assert _pick(out, "INCOMPLETE:") == (f"INCOMPLETE: {RH_ID} (05 heading "
+                                             f"'### Test output (round 2, pasted)' {RH_USE})"), out
+        assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+    else:
+        assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+        assert _pick(out, "RULE NOT SEEN:") == (f"RULE NOT SEEN: {RH_ID} (05 added in {root[:7]} without "
+                                                "ROUND_HEADING_FROM (091): judged by no round-heading check; "
+                                                "item 084)"), out
+
+
+def test_section_flags_match_run_seconds_rule():
+    """_section_flags: opener and closer rows are False; `###` neither opens nor closes."""
+    cp = _cp()
+    rows, _ = cp._md_lines("a\n## Test output (x)\nb\n### sub\nc\n## Next\nd\n")
+    assert cp._section_flags(rows, cp.RUN_HEADING["05"]) == [False, False, True, True, True, False, False]
+
+
+# Item 091 step 7 (RI-007): one scratch-dir sentence in four rule files (text only: no check sees a collision).
+SCRATCH = ("Every agent works in its own new scratch dir, made with `python3 -c 'import tempfile; "
+           "print(tempfile.mkdtemp(prefix=\"<agent>-<ID>-r<round>-\", dir=\"<absolute scratchpad path>\"))'`, and "
+           "never reuses or writes into another agent's dir, even for the same item; agents with no shell (R1-R3, "
+           "I1) get theirs from the orchestrator (item 091).")
+
+
+def test_scratch_sentence_same_in_four_files():
+    for f in (".claude/commands/run-item.md", ".claude/agents/i2-builder.md", ".claude/agents/i3-verifier.md",
+              ".claude/agents/a1-auditor.md"):
+        assert (REPO / f).read_text(encoding="utf-8").count(SCRATCH) == 1, f

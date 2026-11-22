@@ -181,6 +181,15 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   when 06 changed; an I3 that FAILs again leaves 06 at FAIL; A1 FAIL rounds get (c)
                   only; (z) pytest's time and the log stamp are both wall clock (time.time()), so a
                   clock step during a run can move both.
+                  Item 091 (gap w, RI-010): from ROUND_HEADING_FROM on, a 05/06 heading outside code
+                  fences that names a run (STRAY_RUN_HEADING: `#{1,6} [round N ]test output|tests re-run`,
+                  case-insensitive, at the line start) but is neither that file's opener (RUN_HEADING) nor
+                  inside a read section (_section_flags, the same open/close rule as _run_seconds) is the
+                  INCOMPLETE entry `<05|06> heading '<heading>'[, '<heading>'] is not read by LOG BATCH;
+                  use '## Test output (round N, pasted)' / '## Tests re-run (round N)' (item 091)`, gated
+                  on that file like SUITE_FROM; an unreadable 05/06 is `<05|06> round headings not
+                  checked (<why>; item 091)`. Known gaps: runs with no heading of their own (076/05 under
+                  `## Round 2 build`), headings indented 1-3 spaces, and the template lines are text only.
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
@@ -323,7 +332,7 @@ scripts/check_pipeline.py (item 084)`) keeps them and adds that entry (exit 1). 
 cutoff make no git call. Cost (item 088): HEAD is read once per run (+1 wrapper call); a full pair
 is 3 wrapper calls (log, ls-tree, show) = 6 git processes (each _git also runs rev-parse
 --show-toplevel); early exits make 0, 1 or 2; at most 3 pairs per item (05 TESTS, 05 SUITE, 06
-VERDICT). Before 088 a full pair was 4 calls = 8 processes. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
+VERDICT), 5 from ROUND_HEADING_FROM on (05 and 06 ROUND_HEADING, item 091; a pair runs only when a check fires). Before 088 a full pair was 4 calls = 8 processes. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
 items today); the 06 verdict vs last I3 line cross-check stays at CHECKLIST_FROM by decision;
 CHECKLIST_FROM, LOG_CHECK_FROM and their checks stay numeric; --log (write_log) stays numeric, so a
 new log line is never judged by an old rule. The constant counts only at the start of a line, so a
@@ -385,6 +394,9 @@ SUITE_FROM = 87
 # Item 090 (RI-010): from this ID on the I2 tests field keeps pytest's ` in <s>s` time (I2_TIMED); the 7th
 # `*_FROM` cutoff, a numeric floor above the in-flight items 088/089.
 TIMED_FROM = 90
+# Item 091 (RI-010): from this ID on, a 05/06 run heading that LOG BATCH does not read is INCOMPLETE; the 8th
+# `*_FROM` cutoff, a numeric floor above every item open on 2026-11-21 (work/ ends at 091).
+ROUND_HEADING_FROM = 92
 # Item 076: the parts of pytest's summary line, in KNOWN_TYPES order (pytest main/9.0.x terminal.py),
 # each at most once. "deselected" left out on purpose: a full-suite run has none.
 _N = r"[1-9]\d*"
@@ -416,6 +428,10 @@ SEND_BACK = {"R3": (2, "BLOCKED"), "I1": (1, "NOT A FIT"), "I3": (1, "FAIL")}
 BATCH_STRICT = ("no pytest time in 05/06/I2 line", "no line before I2", "log line with no valid time")
 # Item 086: a pytest summary line as printed, .match on the stripped line (anchored at its start, so a
 # summary inside a test ID such as `FAILED t[1 failed in 58.86s]` is not a run); seconds in group 1.
+# Item 091: the section openers LOG BATCH (rule C) reads, per step file; the one source for batch_log_items
+# and the stray-heading check. STRAY_RUN_HEADING is used with .match (anchored at the line start, RI-012).
+RUN_HEADING = {"05": r"## Test output\b", "06": r"## Tests re-run\b"}
+STRAY_RUN_HEADING = re.compile(r"#{1,6} (?:round \d+ )?(?:test output|tests re-run)\b", re.I)
 SUMMARY_LINE = re.compile(rf"(?:=+ )?(?={_N} )(?:{_STATS}) in (\d+\.\d+)(?:s| seconds)\b")
 # Item 070: the Real-data effect field is checked from this ID on; earlier items are not re-checked.
 WHOLE_DIFF_FROM = 70
@@ -784,7 +800,9 @@ def _anchor_env():
     exit gives "git rev-parse --verify HEAD failed (exit <n>)" with failed True (main exits 1). HEAD
     is read once per run here, not per pair in _rule_seen (item 088). Known gap: exit 1 means HEAD
     names no commit: unborn, or a ref git can't resolve; both are strict, and the second also fails
-    UNCOMMITTED STEP's ls-tree HEAD (exit 1), so it is never a silent pass."""
+    UNCOMMITTED STEP's ls-tree HEAD (non-zero; 128 measured on a corrupt ref and a dangling symbolic
+    HEAD, logs/audit/2026-11-21-088.md, item 091), so it is never a silent pass. Both print
+    `not checked (unborn HEAD)`; the label is not accurate for the second (follow-up, not changed here)."""
     if _git("rev-parse", "--git-dir") is None:
         return "no git", False
     if _is_shallow():                                       # item 090: one source with open_branches
@@ -866,7 +884,9 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
     gives the RULE NOT SEEN pair `judged by untimed I2 form` and no entry. Any other bad I2 line keeps the
     TESTS gate. batch_nc ({ID: reason}, from batch_log_items' not_computable): a BATCH_STRICT reason (by
     equality) of an ID from TIMED_FROM on is the entry `LOG BATCH not computable: <reason> (item 090)`, gated
-    the same way (not seen: the pair `LOG BATCH not computable as text only`)."""
+    the same way (not seen: the pair `LOG BATCH not computable as text only`). Item 091: from ROUND_HEADING_FROM
+    on, stray_run_headings of 05 and 06 is one entry per file, gated on that file by _rule_seen(ROUND_HEADING_FROM)
+    (not seen: the pair `no round-heading check`); an unreadable file is `<step> round headings not checked`."""
     not_seen = [] if not_seen is None else not_seen
     if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
         return []
@@ -943,6 +963,21 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
                 seen, sha7 = _rule_seen(item_dir, "05", "SUITE_FROM", env)
                 if seen is False:                           # below SUITE_FROM there is no Suite check
                     not_seen.append((item_dir.name, "05", sha7, "SUITE_FROM", "082", "no Suite check"))
+                else:
+                    missing += [fired] + ([sha7] if seen is None and sha7 else [])
+    if int(item_dir.name) >= ROUND_HEADING_FROM:            # item 091: run headings LOG BATCH can't read
+        for step in ("05", "06"):
+            heads, why = stray_run_headings(item_dir / STEPS[step], RUN_HEADING[step])
+            if why:
+                missing.append(f"{step} round headings not checked ({why}; item 091)")
+            elif heads:
+                named = "', '".join(heads)
+                fired = (f"{step} heading '{named}' is not read by LOG BATCH; use '## Test output (round N, "
+                         f"pasted)' / '## Tests re-run (round N)' (item 091)")
+                seen, sha7 = _rule_seen(item_dir, step, "ROUND_HEADING_FROM", env)   # item 084 gate
+                if seen is False:                           # below ROUND_HEADING_FROM there is no such check
+                    not_seen.append((item_dir.name, step, sha7, "ROUND_HEADING_FROM", "091",
+                                     "no round-heading check"))
                 else:
                     missing += [fired] + ([sha7] if seen is None and sha7 else [])
     if ver_text is not None:                                # item 071 (a)-(d); item 089: 06 was read
@@ -1205,19 +1240,44 @@ def _run_seconds(path, heading):
     if why:
         return [], why
     rows, _ = _md_lines(text)
-    found, inside = [], False
-    for line, state in rows:
-        if state == "out" and re.match(heading, line):
-            inside = True
-            continue
-        if state == "out" and re.match(r"#{1,2} ", line):
-            inside = False
-            continue
+    found = []
+    for (line, state), inside in zip(rows, _section_flags(rows, heading)):
         if inside and state in ("out", "in"):
             m = SUMMARY_LINE.match(line.strip())
             if m:
                 found.append(float(m[1]))
     return found, None
+
+
+def _section_flags(rows, heading):
+    """Item 091: one bool per _md_lines row, True when the row is inside a section _run_seconds reads: an
+    "out" row matching `heading` (re.match) opens it and is itself False; an "out" row matching `#{1,2} `
+    closes it and is False. The one open/close rule shared by _run_seconds and stray_run_headings."""
+    flags, inside = [], False
+    for line, state in rows:
+        if state == "out" and re.match(heading, line):
+            flags.append(False)
+            inside = True
+        elif state == "out" and re.match(r"#{1,2} ", line):
+            flags.append(False)
+            inside = False
+        else:
+            flags.append(inside)
+    return flags
+
+
+def stray_run_headings(path, opener):
+    """Item 091 (RI-010): (headings, None): every "out" row of `path` that matches STRAY_RUN_HEADING, is not
+    `opener` (re.match) and is outside every section `opener` starts (_section_flags), so LOG BATCH never
+    reads the runs under it. ([], None) when the file is absent; ([], "<file> unreadable") when _read fails."""
+    text, why = _read(path, missing_ok=True)
+    if why:
+        return [], why
+    if text is None:
+        return [], None
+    rows, _ = _md_lines(text)
+    return [line for (line, state), inside in zip(rows, _section_flags(rows, opener))
+            if state == "out" and not inside and STRAY_RUN_HEADING.match(line) and not re.match(opener, line)], None
 
 
 def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
@@ -1296,8 +1356,8 @@ def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
             continue
         start = max(before, key=order)
         delta = int((end[0] - start[0]).total_seconds()) // 60
-        t05, why05 = _run_seconds(d / STEPS["05"], r"## Test output\b")
-        t06, why06 = _run_seconds(d / STEPS["06"], r"## Tests re-run\b")
+        t05, why05 = _run_seconds(d / STEPS["05"], RUN_HEADING["05"])
+        t06, why06 = _run_seconds(d / STEPS["06"], RUN_HEADING["06"])
         why = "; ".join(w for w in (why05, why06) if w)
         if why:
             out["not_computable"].append((item, why))

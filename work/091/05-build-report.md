@@ -29,6 +29,104 @@ Commit (A), steps 1-3, tests only:
   - step 2: `test_branch_list_failure_exits_1` (A8), `test_main_ref_lookup_failure_exits_1` (A9a), `test_main_ahead_count_failure_exits_1` (A9b), `test_next_id_branch_listing_failure_refuses` (A13). Each runs its unpatched control first with the same args (`cp.main([...]) == 0`, or `--next-id` printing `041\n`), then patches exactly one tuple via `_patched_git`.
 - tests/test_probe_guardrails.py: `test_recorded_with_trailing_text_is_unreadable` (M11) and `test_recorded_trailing_newline_is_unreadable` (M11b). scripts/probe_guardrails.py is unchanged (`fullmatch`; no `prefixmatch`).
 
+Commit (B), steps 4, 5a, 5b and 7 (plus the 088 A1 docstring wording):
+- .claude/commands/run-item.md, .claude/commands/daily-audit.md, .claude/agents/a1-auditor.md and the `UNSHALLOW` test constant (step 4): 090's list becomes `... REAL-DATA FIELD, LOG TIME, MAIN AHEAD, OPEN BRANCHES and RULE NOT SEEN as 'not checked', never 'none' (items 079, 084, 090).` (04's text was written before 090; RULE NOT SEEN is added to 090's list as 04 says.) `test_unshallow_sentence_same_in_three_files` gains `assert "RULE NOT SEEN" in UNSHALLOW`. INBOX, 088's unborn/verify forms and 089's UNREADABLE stay out.
+- templates/build-report.md, templates/verification.md (step 5a): the round-heading line directly under `## Test output (pasted, not summarized)` / `## Tests re-run (output)`. Test `test_round_heading_template_lines`.
+- scripts/check_pipeline.py (step 5b):
+  - `ROUND_HEADING_FROM = 92` (after TIMED_FROM, with its reason comment); `RUN_HEADING = {"05": r"## Test output\b", "06": r"## Tests re-run\b"}` (the openers, now read by `batch_log_items` from this dict, so the check and LOG BATCH share one source, "never retyped"); `STRAY_RUN_HEADING` as 04 gives it, used with `.match`.
+  - `_section_flags(rows, heading)`: the open/close rule moved out of `_run_seconds`; `_run_seconds` now zips its rows with these flags (no behaviour change: the whole-output diff below is identical, and every LOG BATCH test passes).
+  - `stray_run_headings(path, opener) -> (headings, why)` via `_read(path, missing_ok=True)`.
+  - `incomplete()`: for ID >= ROUND_HEADING_FROM, 05 and 06 each give at most one entry `<step> heading '<h>'[, '<h>'] is not read by LOG BATCH; use '## Test output (round N, pasted)' / '## Tests re-run (round N)' (item 091)`, gated by `_rule_seen(item_dir, step, "ROUND_HEADING_FROM", env)` exactly as SUITE_FROM (not_seen row `(ID, step, sha7, "ROUND_HEADING_FROM", "091", "no round-heading check")`); an unreadable file is `<step> round headings not checked (<why>; item 091)`. The joined text is built outside the f-string (no backslash in an f-string expression: Python 3.10/3.11, RI-008).
+  - Docstrings: module LOG BATCH paragraph (item 091, gap w, residuals), `incomplete()`, the RULE NOT SEEN cost note (5 pairs from 092), and `_anchor_env` (see the extra doc fix below). No `_git(` call and no raw read added: GIT_CENSUS stays 47, the read census stays 2 (both tests pass).
+- tests/test_pipeline_check.py (5a, 5b, 7): `test_round_heading_template_lines`; `test_stray_round_heading_is_incomplete[P1,P2,P3]` (P1 also asserts `_run_seconds` reads no time under it); `test_stray_round_headings_one_entry_per_file`; `test_read_or_unnamed_heading_is_not_stray[N1,N2,N3,N4]` (N1 also asserts `_run_seconds` reads its time); `test_unreadable_05_round_headings_not_checked` (U); `test_round_heading_gate_follows_rule_file_of_05_commit[G-not-seen,G-seen]`; `test_section_flags_match_run_seconds_rule`; `SCRATCH` and `test_scratch_sentence_same_in_four_files`. Two 089 tests updated (Deviations 2).
+- .claude/commands/run-item.md (end of the scratch/realtest paragraph), .claude/agents/i2-builder.md (after its scratch-copy line), .claude/agents/i3-verifier.md (after its RI-002 scratch-copy sentence), .claude/agents/a1-auditor.md (new line before "Write the daily report"): the SCRATCH sentence, once each (step 7). Text only: no check can see a real collision of two agents' dirs.
+- Extra doc fix (088 A1, logs/audit/2026-11-21-088.md "New-item findings" 1): the `_anchor_env` docstring now says UNCOMMITTED STEP's `ls-tree HEAD` fails "non-zero; 128 measured on a corrupt ref and a dangling symbolic HEAD", and that both cases print `not checked (unborn HEAD)`, a label that is not accurate for the second. Wording only. The label change (`HEAD names no commit (unborn or unresolvable)`) and the corrupt-ref test pin A1 suggests are new output text, so they are left for a follow-up item (named in Deviations 4).
+
+## Real-tree run of the stray-heading walker (step 5b, cutoff ignored; REPL on the working tree, 2026-11-22)
+```
+070/06: ### Tests re-run (round 3)
+077/06: ### Tests re-run (output)
+079/05: ### Test output (pasted, not summarized)
+079/06: ### Tests re-run (output)
+081/05: ### Test output (round 2, pasted)
+082/05: ### Tests re-run (output)
+082/06: ### Tests re-run (output)
+084/05: ## Round 2 test output (pasted)
+084/06: ### Tests re-run (output)
+086/05: ### Test output (round 2, pasted)
+087/05: ### Test output (round 2, pasted)
+total 11 items 8 ['070', '077', '079', '081', '082', '084', '086', '087']
+```
+Matched to 03 by file and line (grep `-iE '^#{1,6} (round [0-9]+ )?(test output|tests re-run)'`, minus the two openers): 070/06 L209, 077/06 L115, 079/05 L45, 079/06 L140, 081/05 L320, 082/05 L461, 082/06 L181, 084/05 L205, 084/06 L150, 086/05 L320: exactly 03's 10 headings in 7 items. The 11th, 087/05 L237 `### Test output (round 2, pasted)`, is in a file R3 could not count: `git log -L` gives 7389962 (2026-11-22T01:00:20Z, 087's round-2 I2 commit), after 03's check_handoff run (2026-11-21 23:43 UTC). The expectation was not adjusted: this is reported as Deviations 1 for I3. 087 < 92, so it gets no entry.
+
+## Whole-output diff of check_pipeline.py before and after (B) (RI-013)
+Same working tree, same args (none), base script = `git show 8a8bd33:scripts/check_pipeline.py`:
+```
+before exit 1
+after exit 1
+IDENTICAL
+ 112 /tmp/claude-0/scratch/i2-091/cpB_after.txt
+ 112 /tmp/claude-0/scratch/i2-091/cpB_before.txt
+```
+Both exit 1 only because of `INCOMPLETE: 091 (no log line for I2)`: (A) committed 05 before the I2 log line, which is written right after this 05 is final (commit C). Probe: the same script with `ROUND_HEADING_FROM = 0` on the same tree changes exactly one line, RULE NOT SEEN, which gains 070, 077, 079, ... with `without ROUND_HEADING_FROM (091): judged by no round-heading check` (their anchors predate the constant), so `test_repo_pipeline_has_no_skipped_items`'s exact RULE NOT SEEN assert kills the cutoff-0 mutant on the real tree.
+
+## Mutation probes, commit (B) (scratch worktree at 8a8bd33 + the (B) files; whole tests/test_pipeline_check.py each; one after another)
+`test_repo_pipeline_has_no_skipped_items` fails in every row, mutant or not, because the scratch HEAD 8a8bd33 has 091's 05 and no I2 line (the same transient INCOMPLETE as above); the named tests are the killers.
+```
+== 4a old sentence in run-item only: 2 failed, 379 passed in 32.89s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_unshallow_sentence_same_in_three_files
+== 4b RULE NOT SEEN removed from all 4: 2 failed, 379 passed in 32.31s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_unshallow_sentence_same_in_three_files
+== 5a template line deleted (build-report): 2 failed, 379 passed in 33.37s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_round_heading_template_lines
+== 5a template line deleted (verification): 2 failed, 379 passed in 36.23s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_round_heading_template_lines
+== 5b check removed: 10 failed, 371 passed in 34.45s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_unreadable_06
+    FAILED tests/test_pipeline_check.py::test_unreadable_05_at_suite_check
+    FAILED tests/test_pipeline_check.py::test_stray_round_heading_is_incomplete[P1]
+    FAILED tests/test_pipeline_check.py::test_stray_round_heading_is_incomplete[P2]
+    FAILED tests/test_pipeline_check.py::test_stray_round_heading_is_incomplete[P3]
+    FAILED tests/test_pipeline_check.py::test_stray_round_headings_one_entry_per_file
+    FAILED tests/test_pipeline_check.py::test_unreadable_05_round_headings_not_checked
+    FAILED tests/test_pipeline_check.py::test_round_heading_gate_follows_rule_file_of_05_commit[G-not-seen]
+    FAILED tests/test_pipeline_check.py::test_round_heading_gate_follows_rule_file_of_05_commit[G-seen]
+== 5b ### only: 3 failed, 378 passed in 33.35s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_stray_round_heading_is_incomplete[P2]
+    FAILED tests/test_pipeline_check.py::test_stray_round_headings_one_entry_per_file
+== 5b inside-section exemption removed: 2 failed, 379 passed in 33.58s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_read_or_unnamed_heading_is_not_stray[N1-inside-section]
+== 5b .search: 2 failed, 379 passed in 35.81s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_read_or_unnamed_heading_is_not_stray[N2-not-at-start]
+== 5b cutoff 0: 2 failed, 379 passed in 34.29s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_read_or_unnamed_heading_is_not_stray[N3-below-cutoff]
+== 5b gate removed: 2 failed, 379 passed in 34.80s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_round_heading_gate_follows_rule_file_of_05_commit[G-not-seen]
+== 5b _section_flags closer #{1,3}: 3 failed, 378 passed in 34.79s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_read_or_unnamed_heading_is_not_stray[N1-inside-section]
+    FAILED tests/test_pipeline_check.py::test_section_flags_match_run_seconds_rule
+== 5b opener not excluded: 18 failed, 363 passed in 34.01s
+    (16 existing LOG BATCH / RULE NOT SEEN / Suite tests whose 150/151/990/999 fixtures have a `## Test output` opener, plus N1 and N4)
+== 7 SCRATCH removed from a1-auditor: 2 failed, 379 passed in 36.03s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_scratch_sentence_same_in_four_files
+== 7 SCRATCH removed from i3-verifier: 2 failed, 379 passed in 36.83s
+    FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+    FAILED tests/test_pipeline_check.py::test_scratch_sentence_same_in_four_files
+```
+04's row "`_section_flags` closer `#{1,3} ` → N1 and an existing LOG BATCH test": N1 and the new `test_section_flags_match_run_seconds_rule` fail; no pre-existing LOG BATCH test failed (their fixtures have no `###` line inside a read section). Reported, not adjusted.
+
 ## Mutation probes, commit (A) (scratch worktree /tmp/claude-0/scratch/i2-091/wt at eb57a85 + the (A) test files; run one after another)
 ```
 == A1 drop *RESEARCH_CODE_PATHS: 1 failed, 4 passed, 362 deselected in 1.79s
