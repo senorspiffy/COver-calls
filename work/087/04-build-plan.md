@@ -219,3 +219,64 @@ Recurring issues checked (item 013):
 - RI-012: the START rule is anchored at the value start (q21, q22, M26), and DOC_MARKER_RE is anchored at column 0 by `.match`.
 
 Log fields: FIT WITH CHANGES | 1 files planned
+
+## Round 2
+Input: work/087/06-verification.md (I3 FAIL, round 1, finding F1). Fit verdict unchanged: FIT WITH CHANGES. Still 1 file: tests/test_agent_tools.py. No code change to the parser; the head code (fd73de1) is right and only needs pinning. Round 2 adds exactly I3's four fixes and nothing else.
+
+### F1 (RI-012 / item 059): mid-text negatives for DOC_MARKER_RE and the flow-start rule
+Round 1's RI-012 line above was wrong in effect: "anchored at column 0 by `.match`" was stated but no test failed when the anchor was removed (I3-a), when the terminator was dropped (I3-d), or when `[`/`{` was searched anywhere in the line (I3-b). Each of these three now gets one negative fixture with the pattern inside other text.
+
+Source for the negative side (why these lines are valid and must read as a tool set): the perl.org quoting guide (cited in round 1, research 2) lists `{ } [ ]` and the others as characters a plain scalar cannot *start* with; inside a plain scalar they are ordinary text. PyYAML's docs (cited in round 1, research 1) describe `---`/`...` as document separators; a mid-line `...` or a `---x`/`...x` line is not one. I1 tried to fetch the YAML 1.2.2 `c-forbidden` production (https://yaml.org/spec/1.2.2/, 2026-11-22); the fetched text stopped at §6.6 and gave only §5.3 ("They are therefore forbidden in some cases, to avoid ambiguity in several constructs."), so that production is UNVERIFIED here. The fixtures below do not depend on it: they pin the head code's own rule (column 0, then space/tab/end).
+
+**New parser CASES** (add after q28, in this order; "tools" = `tools: Read, Write`; TOOLS in the file):
+
+| id | front lines | expected (head) | must fail under | expected text under the mutation (I1 trace) |
+|---|---|---|---|---|
+| q29_mid_value_markers | `description: Wait... then --- more` / tools | {Read, Write} | I3-a (`DOC_MARKER_RE.match` → `.search`) | DOC(2): `.search` finds `... ` at index 0 |
+| q30_marker_prefix_text | `name: x` / `...x` / `---x` / tools | {Read, Write} | I3-d (`(?:[ \t]\|$)` dropped) | DOC(3): `...x` matches `...` at column 0 |
+| q31_mid_value_bracket | `description: see [a and {b` / tools | {Read, Write} | I3-b (flow start searched anywhere, `s` = that match's start) | FLOW_OPEN(2): `_flow_end` from `[` pushes `]`, `}`, reaches end → None |
+
+Code form, matching q27/q28: `"q29_mid_value_markers": (_fm("description: Wait... then --- more", TOOLS), {"Read", "Write"}, None)`, and the same shape for q30 (`_fm("name: x", "...x", "---x", TOOLS)`) and q31 (`_fm("description: see [a and {b", TOOLS)`). Use the expected-set form the file already uses for q21/q22.
+
+Hand trace on head (I1, no shell; I2 confirms by running):
+- q29: DOC_MARKER_RE.match at column 0 sees `d`, no match. No tab. VALUE_START_RE: key `description:` + space, c = `W`; not in `&!*?:`, quote or `[{`. No error. `_field` reads the column-0 `tools:` line → {Read, Write}.
+- q30: `...x` and `---x`: DOC_MARKER_RE.match needs space/tab/end after the 3 chars, gets `x`, no match. VALUE_START_RE: no `key:` (no colon), `(?:-[ \t]+)*` takes nothing on `---x` (no space after `-`), c = `.` / `-`, no rule. `agent_tools` ends the front only on `.strip() == "---"`, so neither line ends it. `_field("tools")` is the last front line, nothing after it → {Read, Write}.
+- q31: c = `s`; the flow rule runs only when c is `[`/`{`. No error → {Read, Write}.
+- Under the other two mutations each fixture still passes (q29 has no column-0 marker for I3-d, etc.), which is fine: each mutation needs at least its named fixture to fail.
+
+### Mutation table (I2 runs and records in 05; I3 re-runs in 06)
+Add to round 1's Mutations list, one at a time, file restored after each:
+
+| id | change | must fail (at least) |
+|---|---|---|
+| M39 = I3-a | `if DOC_MARKER_RE.match(line):` → `if DOC_MARKER_RE.search(line):` | q29_mid_value_markers |
+| M40 = I3-b | `elif c in "[{" and not line.startswith(FLOW_KEYS):` → `elif re.search(r"[\[{]", line) and not line.startswith(FLOW_KEYS):` with `s` set to that match's `.start()` before `_flow_end` | q31_mid_value_bracket |
+| M41 = I3-d | `DOC_MARKER_RE = re.compile(r"(?:---\|\.\.\.)")` (terminator dropped) | q30_marker_prefix_text |
+
+A mutation that leaves every test green is still a finding. M38 and M38b from round 1 stay (they pin the firing side; M39-M41 pin the non-firing side).
+
+### Counts (replaces round 1 Counts, Checks 1, 2, 4 and Expected result numbers)
+- Parser cases: 48 + 28 + 3 = 79. Tree cases: 11. Tests in the file: 79 + 11 + 1 + 1 = **92**.
+- New tests over the base: 30 + 3 = **33**, plus p11 changed. Whole-suite expected delta: **+33** (totals still copied from pytest, RI-006).
+- Round 1 Checks 2 tally fixed: of the round-1 89 tests, the named list (q1-q5, q7-q20, q25, q27, q28 = 22 parser, + n10, n11, + p11) is **25 fail / 64 pass** on the base, as I3 measured (06: "25 failed, 64 passed"). Round 1's "28 / 61" and "25 parser" were wrong.
+- With round 2: q29-q31 are negatives that the base parser also reads as {Read, Write} (base has no DOC or flow rule), so on the base the expected result is **25 failed, 67 passed** of 92. I1 trace only; I2 pastes the real line.
+- Checks 1 becomes `python3 -m pytest -q tests/test_agent_tools.py` → `92 passed`.
+
+### Plan for I2 (round 2)
+1. tests/test_agent_tools.py: add q29, q30, q31 to CASES after q28 (no other edit).
+2. 05: add a Round 2 section with the file's pytest line (92 passed), the base-check line (expect 25 failed / 67 passed), the whole-suite line (+33 vs base), M39-M41 each with its failing ids, and the 3.11 compile.
+3. Fix the 25/64 tally wherever 05 copies round 1's number.
+
+### Rule trace (round 2 rows)
+| 06 rule (F1 fixes) | Plan line, or DROPPED: <reason> |
+|---|---|
+| Fix 1: DOC_MARKER_RE mid-text negative, fails under I3-a | q29_mid_value_markers; M39 |
+| Fix 2: marker terminator negative, fails under I3-d | q30_marker_prefix_text; M41 |
+| Fix 3: flow `[`/`{` mid-value negative, fails under I3-b | q31_mid_value_bracket; M40 |
+| Fix 4: 05 mutation rows, counts 92 / +33, Checks 2 tally 25 / 64 | Mutation table; Counts; Plan for I2 steps 2-3 |
+
+Guardrail tests (round 2): DOC and the flow rule now have both sides pinned. Firing side: q27/q28 (DOC), q7-q13/q15/q25 (flow). Non-firing side with the pattern in other text: q29/q30 (DOC), q31 (flow). The feasibility count is unchanged (21 of 21 real lines pass, 0 fire, 2026-11-21); the real-tree test still pins it. No new optional input, so no new absent-case test.
+
+Recurring issues checked (round 2, item 013): RI-012 (GUARDED: this round. Each text classifier added by 087 now has a negative fixture with the pattern inside other text, and a mutation (M39-M41) that must fail it; START was already pinned by q21/q22/M26). RI-001 (ESCALATED: no new rule, count unchanged and dated). RI-010 (ESCALATED: I1 writes no log line; the Log fields line below is for the orchestrator). RI-014 (OPEN: not touched). RI-002 (GUARDED: the negatives check that valid lines are not turned into errors; firing fixtures unchanged). RI-004/005 (each new expected value and each mutation's expected text traced by hand above). RI-006 (counts 92, +33, 25/67 to be copied from pytest by I2/I3; round 1 tally corrected to 25/64). RI-008 (fixtures only, 3.11 compile). RI-009/011 (still only tests/test_agent_tools.py).
+
+Log fields (round 2): FIT WITH CHANGES | 1 files planned
