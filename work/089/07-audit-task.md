@@ -12,3 +12,4 @@ What Audit should look at:
 8. RULE_PATHS: scripts/check_pipeline.py is a rule path, so the person's OK is needed at PR review.
 9. Follow-ups to open (05/06): scripts/check_handoff.py L55/L62 still read strictly (03 row 63) → new item; 090 must route any new read through `_read` (test_read_census enforces); 091 should not duplicate the `unreadable` exit-term test.
 10. Re-run the whole suite (I3: `698 passed, 1 skipped in 85.52s (0:01:25)` at 0ad4d62; skip = exchange_calendars not installed) and the python3.11 compile (python3.10 absent). Copy guardrail status into recurring-issues.md on main (item 036): RI-014 stays OPEN, guardrail extended by 089; RI-002 GUARDED, unchanged.
+A1 result: PASS (2026-11-22, logs/audit/2026-11-22-089.md)
