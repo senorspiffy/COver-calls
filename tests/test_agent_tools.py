@@ -400,6 +400,9 @@ CASES = {
                             "unclosed [ in disallowedTools: (item 075)"),
     "q27_doc_end_marker": (_fm("name: x", "...", TOOLS), None, DOC.format(3)),
     "q28_doc_start_marker": (_fm("name: x", "--- # c", TOOLS), None, DOC.format(3)),
+    "q29_mid_value_markers": (_fm("description: Wait... then --- more", TOOLS), {"Read", "Write"}, None),
+    "q30_marker_prefix_text": (_fm("name: x", "...x", "---x", TOOLS), {"Read", "Write"}, None),
+    "q31_mid_value_bracket": (_fm("description: see [a and {b", TOOLS), {"Read", "Write"}, None),
 }
 
 

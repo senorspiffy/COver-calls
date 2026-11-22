@@ -70,7 +70,7 @@ FAILED tests/test_agent_tools.py::test_tree_problems[n10_anchor_description]
 FAILED tests/test_agent_tools.py::test_tree_problems[n11_open_flow]
 25 failed, 64 passed in 0.22s
 ```
-The failing set is exactly 04's named list: q1-q5, q7-q20, q25, q27, q28, n10, n11 and p11. q6, q21-q24 and q26 pass on the base, as 04 says. The count differs from 04's "28 / 61"; see Deviations 1.
+The failing set is exactly 04's named list: q1-q5, q7-q20, q25, q27, q28, n10, n11 and p11. q6, q21-q24 and q26 pass on the base, as 04 says. The count differs from 04's "28 / 61"; see Deviations 1. The right tally is 25 fail / 64 pass (I1 round 2 Counts and I3 06 agree).
 
 ## Test output (pasted, not summarized)
 Full suite, repo root, 2026-11-22 ~00:17 UTC, after the last edit:
@@ -80,7 +80,10 @@ $ python3 -m pytest -q
 .........                                                                [100%]
 728 passed, 1 skipped in 84.11s (0:01:24)
 ```
+Round 1 `Suite:` line (superseded by Round 2 below, item 082):
+```
 Suite: 728 passed, 1 skipped in 84.11s (0:01:24)
+```
 
 The base (089's 05 at 0ad4d62) has `698 passed, 1 skipped`. 728 − 698 = +30, which matches 04's expected delta (28 parser + 2 tree).
 
@@ -165,3 +168,114 @@ Recurring issues checked (item 013), against this build:
 - RI-008: python3.11 py_compile OK.
 - RI-009/011: mutations and probes only in a scratch worktree; only my own files are staged.
 - RI-012: START anchored at the value start; M26 (search anywhere) fails q21, q22, e, f and the real tree.
+
+## Round 2 (2026-11-22, I2)
+Input: work/087/04-build-plan.md `## Round 2` (after I3 FAIL round 1, finding F1). Head before this round: 8caffda (090 I2) on daily-fixes/2026-11-21. `git rev-parse --is-shallow-repository` → `false`.
+
+### Changes made (round 2)
+- tests/test_agent_tools.py: three parser CASES added after q28, in the plan's order and code form, and nothing else (`git diff --stat` → `tests/test_agent_tools.py | 3 +++`):
+  - `q29_mid_value_markers`: `_fm("description: Wait... then --- more", TOOLS)` → {Read, Write}
+  - `q30_marker_prefix_text`: `_fm("name: x", "...x", "---x", TOOLS)` → {Read, Write}
+  - `q31_mid_value_bracket`: `_fm("description: see [a and {b", TOOLS)` → {Read, Write}
+- The parser code is unchanged (04 round 2: head code is right, only pinned).
+
+File counts (round 2):
+- `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'` → `0`
+- `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'` → `1`
+
+### Connectivity check (round 2)
+- [x] Every new fixture is used: q29-q31 are entries of CASES, which `test_agent_tools_parser` parametrizes (they appear in the 92 below and by name in the mutation table).
+- [x] Inputs/outputs: each fixture's lines go through `agent_tools` → `_frontmatter_error` (returns None) → `_field` → asserted set {Read, Write}.
+- [x] Every branch ends in a defined result: the fixtures take the non-firing path of DOC and the flow rule, which ends in `_field`'s tool set; each mutation of that path ends in a named error (DOC / FLOW_OPEN), which fails the fixture.
+- [x] No TODO, no new file: `git diff -- tests/ | grep -nE "TODO|fillna|or 0|else 0|is not None and|: float = "` → no output (exit 1).
+
+Missing-data grep over `ccbot/` (round 2): 38 hits, all pre-existing; this round changes no ccbot/ file, so no new or changed hit. No dataclass, numeric default or `>`/`<` test added (fixtures only).
+
+### Base-failure check (round 2)
+Scratch worktree at 0ad4d62, base parser (above `def _fm(`) + round-2 head fixtures, `python3 -B -m pytest -q -p no:cacheprovider tests/test_agent_tools.py`. Failing set, as printed (same 25 ids as round 1; q29-q31 pass on the base, as 04 traced):
+```
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[p11_tab_after_colon]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q10_comment_closer]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q11_wrong_closer]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q12_text_after_flow]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q13_flow_next_line]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q14_anchor_alone]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q15_item_open_map]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q16_explicit_key]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q17_colon_start]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q18_dash_tab]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q19_alias]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q1_anchor_dq]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q20_tag_on_tools]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q25_open_flow_last_line]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q27_doc_end_marker]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q28_doc_start_marker]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q2_tag_dq]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q3_tag_sq]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q4_anchor_tag_dq]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q5_item_anchor]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q7_open_seq]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q8_open_map]
+FAILED tests/test_agent_tools.py::test_agent_tools_parser[q9_quoted_closer]
+FAILED tests/test_agent_tools.py::test_tree_problems[n10_anchor_description]
+FAILED tests/test_agent_tools.py::test_tree_problems[n11_open_flow]
+25 failed, 67 passed in 0.21s
+```
+Matches 04 round 2 Counts (25 failed, 67 passed of 92). The base file alone (`git archive 0ad4d62`, same command) → `59 passed in 0.05s`; 92 − 59 = +33 tests from 087, as 04 expects.
+
+### Mutations (round 2)
+Scratch worktree /tmp/claude-0/scratch/i2-087r2/wt (`git worktree add --detach` at 8caffda plus my test file), script /tmp/claude-0/scratch/i2-087r2/tools/mut.py: asserts each anchor occurs once, one mutation at a time, `python3 -B -m pytest -q -p no:cacheprovider tests/test_agent_tools.py` with `PYTHONDONTWRITEBYTECODE=1`; file restored (`cmp` → identical), both scratch worktrees removed afterwards (`git worktree list` no longer shows them). Output as printed:
+
+| ID | Change | Result | Failing tests |
+|---|---|---|---|
+| M39 = I3-a | `if DOC_MARKER_RE.match(line):` → `if DOC_MARKER_RE.search(line):` | 1 failed, 91 passed in 0.07s | q29_mid_value_markers |
+| M40 = I3-b | `elif c in "[{" and ...` → `elif re.search(r"[\[{]", line) and ...`, plus `s = re.search(r"[\[{]", line).start()` before `_flow_end` | 1 failed, 91 passed in 0.07s | q31_mid_value_bracket |
+| M41 = I3-d | `DOC_MARKER_RE = re.compile(r"(?:---\|\.\.\.)")` (terminator dropped) | 1 failed, 91 passed in 0.07s | q30_marker_prefix_text |
+
+Each fails exactly its named fixture; none leaves the file green. Round 1's M25-M38b rows above are unchanged code paths and were not re-run this round (I3 re-runs them in 06).
+
+### Test output (round 2, pasted)
+Full suite, repo root, 2026-11-22 00:57 UTC, after the last edit (`python3 -m pytest -q`), tail as printed:
+```
+E         SKIPPED: none
+E         
+E       assert 1 == 0
+
+tests/test_pipeline_check.py:181: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 761 passed, 1 skipped in 84.74s (0:01:24)
+```
+Suite: 1 failed, 761 passed, 1 skipped in 84.74s (0:01:24)
+
+The one failure is expected (item 071), not a defect of this build: `python3 scripts/check_pipeline.py` exits 1 and its only failing line is `I3 FAIL: 087` (`087: I3 FAIL (FULL; sent back to I1 I2, needs a later PASS round in 06 (item 071))`); SKIPPED, INCOMPLETE, A1 FAIL, LOG TIME, LOG BATCH and UNTRACKED CHANGE are all `none`. It clears when I3 writes a PASS round for 087.
+
+Totals vs the previous head: 090's 05 at 8caffda has `Suite: 1 failed, 758 passed, 1 skipped` (same expected failure); 761 + 1 − (758 + 1) = +3, the three new fixtures. Against 087's base 0ad4d62 (`698 passed, 1 skipped`) the suite also contains 090's tests, so 087's own +33 is taken from the file counts above (92 − 59), not from the suite totals.
+
+Other checks:
+```
+$ python3 -m pytest -q tests/test_agent_tools.py
+92 passed in 0.07s
+$ python3.11 -m py_compile tests/test_agent_tools.py && echo compile311 ok
+compile311 ok
+```
+
+### Real-data effect (round 2)
+not required (`git diff --stat`: tests/test_agent_tools.py only; no ccbot/, config/ or data/ file)
+
+### Deviations from plan (round 2)
+None. 04 round 2 step 3 (fix the 25/64 tally where 05 copies round 1's number): round 1's 05 already had 25 / 64 (Deviation 1); I added a pointer to the corrected tally next to round 1's base-check note.
+
+### Recurring issues checked (round 2, item 013)
+- RI-012: GUARDED, checked. Each text classifier added by 087 now has a negative fixture with the pattern inside other text, and a mutation that fails it: DOC `.match` (q29/M39), DOC terminator (q30/M41), flow start (q31/M40); START was already pinned (q21, q22, M26).
+- RI-001: ESCALATED, checked. No new rule; real-tree test still passes (0 of 21 real frontmatter lines fire).
+- RI-010: ESCALATED, checked. Log line written with `check_pipeline.py --log` right after this file; its tests field is the `Suite:` line above, copied unchanged.
+- RI-014: OPEN, checked; not touched (repo not shallow).
+- RI-002: GUARDED, checked. The negatives check that valid lines are not turned into errors; firing fixtures unchanged and still fail on the base (25).
+- RI-004/005: each new expected value matched 04's hand trace when run (92 passed; M39-M41 fail the traced fixture).
+- RI-006: all totals copied from pytest output; file counts from the commands above.
+- RI-008: python3.11 py_compile OK.
+- RI-009/011: mutations and base check only in scratch worktrees (removed); only my own files staged.
+
+Guardrail status lines (for A1 on main, item 036):
+RI-012: GUARDED (087 round 2: DOC and flow classifiers have mid-text negatives q29-q31; M39-M41 each fail one)
