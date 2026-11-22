@@ -11,3 +11,4 @@ What Audit should look at:
 7. Real repo: `RULE NOT SEEN: 083 (...)` is unchanged between before and after (05), and `INCOMPLETE: none` holds at 23:52 UTC (I3).
 8. Re-run the whole suite (I3: `678 passed, 1 skipped in 82.60s (0:01:22)` at d6715d5) and the python3.11 compile (python3.10 absent). Copy the guardrail status into recurring-issues.md on main (item 036): RI-014 stays OPEN, guardrail extended by 088 (failed verify → exit 1); RI-002 GUARDED, unchanged; 084's unknown-anchor near miss is closed by (u), (u-s) and (h).
 9. Scope lock: `incomplete`'s gate logic, the *_FROM constants, `write_log` and the agent/template text are untouched (`git diff d6715d5~1 d6715d5 --stat`: 2 code files).
+A1 result: PASS (2026-11-21, logs/audit/2026-11-21-088.md)
