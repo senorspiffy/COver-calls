@@ -14,7 +14,7 @@ AGENTS = {"01": "R1", "02": "R2", "03": "R3", "04": "I1", "05": "I2", "06": "I3"
 # One well-formed field set per agent (item 045, LOG_FORMAT).
 FIELDS = {"R1": "brief written | 0", "R2": "3 for / 3 against | languages: N/A",
           "R3": "1 verified, 0 fixed, 0 removed | READY", "I1": "FIT | 1 files planned",
-          "I2": "1 files changed | tests 1 passed", "I3": "PASS | sent to audit: yes"}
+          "I2": "1 files changed | tests 1 passed in 0.01s", "I3": "PASS | sent to audit: yes"}
 # Item 076: items before TESTS_FORMAT_FROM (76) keep the old I2 form `<pass>/<total>`.
 I2_BEFORE_FIELD = "1 files changed | tests 1/1"
 
@@ -121,13 +121,13 @@ def test_fast_scope_never_skips_verification(tmp_path):
 
 
 def test_waived_steps_are_excused_and_printed(tmp_path):
-    _item(tmp_path, "105", ["05-build-report.md", "06-verification.md", "07-audit-task.md"],
-          waived="01 02 03 04 (person, 2026-10-31: built before 026)")
+    _item(tmp_path, "085", ["05-build-report.md", "06-verification.md", "07-audit-task.md"],
+          waived="01 02 03 04 (person, 2026-10-31: built before 026)")   # item 090: below TIMED_FROM (no line before I2)
     _item(tmp_path, "106", ["01-research.md", "03-handoff.md", "04-build-plan.md", "05-build-report.md",
                             "06-verification.md", "07-audit-task.md"], waived="02 (A1, 2026-11-01: no claims)")
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-10-31")
     assert code == 0
-    assert "105: complete (FULL; Waived: 01 02 03 04 (person, 2026-10-31: built before 026))" in out
+    assert "085: complete (FULL; Waived: 01 02 03 04 (person, 2026-10-31: built before 026))" in out
     assert "106: complete (FULL; Waived: 02 (A1, 2026-11-01: no claims))" in out
 
 
@@ -461,15 +461,15 @@ def test_log_refuses_bad_fields(tmp_path, agent, fields):
 def test_log_refuses_item_without_request(tmp_path):
     """047: a well-formed line for an ID with no work/<ID>/request.md is refused, nothing written."""
     (tmp_path / "work" / "999").mkdir(parents=True)   # folder alone is not enough
-    code, _ = _run(tmp_path, "check_pipeline.py", "--log", "I2", "999", "1 file changed | tests 1 passed")
-    assert code == 2 and not (tmp_path / "logs").exists()
+    code, err = _log(tmp_path, "I2", "999", "1 file changed | tests 1 passed in 0.01s")
+    assert code == 2 and "item 047" in err and not (tmp_path / "logs").exists()
 
 
 def test_orphan_log_line_is_reported(tmp_path):
     """047: a log line for an item with no work folder is ORPHAN LOG (exit 1); real items are not."""
     _item(tmp_path, "150", ALL)
     with (tmp_path / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
-        fh.write("12:05 | I2 | 999 | 1 file changed | tests 1 passed\n")
+        fh.write("12:05 | I2 | 999 | 1 file changed | tests 1 passed in 0.01s\n")
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-05")
     line = [l for l in out.splitlines() if l.startswith("ORPHAN LOG:")][0]
     assert code == 1
@@ -499,7 +499,7 @@ def test_log_line_after_its_commit_is_flagged(tmp_path):
     _item(tmp_path, "150", ALL, logged=False)
     log = tmp_path / "logs" / "implementation" / "2026-11-04.md"
     log.parent.mkdir(parents=True)
-    log.write_text("22:24 | I1 | 150 | FIT | 1 files planned\n23:10 | I2 | 150 | 1 files changed | tests 1 passed\n"
+    log.write_text("22:24 | I1 | 150 | FIT | 1 files planned\n23:10 | I2 | 150 | 1 files changed | tests 1 passed in 0.01s\n"
                    "23:10 | I2 | 044 | see 05 | tests 182/184\n", encoding="utf-8")
     research = tmp_path / "logs" / "research" / "2026-11-04.md"
     research.parent.mkdir(parents=True)
@@ -594,7 +594,7 @@ def test_recommitted_log_line_is_checked_against_new_commit(tmp_path):
     _commit_all(tmp_path, "2026-11-07T20:20:00+00:00")
     _, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-08")
     assert "LOG TIME: 150 I2" in out
-    log.write_text("20:40 | I2 | 150 | 1 files changed | tests 1 passed\n", encoding="utf-8")
+    log.write_text("20:40 | I2 | 150 | 1 files changed | tests 1 passed in 0.01s\n", encoding="utf-8")
     _commit_all(tmp_path, "2026-11-07T22:00:00+00:00")
     _, out = _run(tmp_path, "check_pipeline.py", "--untracked-from", _root(tmp_path), "--today", "2026-11-08")
     assert "LOG TIME: none" in out
@@ -619,12 +619,14 @@ def test_malformed_log_line_names_expected_format(tmp_path):
     assert code == 1
     assert ('150 (log line for I1 I2 does not match its format (item 045): '
             'I1 wants "FIT or FIT WITH CHANGES or NOT A FIT | <n> files planned"; '
-            'I2 wants "<n> files changed | tests <last line of python3 -m pytest -q, as printed>")') in out
+            'I2 wants "<n> files changed | tests <last line of python3 -m pytest -q, as printed, with its ` in <s>s` '
+            'time>")') in out
     r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), "--log", "I2", "150", "see 05"],
                        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 2
     assert r.stderr.strip() == ('--log refused: I2 | 150 | see 05 does not match '
-                                '"<n> files changed | tests <last line of python3 -m pytest -q, as printed>"')
+                                '"<n> files changed | tests <last line of python3 -m pytest -q, as printed, with its '
+                                '` in <s>s` time>"')
 
 
 # Item 076: the I2 tests field from TESTS_FORMAT_FROM on is pytest's summary line as printed
@@ -644,7 +646,7 @@ I2_ACCEPT = [
     "3 failed, 3 subtests passed in 0.12s",                                # A12
     "1 failed, 1 passed, 2 skipped, 1 xfailed, 1 xpassed in 0.07 seconds",  # A13
     "9 passed, 1 skipped in 3.21s",                                        # A14 (hint example)
-    "1 passed",                                                            # FIELDS["I2"]
+    "1 passed",                                                            # untimed (below TIMED_FROM)
 ]
 I2_REFUSE = [
     "no tests ran",                                                        # R1
@@ -682,12 +684,13 @@ def _log(root, agent, item, fields):
 
 @pytest.mark.parametrize("case", I2_ACCEPT)
 def test_i2_summary_line_accepted(tmp_path, case):
-    """076 T1: from item 076 on, pytest's summary line as printed is accepted and written."""
-    _request(tmp_path, "150")
-    code, err = _log(tmp_path, "I2", "150", f"1 files changed | tests {case}")
+    """076 T1: from item 076 on, pytest's summary line as printed is accepted and written. Item 090: on 089,
+    the last ID before TIMED_FROM, so the untimed cases (A5, A6, `1 passed`) keep their 076 meaning."""
+    _request(tmp_path, "089")
+    code, err = _log(tmp_path, "I2", "089", f"1 files changed | tests {case}")
     assert code == 0, err
     text = next((tmp_path / "logs" / "implementation").glob("*.md")).read_text(encoding="utf-8")
-    assert text.splitlines()[-1][5:] == f" | I2 | 150 | 1 files changed | tests {case}"
+    assert text.splitlines()[-1][5:] == f" | I2 | 089 | 1 files changed | tests {case}"
 
 
 @pytest.mark.parametrize("case", I2_REFUSE)
@@ -1001,7 +1004,7 @@ def _untracked(repo, cutoff):
 def test_completed_item_note_with_config_is_untracked(tmp_path):
     """The 3ba835e shape: a note in a completed item's 05 plus config and test edits."""
     repo, cutoff = _history(tmp_path)
-    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed\n## Follow-up\n")
+    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed in 0.01s\n## Follow-up\n")
     _write(repo, "config/x.json", '{"a": 1}\n')
     _write(repo, "tests/t.py")
     c = _commit(repo, "follow-up")
@@ -1031,7 +1034,7 @@ def test_new_item_step_file_covers_code(tmp_path):
 def test_merge_bringing_untracked_commit_is_flagged(tmp_path):
     repo, cutoff = _history(tmp_path)
     _git(repo, "checkout", "-q", "-b", "side")
-    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed\n## Follow-up\n")
+    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed in 0.01s\n## Follow-up\n")
     _write(repo, "config/x.json", '{"a": 1}\n')
     _write(repo, "tests/t.py")
     side = _commit(repo, "follow-up")
@@ -1083,7 +1086,7 @@ def test_cutoff_missing_in_full_repo_fails(tmp_path):
 @NO_GIT
 def test_commits_before_cutoff_ignored(tmp_path):
     repo, _ = _history(tmp_path)
-    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed\n## Follow-up\n")
+    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed in 0.01s\n## Follow-up\n")
     _write(repo, "config/x.json", '{"a": 1}\n')
     later = _commit(repo, "follow-up, before the cutoff")
     code, line = _untracked(repo, later)
@@ -2459,7 +2462,7 @@ def test_malformed_shallow_real_git_nothing_none(tmp_path):
     repo = _repo_with_open_branch(tmp_path)
     _branch_adds(repo, "scratch-x", "099", [])
     _item(repo, "150", [], date="2026-11-20", logged=False)
-    _write(repo, "logs/implementation/2026-11-20.md", "23:59 | I2 | 150 | 1 files changed | tests 1 passed\n")
+    _write(repo, "logs/implementation/2026-11-20.md", "23:59 | I2 | 150 | 1 files changed | tests 1 passed in 0.01s\n")
     _daily(repo, "2026-11-20.md", INBOX_OK.format(sha="a" * 7), commit=False)
     _commit(repo, "late log")
     head, root = _commit_sha(repo), _root(repo)
@@ -2615,13 +2618,15 @@ OLD_RULES = "CHECKLIST_FROM = 41\n"
 NEW_RULES = "CHECKLIST_FROM = 41\nVERDICT_FROM = 71\nTESTS_FORMAT_FROM = 76\n"
 SEEN_150 = ("RULE NOT SEEN: 150 (05 added in {sha} without TESTS_FORMAT_FROM (076): judged by I2_BEFORE; "
             "06 added in {sha} without VERDICT_FROM (071): judged by no Sent-back check; item 084)")
-NEW_I2_WANT = 'I2 wants "<n> files changed | tests <last line of python3 -m pytest -q, as printed>"'
+NEW_I2_WANT = 'I2 wants "<n> files changed | tests <last line of python3 -m pytest -q, as printed, with its ` in <s>s` time>"'
 NO_SENT_BACK = "06 Verdict is PASS but has no 'Sent back to: none' line (item 071)"
 
 
 def _defective(root, item, i2="1 files changed | tests 9/9", date="2026-10-31"):
     """Item `item` with every step and log line, but 06 has no Sent back line and its I2 log line is `i2`."""
     _item(root, item, ALL, sent_back=None, date=date)
+    with (root / "work" / item / "05-build-report.md").open("a", encoding="utf-8") as fh:
+        fh.write("## Test output\n1 passed in 0.01s\n")     # item 090: a time, so LOG BATCH is computable
     log = root / "logs" / "implementation" / f"{date}.md"
     text = log.read_text(encoding="utf-8")
     old = f"12:00 | I2 | {item} | {FIELDS['I2']}\n"
@@ -2968,7 +2973,7 @@ def _six(t, i2=I2_083, i3="PASS | sent to audit: yes"):
             [(BATCH_DAY, t, "I1", "FIT | 2 files planned"), (BATCH_DAY, t, "I2", i2), (BATCH_DAY, t, "I3", i3)])
 
 
-def _impl(i1, i2, i3, item_i2="1 files changed | tests 1 passed"):
+def _impl(i1, i2, i3, item_i2="1 files changed | tests 1 passed in 0.01s"):
     return [(BATCH_DAY, i1, "I1", "FIT | 1 files planned"), (BATCH_DAY, i2, "I2", item_i2), (BATCH_DAY, i3, "I3", "PASS | sent to audit: yes")]
 
 
@@ -3063,14 +3068,24 @@ def test_batch_copy_of_05_in_06_is_dropped(tmp_path):
 
 def test_batch_untimed_item_is_not_computable(tmp_path):
     """086 N5 (M4): six lines in one minute but no pytest time anywhere: listed not computable, never
-    flagged, never read as 0 or 60 s; check_pipeline exits 0."""
+    flagged, never read as 0 or 60 s; check_pipeline exits 0. Item 090: on 089 (below TIMED_FROM) it is text
+    only; the 990 twin is also INCOMPLETE: its untimed I2 line and `LOG BATCH not computable` (exit 1)."""
     r, i = _six("10:15", i2="2 files changed | tests 3 passed")
-    _batch_item(tmp_path, "999", r, i, "3 passed", "3 passed", full=True)
+    _batch_item(tmp_path, "089", r, i, "3 passed", "3 passed", full=True)
     res = _bl(tmp_path)
-    assert res["flagged"] == [] and res["not_computable"] == [("999", "no pytest time in 05/06/I2 line")], res
+    assert res["flagged"] == [] and res["not_computable"] == [("089", "no pytest time in 05/06/I2 line")], res
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
-    assert "LOG BATCH: none; not computable: 999: no pytest time in 05/06/I2 line" in out.splitlines(), out
+    assert "LOG BATCH: none; not computable: 089: no pytest time in 05/06/I2 line" in out.splitlines(), out
+    assert "INCOMPLETE: none" in out.splitlines(), out
     assert code == 0, out
+    twin = tmp_path / "twin"
+    _batch_item(twin, "990", r, i, "3 passed", "3 passed", full=True)
+    code, out = _run(twin, "check_pipeline.py", "--today", "2026-11-21")
+    inc = _pick(out, "INCOMPLETE:")
+    assert 'log line for I2 does not match its format (item 045): I2 wants "<n> files changed | tests <last line ' \
+           'of python3 -m pytest -q, as printed, with its ` in <s>s` time>"' in inc, out
+    assert "LOG BATCH not computable: no pytest time in 05/06/I2 line (item 090)" in inc, out
+    assert code == 1, out
 
 
 def test_batch_interleaved_items_not_flagged(tmp_path):
@@ -3232,26 +3247,31 @@ def test_log_written_when_no_later_step(tmp_path):
 
 def test_log_after_i3_fail_is_written(tmp_path):
     """086 D3 (M6): 076's order: I1, I2, then `I3 | FAIL`; the round-2 `--log I1` and `--log I2` with 05
-    and 06 present are written (the item was sent back)."""
+    and 06 present are written (the item was sent back). Item 090: 06 still says FAIL (round rule (b))."""
     _request(tmp_path, "999")
     _steps(tmp_path, "999", ("01", "02", "03", "04", "05", "06"))
-    for agent, fields in (("I1", "FIT | 1 files planned"), ("I2", "1 files changed | tests 1 passed"),
+    (tmp_path / "work" / "999" / "06-verification.md").write_text("Verdict: FAIL (round 1)\nx\n", encoding="utf-8")
+    for agent, fields in (("I1", "FIT | 1 files planned"), ("I2", "1 files changed | tests 1 passed in 0.01s"),
                           ("I3", "FAIL | sent to audit: no")):
         _log_line(tmp_path, "implementation", "999", agent, fields)
     assert _log(tmp_path, "I1", "999", "FIT | 1 files planned")[0] == 0
-    assert _log(tmp_path, "I2", "999", "1 files changed | tests 1 passed")[0] == 0
+    assert _log(tmp_path, "I2", "999", "1 files changed | tests 1 passed in 0.01s")[0] == 0
     assert _written(tmp_path, "I1", "999") and _written(tmp_path, "I2", "999")
 
 
-@pytest.mark.parametrize("team, agent, fields, steps", [
-    ("research", "R3", "5 verified, 0 fixed, 0 removed | BLOCKED", ("01", "02", "03")),        # D4 (M6b)
-    ("implementation", "I1", "NOT A FIT | 0 files planned", ("01", "02", "03", "04")),          # D5
+@pytest.mark.parametrize("team, agent, fields, steps, verdict", [
+    ("research", "R3", "5 verified, 0 fixed, 0 removed | BLOCKED", ("01", "02", "03"),
+     ("03", "Status: BLOCKED (x)\n")),                                                         # D4 (M6b)
+    ("implementation", "I1", "NOT A FIT | 0 files planned", ("01", "02", "03", "04"),
+     ("04", "Fit verdict: NOT A FIT\n")),                                                      # D5
 ])
-def test_log_after_blocked_or_not_a_fit_is_written(tmp_path, team, agent, fields, steps):
+def test_log_after_blocked_or_not_a_fit_is_written(tmp_path, team, agent, fields, steps, verdict):
     """086 D4, D5: after an R3 BLOCKED line (group 2 of R3's format) or an I1 NOT A FIT line, the R1
-    re-log with later files present is written."""
+    re-log with later files present is written. Item 090: the sender's file still shows its send-back
+    verdict (round rule (b))."""
     _request(tmp_path, "999")
     _steps(tmp_path, "999", steps)
+    (tmp_path / "work" / "999" / STEP_NAMES[verdict[0]]).write_text(verdict[1] + "x\n", encoding="utf-8")
     _log_line(tmp_path, team, "999", agent, fields)
     code, err = _log(tmp_path, "R1", "999", "brief written | 0")
     assert code == 0, err
@@ -3406,7 +3426,7 @@ SUITE_DAY = "2026-11-11"
 NO_SUITE = "05 has no 'Suite:' line (item 082)"
 
 
-def _suite_item(root, suite05, i2=("1 files changed | tests 1 passed",), item="151"):
+def _suite_item(root, suite05, i2=(FIELDS["I2"],), item="151"):
     """Item `item` with every step and log line (_item), then 05 replaced by `suite05` and its one I2
     log line replaced by the lines `i2`, in that order (an empty tuple: no I2 line)."""
     _item(root, item, ALL, date=SUITE_DAY)
@@ -3455,10 +3475,11 @@ def test_suite_line_dropped_middle_is_incomplete(tmp_path):
 
 @pytest.mark.parametrize("field", ["411 passed, 1 skipped", S_FULL + " (note)"], ids=["S3-tail", "S4-note"])
 def test_suite_line_part_of_field_is_incomplete(tmp_path, field):
-    """S3: the field dropped the time (kills `field in suite`); S4: it added a note (kills `suite in field`)."""
-    _suite_item(tmp_path, f"x\nSuite: {S_FULL}\n", i2=(f"1 files changed | tests {field}",))
+    """S3: the field dropped the time (kills `field in suite`); S4: it added a note (kills `suite in field`).
+    Item 090: on SF (below TIMED_FROM), where an untimed field is still well-formed."""
+    _suite_item(tmp_path, f"x\nSuite: {S_FULL}\n", i2=(f"1 files changed | tests {field}",), item=f"{SF:03d}")
     _, inc = _inc(tmp_path)
-    assert inc == f"INCOMPLETE: 151 ({_mismatch(S_FULL, field)})"
+    assert inc == f"INCOMPLETE: {SF:03d} ({_mismatch(S_FULL, field)})"
 
 
 def test_suite_line_inside_fence_is_not_read(tmp_path):
@@ -3481,7 +3502,7 @@ def test_unfilled_template_suite_line_is_incomplete(tmp_path):
     _suite_item(tmp_path, template)
     _, inc = _inc(tmp_path)
     holder = [l for l in template.splitlines() if l.startswith("Suite:")][0][len("Suite:"):].strip()
-    assert inc == f"INCOMPLETE: 151 ({_mismatch(holder, '1 passed')})"
+    assert inc == f"INCOMPLETE: 151 ({_mismatch(holder, '1 passed in 0.01s')})"
 
 
 def test_suite_with_no_i2_line_adds_no_suite_entry(tmp_path):
@@ -3494,7 +3515,7 @@ def test_suite_with_no_i2_line_adds_no_suite_entry(tmp_path):
 def test_suite_with_malformed_last_i2_line_never_falls_back(tmp_path):
     """S9: the last I2 line is malformed: 045's entry only, the earlier well-formed line is never used."""
     _suite_item(tmp_path, "x\nSuite: 411 passed\n",
-                i2=("1 files changed | tests 410 passed", "1 files changed | tests 411/411"))
+                i2=("1 files changed | tests 410 passed in 0.01s", "1 files changed | tests 411/411"))
     _, inc = _inc(tmp_path)
     assert inc.startswith("INCOMPLETE: 151 (log line for I2 does not match its format (item 045)"), inc
     assert "Suite" not in inc, inc
@@ -3509,18 +3530,18 @@ def test_suite_below_cutoff_not_checked(tmp_path):
 
 def test_suite_compared_with_last_i2_line(tmp_path):
     """S11: two I2 lines, the last equals Suite: no entry. S12: only the first does: mismatch."""
-    _suite_item(tmp_path / "a", "x\nSuite: 2 passed\n",
-                i2=("1 files changed | tests 1 passed", "1 files changed | tests 2 passed"))
+    _suite_item(tmp_path / "a", "x\nSuite: 2 passed in 0.02s\n",
+                i2=("1 files changed | tests 1 passed in 0.01s", "1 files changed | tests 2 passed in 0.02s"))
     assert _inc(tmp_path / "a")[1] == "INCOMPLETE: none"
-    _suite_item(tmp_path / "b", "x\nSuite: 1 passed\n",
-                i2=("1 files changed | tests 1 passed", "1 files changed | tests 2 passed"))
-    assert _inc(tmp_path / "b")[1] == f"INCOMPLETE: 151 ({_mismatch('1 passed', '2 passed')})"
+    _suite_item(tmp_path / "b", "x\nSuite: 1 passed in 0.01s\n",
+                i2=("1 files changed | tests 1 passed in 0.01s", "1 files changed | tests 2 passed in 0.02s"))
+    assert _inc(tmp_path / "b")[1] == f"INCOMPLETE: 151 ({_mismatch('1 passed in 0.01s', '2 passed in 0.02s')})"
 
 
 def test_suite_inside_other_text_is_not_read(tmp_path):
     """S14: only the column-0 `Suite:` line is read. `Suite:` inline in backticks, in a list item and
     indented is not (kills `"Suite:" in line` and `line.lstrip().startswith("Suite:")`)."""
-    _suite_item(tmp_path, "x\nSuite: 1 passed\n"
+    _suite_item(tmp_path, "x\nSuite: 1 passed in 0.01s\n"
                           "the `Suite:` line above is copied as printed\n"
                           "- `Suite: 2 passed` was round 1\n"
                           "   Suite: 2 passed\n")
@@ -3578,8 +3599,8 @@ def test_suite_label_in_template_and_i2_text():
 
 
 UNSHALLOW = ("If `git rev-parse --is-shallow-repository` prints true, run `git fetch --unshallow`, then test "
-             "again. If it is still true, report UNTRACKED CHANGE, RESEARCH CODE and REAL-DATA FIELD as "
-             "'not checked', never 'none' (item 079).")
+             "again. If it is still true, report UNTRACKED CHANGE, RESEARCH CODE, REAL-DATA FIELD, LOG TIME, "
+             "MAIN AHEAD and OPEN BRANCHES as 'not checked', never 'none' (items 079, 090).")
 
 
 def test_unshallow_sentence_same_in_three_files():
@@ -3946,3 +3967,411 @@ def test_sent_back_unreadable_log_is_no_send_back(tmp_path, monkeypatch):
     _tree(tmp_path, BAD)
     (tmp_path / "work" / "150" / "05-build-report.md").write_text("x\n", encoding="utf-8")
     assert cp._sent_back("150") is False
+
+
+# Item 090 (RI-010, RI-014): timed I2 field from TIMED_FROM, LOG BATCH not computable as INCOMPLETE, the
+# per-round I2 bound, the round rule for --log after a send-back, and the shallow-clone readers.
+TIMED_HINT = "<n> files changed | tests <last line of python3 -m pytest -q, as printed, with its ` in <s>s` time>"
+
+
+def test_log_i2_untimed_refused_from_090(tmp_path):
+    """090 T1 (M1, M3): from TIMED_FROM the I2 field needs pytest's ` in <s>s` right after the stats; a time
+    only inside the note does not count; below it the untimed form is still written."""
+    for item in ("089", "990"):
+        _request(tmp_path, item)
+    code, err = _log(tmp_path, "I2", "990", "1 file changed | tests 5 passed")
+    assert code == 2 and f'"{TIMED_HINT}"' in err, err
+    assert _log(tmp_path, "I2", "990", "1 file changed | tests 5 passed (in 3.00s)")[0] == 2
+    assert not (tmp_path / "logs").exists()
+    for tail in ("in 3.21s", "in 61.68s (0:01:01)", "in 3.21 seconds", "in 3.21s (note)"):
+        code, err = _log(tmp_path, "I2", "990", f"1 file changed | tests 5 passed {tail}")
+        assert code == 0, (tail, err)
+    assert _log(tmp_path, "I2", "089", "1 file changed | tests 5 passed")[0] == 0
+
+
+def test_timed_hint_fits_timed_format():
+    """090 T2: the timed hint's example fits I2_TIMED and is accepted for an ID >= TIMED_FROM; log_hint picks it
+    from TIMED_FROM on only (M2 is killed by test_i2_tests_field_cutoff's untimed 076 line)."""
+    import re
+    cp = _cp()
+    example = cp.LOG_HINT_TIMED["I2"][1]
+    assert re.fullmatch(cp.I2_TIMED, example)
+    assert cp.log_fields_ok("I2", f"{cp.TIMED_FROM:03d}", example)
+    assert cp.log_hint("I2", f"{cp.TIMED_FROM:03d}") == TIMED_HINT == cp.LOG_HINT_TIMED["I2"][0]
+    assert cp.log_hint("I2", f"{cp.TIMED_FROM - 1:03d}") == cp.LOG_HINT["I2"][0]
+    assert cp.TIMED_FROM == 90
+
+
+TIMED_RULES = "TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\nSUITE_FROM = 87\n"
+TIMED_05 = "x\nSuite: 1 passed\n## Test output\n1 passed in 0.01s\n"   # a time, so LOG BATCH is computable
+
+
+def _timed_repo(tmp_path, rules, commit_05=True):
+    """S13-style: RULE_FILE `rules`, item 990 with every step, 05 TIMED_05 and one untimed I2 line."""
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", rules)
+    root = _commit(repo, "root")
+    _suite_item(repo, TIMED_05, i2=("1 files changed | tests 1 passed",), item="990")
+    if commit_05:
+        root = _commit(repo, "990 built")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", SUITE_DAY)
+    return root, out
+
+
+@NO_GIT
+def test_timed_gate(tmp_path):
+    """090 T3: an untimed 990 I2 line whose 05 was added under a rule file without TIMED_FROM is RULE NOT SEEN
+    (`judged by untimed I2 form`), not INCOMPLETE; with TIMED_FROM there it is INCOMPLETE with the timed hint;
+    an uncommitted 05 (no anchor) is strict."""
+    sha, out = _timed_repo(tmp_path / "a", TIMED_RULES)
+    assert _pick(out, "RULE NOT SEEN:") == (f"RULE NOT SEEN: 990 (05 added in {sha[:7]} without TIMED_FROM (090): "
+                                            "judged by untimed I2 form; item 084)"), out
+    assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+    want = f'INCOMPLETE: 990 (log line for I2 does not match its format (item 045): I2 wants "{TIMED_HINT}")'
+    _, out = _timed_repo(tmp_path / "b", TIMED_RULES + "TIMED_FROM = 90\n")
+    assert _pick(out, "INCOMPLETE:") == want, out
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+    _, out = _timed_repo(tmp_path / "c", TIMED_RULES, commit_05=False)
+    assert _pick(out, "INCOMPLETE:") == want, out
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+
+
+@NO_GIT
+def test_timed_gate_not_seen_keeps_suite_check(tmp_path):
+    """090: a RULE NOT SEEN TIMED_FROM item still gets its Suite check against its untimed field."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", TIMED_RULES)
+    _commit(repo, "root")
+    _suite_item(repo, TIMED_05.replace("Suite: 1 passed", "Suite: 2 passed"), i2=("1 files changed | tests 1 passed",),
+                item="990")
+    root = _commit(repo, "990 built")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", SUITE_DAY)
+    assert _pick(out, "INCOMPLETE:") == f"INCOMPLETE: 990 ({_mismatch('2 passed', '1 passed')})", out
+
+
+@pytest.mark.parametrize("item, strict", [("990", True), ("089", False)])
+def test_batch_not_computable_strict_from_090(tmp_path, item, strict):
+    """090 T4 (M4): an 083-shaped timed item with one more line timed 25:00 is not computable; from TIMED_FROM
+    that is also INCOMPLETE `LOG BATCH not computable: log line with no valid time (item 090)` (exit 1); on
+    089 it stays LOG BATCH text only (exit 0)."""
+    r, i = _six("10:15")
+    _batch_item(tmp_path, item, r, i + [(BATCH_DAY, "25:00", "I3", "PASS | sent to audit: yes")],
+                "344 passed, 1 skipped in 48.51s", "344 passed, 1 skipped in 47.57s", full=True)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
+    assert f"; not computable: {item}: log line with no valid time" in _pick(out, "LOG BATCH:"), out
+    inc = _pick(out, "INCOMPLETE:")
+    if strict:
+        assert inc == "INCOMPLETE: 990 (LOG BATCH not computable: log line with no valid time (item 090))", out
+        assert code == 1, out
+    else:
+        assert inc == "INCOMPLETE: none" and code == 0, out
+
+
+@pytest.mark.parametrize("item, inc", [
+    ("990", "INCOMPLETE: 990 (LOG BATCH not computable: no line before I2 (item 090))"),
+    ("089", "INCOMPLETE: none")])
+def test_batch_no_line_before_i2_strict_from_090(tmp_path, item, inc):
+    """090 T5 variant: a timed item whose first line is I2 (no line before it): INCOMPLETE from TIMED_FROM,
+    text only below it."""
+    impl = [(BATCH_DAY, "10:00", "I2", "1 files changed | tests 1 passed in 0.01s"),
+            (BATCH_DAY, "10:05", "I3", "PASS | sent to audit: yes")]
+    _batch_item(tmp_path, item, impl=impl, t05="1 passed in 0.01s", t06="1 passed in 0.02s", full=True)
+    for s in ("01", "02", "03", "04"):                        # no step files before 05: no R1-I1 log lines owed
+        (tmp_path / "work" / item / STEP_NAMES[s]).unlink()
+    (tmp_path / "work" / item / "request.md").write_text(
+        f"# Work item {item}\nScope: FULL\nDate: 2026-11-20\nWaived: 01 02 03 04 (person, 2026-11-20: test)\n",
+        encoding="utf-8")
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
+    assert f"not computable: {item}: no line before I2" in _pick(out, "LOG BATCH:"), out
+    assert _pick(out, "INCOMPLETE:") == inc, out
+
+
+def _round_item(root, rows, t05=None, t06=None, full=False, item="999"):
+    _batch_item(root, item, impl=rows, t05=t05, t06=t06, full=full)
+    return _bl(root)
+
+
+@pytest.mark.parametrize("t, flagged", [("60.00", False), ("60.01", True)])
+def test_round_bound_delta0_boundary(tmp_path, t, flagged):
+    """090 T6: Δ0 (I1 and I2 at 10:00), limit 60 s: 60.00 - 0.005 = 59.995 < 60 is not flagged, 60.01 -> 60.005
+    is; the whole-item window (10:00 -> 10:30) is not flagged either way."""
+    res = _round_item(tmp_path, [(BATCH_DAY, "10:00", "I1", "FIT | 1 files planned"),
+                                 (BATCH_DAY, "10:00", "I2", f"1 files changed | tests 1 passed in {t}s"),
+                                 (BATCH_DAY, "10:30", "I3", "PASS | sent to audit: yes")], t06="1 passed in 1.00s")
+    want = ["999 I2 at 2026-11-20 10:00 (60.01 s pytest run after the I1 line at 10:00, limit 60 s; impossible under "
+            "the run-item order, item 090)"] if flagged else []
+    assert res["flagged"] == want and res["flagged_ids"] == (["999"] if flagged else []), res
+
+
+ROUND2 = [(BATCH_DAY, "09:20", "I1", "FIT | 1 files planned"),
+          (BATCH_DAY, "09:30", "I2", "1 files changed | tests 1 passed in 50.00s"),
+          (BATCH_DAY, "09:50", "I3", "FAIL | sent to audit: no"),
+          (BATCH_DAY, "10:05", "I1", "FIT | 1 files planned"),
+          (BATCH_DAY, "10:05", "I2", "1 files changed | tests 1 passed in 80.00s"),
+          (BATCH_DAY, "10:20", "I3", "PASS | sent to audit: yes")]
+ROUND2_FLAG = ("999 I2 at 2026-11-20 10:05 (80.00 s pytest run after the I1 line at 10:05, limit 60 s; impossible "
+               "under the run-item order, item 090)")
+
+
+def test_round_bound_round2_batch(tmp_path):
+    """090 T7 (M6): a round-2 I2 in the same minute as its I1 (80.00 s) is flagged; round 1 (50.00 s, Δ10) and the
+    whole item (09:20 -> 10:20) are not. With prev = the item's first line it would be Δ65 (not flagged)."""
+    _batch_item(tmp_path, "999", research=[(BATCH_DAY, "09:00", "R1", "brief written | 1")], impl=ROUND2)
+    res = _bl(tmp_path)
+    assert res["flagged"] == [ROUND2_FLAG] and res["flagged_ids"] == ["999"], res
+
+
+def test_round_bound_delta1_limit_120(tmp_path):
+    """090 T8 (M5): Δ1 (I1 10:00, I2 10:01): limit (1+1)*60 = 120 s, 86.00 s is not flagged."""
+    res = _round_item(tmp_path, [(BATCH_DAY, "10:00", "I1", "FIT | 1 files planned"),
+                                 (BATCH_DAY, "10:01", "I2", "1 files changed | tests 1 passed in 86.00s"),
+                                 (BATCH_DAY, "10:30", "I3", "PASS | sent to audit: yes")])
+    assert res["flagged"] == [], res
+
+
+def test_round_bound_interleaved_items(tmp_path):
+    """090 T9 (M7): three items, R1 and I1 at 23:27, I2 at 23:29 / 23:30 / 23:31 (70 s runs); each item's I3 is
+    in the next item's I2 minute, above it. Per item, prev is the item's own I1 (Δ >= 2): none flagged; another
+    item's I3 as prev would be Δ0."""
+    impl = []
+    for n, item in enumerate(("997", "998", "999")):
+        _batch_item(tmp_path, item, [(BATCH_DAY, "23:27", "R1", "brief written | 1")],
+                    [(BATCH_DAY, "23:27", "I1", "FIT | 1 files planned")])
+    rows = [("23:29", "I2", "997"), ("23:30", "I3", "997"), ("23:30", "I2", "998"), ("23:31", "I3", "998"),
+            ("23:31", "I2", "999"), ("23:32", "I3", "999")]
+    with (tmp_path / "logs" / "implementation" / f"{BATCH_DAY}.md").open("a", encoding="utf-8") as fh:
+        for hhmm, agent, item in rows:
+            fields = "1 files changed | tests 1 passed in 70.00s" if agent == "I2" else "PASS | sent to audit: yes"
+            fh.write(f"{hhmm} | {agent} | {item} | {fields}\n")
+    res = _bl(tmp_path)
+    assert res["flagged"] == [] and res["checked"] == 3, res
+
+
+def test_round_bound_fast_prev_is_research(tmp_path):
+    """090 T10: FAST shape: the R3 research line at the I2 minute is prev (Δ0): 70.00 s is flagged."""
+    _batch_item(tmp_path, "999", [(BATCH_DAY, "10:15", "R3", "1 verified, 0 fixed, 0 removed | READY")],
+                [(BATCH_DAY, "10:15", "I2", "1 files changed | tests 1 passed in 70.00s"),
+                 (BATCH_DAY, "10:30", "I3", "PASS | sent to audit: yes")])
+    assert _bl(tmp_path)["flagged"] == ["999 I2 at 2026-11-20 10:15 (70.00 s pytest run after the R3 line at 10:15, "
+                                        "limit 60 s; impossible under the run-item order, item 090)"]
+
+
+def test_round_bound_on_repo_data():
+    """090 T11: on this repo's work/ and logs/ the per-round bound flags no I2 round (0 of 17 on 2026-11-21)."""
+    res = _cp().batch_log_items(REPO / "work", REPO / "logs")
+    assert not [f for f in res["flagged"] if f.endswith("item 090)")], res
+
+
+def test_round_bound_end_to_end(tmp_path):
+    """090 T12: T7's shape as a full item: `LOG BATCH: <the round entry>` and exit 1."""
+    research = [(BATCH_DAY, "09:00", "R1", "brief written | 1"), (BATCH_DAY, "09:05", "R2", FIELDS["R2"]),
+                (BATCH_DAY, "09:10", "R3", FIELDS["R3"])]
+    _batch_item(tmp_path, "999", research=research, impl=ROUND2, t05="1 passed in 80.00s", t06="1 passed in 1.00s",
+                full=True)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
+    assert _pick(out, "LOG BATCH:") == f"LOG BATCH: {ROUND2_FLAG}", out
+    assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+    assert code == 1, out
+
+
+@pytest.mark.parametrize("team, sender, fields, steps, path, body, agent, want", [
+    ("implementation", "I3", "FAIL | sent to audit: no", "010203040506", "06", "Verdict: PASS (round 2)\n", "I2",
+     "work/999/06-verification.md no longer says FAIL (PASS); I3 ran again before this line"),
+    ("research", "R3", "1 verified, 0 fixed, 0 removed | BLOCKED", "0102", "03", "Status: READY\n", "R1",
+     "work/999/03-handoff.md no longer says BLOCKED (READY)"),
+    ("implementation", "I1", "NOT A FIT | 0 files planned", "010203", "04", "Fit verdict: FIT\n", "R2",
+     "work/999/04-build-plan.md no longer says NOT A FIT (FIT)"),
+    ("implementation", "I1", "NOT A FIT | 0 files planned", "010203", "04",
+     "Fit verdict: FIT | FIT WITH CHANGES | NOT A FIT\n", "R2", "(no readable Fit verdict: line)"),
+    ("implementation", "I3", "FAIL | sent to audit: no", "010203040506", "06",
+     "Verdict: PASS (round 2; earlier rounds: FAIL)\n", "I2", "no longer says FAIL (PASS)"),
+    ("implementation", "I3", "FAIL | sent to audit: no", "010203040506", "06", b"\xff", "I2",
+     "(work/999/06-verification.md unreadable)"),
+    ("implementation", "I3", "FAIL | sent to audit: no", "0102030405", None, None, "I2", "(absent)"),
+], ids=["06-pass", "03-ready", "04-fit", "04-unfilled", "06-earlier-fail", "06-unreadable", "06-absent"])
+def test_round_content_refusal(tmp_path, team, sender, fields, steps, path, body, agent, want):
+    """090 T14 (M9, M10, M17): in an open round, a step before the sender is refused when the sender's file
+    no longer shows its send-back verdict (first verdict line, the unfilled template line reads as none, a
+    later word in the line is not it), is unreadable or absent; exit 2, nothing written."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", [steps[k:k + 2] for k in range(0, len(steps), 2)])
+    if path:
+        f = tmp_path / "work" / "999" / STEP_NAMES[path]
+        f.write_bytes(body) if isinstance(body, bytes) else f.write_text(body + "x\n", encoding="utf-8")
+    _log_line(tmp_path, team, "999", sender, fields)
+    code, err = _log(tmp_path, agent, "999", FIELDS[agent])
+    assert code == 2 and want in err and "(item 090)" in err, err
+    assert not _written(tmp_path, agent, "999")
+
+
+def test_round_unreadable_07_keeps_rule_d(tmp_path):
+    """090 (missing input 07): an unreadable 07 adds no send-back, so rule D refuses as today."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "02", "03", "04", "05", "06"))
+    (tmp_path / "work" / "999" / "07-audit-task.md").write_bytes(b"\xff")
+    code, err = _log(tmp_path, "I1", "999", "FIT | 1 files planned")
+    assert code == 2 and "(item 086)" in err, err
+
+
+def test_round_open_refuses_later_step(tmp_path):
+    """090 T15 (M15): I1 sent the item back (NOT A FIT) and has not logged again: `--log I2` is refused."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "02", "03", "04"))
+    (tmp_path / "work" / "999" / "04-build-plan.md").write_text("Fit verdict: NOT A FIT\n", encoding="utf-8")
+    _log_line(tmp_path, "implementation", "999", "I1", "NOT A FIT | 0 files planned")
+    code, err = _log(tmp_path, "I2", "999", FIELDS["I2"])
+    assert code == 2, err
+    assert ("--log refused: I1 sent work/999 back at 2000-01-01 10:00 and has not logged again; I1 runs before I2 "
+            "(item 090)") in err, err
+
+
+def _round_069(root, extra=()):
+    """069's shape: 01-06, 06 PASS (round 2), lines I1, I2, I3 FAIL, I2, I3 PASS (+ extra), 07 A1 FAIL."""
+    _request(root, "999")
+    _steps(root, "999", ("01", "02", "03", "04", "05", "06"))
+    (root / "work" / "999" / "06-verification.md").write_text("Verdict: PASS (round 2)\nx\n", encoding="utf-8")
+    (root / "work" / "999" / "07-audit-task.md").write_text("x\nA1 result: FAIL (test)\n", encoding="utf-8")
+    for agent, fields in (("I1", FIELDS["I1"]), ("I2", FIELDS["I2"]), ("I3", "FAIL | sent to audit: no"),
+                          ("I2", FIELDS["I2"]), ("I3", "PASS | sent to audit: yes"), *extra):
+        _log_line(root, "implementation", "999", agent, fields)
+
+
+def test_round_069_shape(tmp_path):
+    """090 T16 (M8, M16): after 069's A1 FAIL the round-3 I1, I2 and I3 log cleanly (the I3 FAIL round closed
+    at I3 PASS, so 06's PASS is not read); with a round-3 I2 already logged, `--log I1` is refused (order)."""
+    _round_069(tmp_path)
+    assert _log(tmp_path, "I1", "999", FIELDS["I1"]) == (0, "")
+    assert _log(tmp_path, "I2", "999", FIELDS["I2"]) == (0, "")
+    assert _log(tmp_path, "I3", "999", "PASS | sent to audit: yes") == (0, "")
+    twin = tmp_path / "twin"
+    _round_069(twin, extra=(("I2", FIELDS["I2"]),))
+    code, err = _log(twin, "I1", "999", FIELDS["I1"])
+    assert code == 2, err
+    assert "--log refused: I2 already logged at 10:00 after I3 10:00; log steps in order (item 090)" in err, err
+
+
+def test_round_unreadable_log_refused(tmp_path):
+    """090 T17: an unreadable log file with an I3 FAIL in another file: `--log I2` is refused, order not checked."""
+    _request(tmp_path, "999")
+    _steps(tmp_path, "999", ("01", "02", "03", "04", "05", "06"))
+    (tmp_path / "work" / "999" / "06-verification.md").write_text("Verdict: FAIL (round 1)\nx\n", encoding="utf-8")
+    _log_line(tmp_path, "implementation", "999", "I3", "FAIL | sent to audit: no")
+    (tmp_path / "logs" / "implementation" / "2000-01-02.md").write_bytes(b"\xff\xfe")
+    code, err = _log(tmp_path, "I2", "999", FIELDS["I2"])
+    assert code == 2, err
+    assert ("--log refused: logs/implementation/2000-01-02.md unreadable; order not checked (item 090)") in err, err
+
+
+SHALLOW_LINE_TEXT = "not checked (shallow clone; run git fetch --unshallow)"
+
+
+def _shallow_source(tmp_path, monkeypatch, late=True, branch="claude-x"):
+    """origin (HEAD -> dev): main = c1 (work/150 + a log line `23:59` or `01:00` on 2026-11-20, committed
+    2026-11-20 01:30) and c2 (2026-11-21 00:30); dev = main + c3 (HEAD's tip one commit ahead of main); an open
+    branch off main with one .claude/x.md commit, or (branch=None) an orphan README-only branch `docs`."""
+    origin, src = tmp_path / "origin.git", tmp_path / "src"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    _git(tmp_path, "clone", "-q", str(origin), str(src))
+    _git(src, "checkout", "-q", "-b", "main")
+    _item(src, "150", [], date="2026-11-20", logged=False)
+    _write(src, "logs/implementation/2026-11-20.md",
+           f"{'23:59' if late else '01:00'} | I3 | 150 | PASS | sent to audit: yes\n")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-20T01:30:00+00:00")
+    _commit(src, "c1")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-21T00:30:00+00:00")
+    _write(src, "notes/a.md")
+    _commit(src, "c2")
+    _git(src, "push", "-q", "origin", "main")
+    if branch:
+        _git(src, "checkout", "-q", "-b", branch)
+        _write(src, ".claude/x.md")
+        _commit(src, "rules")
+        _git(src, "push", "-q", "origin", branch)
+    else:
+        _orphan(src, "docs", {})
+    _git(src, "checkout", "-q", "-b", "dev", "main")
+    _write(src, "notes/b.md")
+    _commit(src, "c3")
+    _git(src, "push", "-q", "origin", "dev")
+    _git(origin, "symbolic-ref", "HEAD", "refs/heads/dev")
+    monkeypatch.delenv("GIT_COMMITTER_DATE")
+    return origin
+
+
+def _clone(tmp_path, origin, name, *args):
+    repo = tmp_path / name
+    _git(tmp_path, "clone", "-q", *args, "--no-single-branch", f"file://{origin}", str(repo))
+    flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=repo, capture_output=True, text=True)
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", "2026-11-21")
+    return flag.stdout.strip(), code, out
+
+
+@NO_GIT
+def test_shallow_three_readers_not_checked(tmp_path, monkeypatch):
+    """090 T18 (M11): full-clone control: LOG TIME names the late line, no MAIN AHEAD line, the branch is
+    scanned. Depth 1: LOG TIME, MAIN AHEAD and the unrelated branch say not checked, origin/main is not listed,
+    and the branch's .claude/ file is a BRANCH ERROR (exit 1)."""
+    origin = _shallow_source(tmp_path, monkeypatch)
+    flag, code, out = _clone(tmp_path, origin, "full")
+    lines = out.splitlines()
+    assert flag == "false"
+    assert _pick(out, "LOG TIME:") == "LOG TIME: 150 I3 (2026-11-20 23:59 after commit 2026-11-20 01:30 UTC)", out
+    assert "MAIN AHEAD" not in out, out
+    assert any(l.startswith("  origin/claude-x: items none; merges cleanly") for l in lines), out
+    flag, code, out = _clone(tmp_path, origin, "d1", "--depth", "1")
+    lines = out.splitlines()
+    assert flag == "true"
+    assert _pick(out, "LOG TIME:") == f"LOG TIME: {SHALLOW_LINE_TEXT}", out
+    assert _pick(out, "MAIN AHEAD:") == f"MAIN AHEAD: {SHALLOW_LINE_TEXT}", out
+    assert any(l.startswith(f"  origin/claude-x: {SHALLOW_LINE_TEXT}") for l in lines), out
+    assert not any(l.startswith("  origin/main:") for l in lines), out
+    assert _pick(out, "BRANCH ERROR:").startswith("BRANCH ERROR: origin/claude-x (shallow clone; "), out
+    assert "run git fetch --unshallow (item 090))" in _pick(out, "BRANCH ERROR:"), out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_shallow_docs_only_orphan_exit_0(tmp_path, monkeypatch):
+    """090 T19 (M11-M14): depth 1 with only an orphan README-only branch and no late line: the three not-checked
+    lines and exit 0 (not-checked lines never change the exit; origin/main is not turned into a BRANCH ERROR)."""
+    origin = _shallow_source(tmp_path, monkeypatch, late=False, branch=None)
+    flag, code, out = _clone(tmp_path, origin, "d1", "--depth", "1")
+    lines = out.splitlines()
+    assert flag == "true"
+    assert _pick(out, "LOG TIME:") == f"LOG TIME: {SHALLOW_LINE_TEXT}", out
+    assert _pick(out, "MAIN AHEAD:") == f"MAIN AHEAD: {SHALLOW_LINE_TEXT}", out
+    assert any(l.startswith(f"  origin/docs: {SHALLOW_LINE_TEXT}") for l in lines), out
+    assert "BRANCH ERROR" not in out and not any(l.startswith("  origin/main:") for l in lines), out
+    assert code == 0, out
+
+
+def test_open_branches_default_computes_shallow(monkeypatch):
+    """090 T20: open_branches() with no args (check_handoff's call) computes shallowness: origin/main is skipped
+    and main_ahead is never called; _is_shallow reads "unreadable" and boundaries as shallow; main_ahead(True)
+    with no ref is still 0 (no line)."""
+    cp = _cp()
+    branch = ("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
+    monkeypatch.setattr(cp, "_git", lambda *a: ("origin/main\n", 0) if a == branch else ("", 0))
+    monkeypatch.setattr(cp, "main_ahead", lambda *a: (_ for _ in ()).throw(AssertionError("main_ahead called")))
+    monkeypatch.setattr(cp, "_is_shallow", lambda: True)
+    assert cp.open_branches() == []
+    monkeypatch.undo()
+    for value, want in (("unreadable", True), (["a" * 40], True), ([], False), ("full", False)):
+        monkeypatch.setattr(cp, "_shallow_boundaries", lambda v=value: v)
+        assert cp._is_shallow() is want, value
+    monkeypatch.setattr(cp, "_git", lambda *a: ("", 0))
+    assert cp.main_ahead(shallow=True) == 0
+
+
+def test_i2_and_run_item_texts_name_item_090():
+    """090: the i2-builder and run-item rule texts state the timed field and the round rule (text pins)."""
+    i2 = (REPO / ".claude" / "agents" / "i2-builder.md").read_text(encoding="utf-8")
+    assert ("From item 090 (TIMED_FROM) the field must keep pytest's ` in <s>s` time; `--log` refuses it without "
+            "one.") in i2
+    run = (REPO / ".claude" / "commands" / "run-item.md").read_text(encoding="utf-8")
+    assert "it refuses a step after the sender until the sender logs again" in run and "(item 090)" in run
+    assert "unless the item was sent back" not in run

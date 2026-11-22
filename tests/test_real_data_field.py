@@ -7,7 +7,7 @@ import sys
 import pytest
 
 from conftest import REPO
-from test_pipeline_check import _item, _git, _run, _history, _write, _commit, NO_GIT, ALL, _cp
+from test_pipeline_check import _item, _git, _run, _history, _write, _commit, NO_GIT, ALL, _cp, FIELDS
 
 HEAD = "## Real-data effect (diff_reports output, pasted)"
 TOTAL = ("TOTAL: files 1, only-before 0, only-after 0, not compared 0, json changes 1, "
@@ -17,6 +17,7 @@ FILLED = f"{HEAD}\n```\n{TOTAL}\n```\n"
 COMMENT = (f"{HEAD}\n<!-- Required when the item changes ccbot/realtest.py ... the whole output down to "
            "TOTAL. Otherwise: `not required (<git diff --stat file list>)`. -->\n")
 DATE = "2026-11-11"                   # fixture log lines are timed before any real commit
+SUITE = FIELDS["I2"].split(" | tests ", 1)[1]   # item 082: 05's Suite line = the fixture I2 field (timed, item 090)
 
 
 def _rd_item(repo, item, body05=FILLED, body06=FILLED, files=ALL, scope="FULL"):
@@ -24,7 +25,7 @@ def _rd_item(repo, item, body05=FILLED, body06=FILLED, files=ALL, scope="FULL"):
     _item(repo, item, files, scope=scope, date=DATE)
     d = repo / "work" / item
     if "05-build-report.md" in files:
-        (d / "05-build-report.md").write_text(f"# 05\nSuite: 1 passed\n{body05}", encoding="utf-8")   # item 082
+        (d / "05-build-report.md").write_text(f"# 05\nSuite: {SUITE}\n{body05}", encoding="utf-8")   # item 082
     if "06-verification.md" in files:
         (d / "06-verification.md").write_text(f"# 06\nVerdict: PASS (round 1)\nSent back to: none\nRecurring issues checked: RI-007\n{body06}",
                                               encoding="utf-8")
@@ -360,7 +361,7 @@ def test_t20_main_exits_1_for_triggered_id_without_request(tmp_path):
     audit.write_text(a1, encoding="utf-8")
     report = repo / "work" / "160" / "05-build-report.md"
     report.write_text(report.read_text(encoding="utf-8") + "round 2\n", encoding="utf-8")
-    _write(repo, "work/162/05-build-report.md", "x\nSuite: 1 passed\n")
+    _write(repo, "work/162/05-build-report.md", f"x\nSuite: {SUITE}\n")
     _write(repo, "ccbot/realtest.py")
     _commit(repo, "160 05 + 07, 162 05 + realtest; 162 has no request.md")
     code, out, real, inc = _check(repo, cutoff)

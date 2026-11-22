@@ -85,6 +85,14 @@ and its last commit date and age (039). Three more lines come from the branches:
                   still counts its work/ IDs. Known gap: check_handoff's `_branch_with_handoff` does
                   not read per-ref errors, so an item whose 03 exists only on an unreadable or
                   unrelated branch shows `no hand-off` there; this BRANCH ERROR is the loud signal.
+                  Item 090 (RI-014): in a shallow clone origin/main is not listed (it is not merged in
+                  the shallow view; MAIN AHEAD says not checked) and main_ahead is not called; an
+                  unrelated ref prints `<ref>: not checked (shallow clone; run git fetch --unshallow)`,
+                  and with checked paths its BRANCH ERROR is `shallow clone; <n> file(s) on checked paths
+                  (first: <p>) not checked; run git fetch --unshallow (item 090)` (exit 1, as before).
+                  Known gaps: a branch with a shared shallow base is scanned as today and was not
+                  checked by 090; refs already in main are listed (not merged in the shallow view); a
+                  single-branch clone hides branches (sent to A1).
 --log <agent> <ID> "<fields>" (item 045) appends `HH:MM | <agent> | <ID> | <fields>` with the
 current UTC time to logs/research or logs/implementation/<UTC date>.md, and refuses (exit 2)
 fields that don't match the agent's format (LOG_FORMAT). Every step logs this way, right after
@@ -94,7 +102,11 @@ each at most once; `deselected` and unknown parts are refused. Before it (I2_BEF
 `<pass>/<total>`, with total = passed + failed + skipped + errors + xfailed + xpassed (deselected
 and warnings are not tests) and pass <= total. Known limit: a trailing ` (<note>)` is free text
 and could hold e.g. `(1 failed)`; the stats part before the note is still checked in full, so no
-failure can be dropped from it.
+failure can be dropped from it. Item 090: from TIMED_FROM on the field must keep pytest's ` in <s>s` time
+right after the stats (I2_TIMED; a time only inside the note does not count); --log refuses it without
+one. INCOMPLETE applies the same rule, gated by 084's _rule_seen on 05 (TIMED_FROM): an item whose 05 was
+added under a rule file without it, and whose I2 lines all fit the untimed form, is listed in RULE NOT SEEN
+as `judged by untimed I2 form`.
 Item 082 (RI-006): from SUITE_FROM on, an item's 05 has exactly one column-0 `Suite:` line outside code
 fences and HTML comments (_md_lines "out" rows), and its text after `Suite:` (stripped) equals the tests
 field of the item's last I2 log line (by file date, then line order), compared as a whole string,
@@ -105,16 +117,31 @@ under a rule file without it is listed in RULE NOT SEEN as `judged by no Suite c
 Item 086 (rule D, RI-010): --log also refuses (exit 2, nothing written) while a later step file 01-06
 of the same item exists in work/<ID>/ (`--log refused: work/<ID>/ already has <files> after <agent>'s
 step; ...`), so a batch of lines written after the build is refused at R1. 07 and other files never
-count. It runs after the format and request.md refusals, whose texts and order are unchanged. It is
-off for an item that was sent back (SEND_BACK: an R3 line with BLOCKED, an I1 line with NOT A FIT or an
-I3 line with FAIL, each read from its LOG_FORMAT fullmatch group, never a substring; or an `A1 result:
-FAIL` line in 07), because a re-run step logs again while later files from the earlier round exist.
+count. It runs after the format and request.md refusals, whose texts and order are unchanged. For an
+item that was sent back (SEND_BACK: an R3 line with BLOCKED, an I1 line with NOT A FIT or an I3 line with
+FAIL, each read from its LOG_FORMAT fullmatch group, never a substring; or an `A1 result: FAIL` line in
+07) a re-run step logs again while later files from the earlier round exist, so item 090's round rule
+replaces it (_round_refusal, on the item's log lines by stamp, file, line):
+  (a) while the latest send-back line's sender S has not logged again (the round is open), a step after
+      S is refused: `<S> sent work/<ID> back at <date HH:MM> and has not logged again; ...`;
+  (b) in that open round, a step before S is refused when S's file (03 `Status:`, 04 `Fit verdict:`, 06
+      `Verdict:`; its first column-0 line outside fences and comments, the unfilled template line reads as
+      none, VERDICT_OF) no longer says the send-back word, or is absent, unreadable or has no readable
+      line: `work/<ID>/<file> no longer says <word> (...); <S> ran again before this line ...`;
+  (c) from the latest send-back or terminal line (I3 PASS; R3 READY for RESEARCH ONLY), else the item's
+      first line, a line with a later step than this one refuses it: `<agent> already logged at <HH:MM>
+      after <start agent> <HH:MM>; log steps in order (item 090)`.
+  An unreadable log file or request.md, or a line with no valid time, refuses with `order not checked
+  (item 090)`. A round opened only by A1 FAIL gets (c) only.
 From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
   LOG TIME        a committed log line timed after the commit that added it (git blame): it was
                   not written when its step ran (exit 1; RI-010).
                   Items in LOG_TIME_EXCEPT are not checked and are named with their reason
                   (item 049). Known gap: blame gives a line's latest commit, so a line edited
                   in a later commit is checked against that later commit.
+                  Item 090 (RI-014): in a shallow clone (_anchor_env gives SHALLOW_TEXT) blame gives the
+                  boundary's later commit to older lines, so it prints `LOG TIME: not checked (shallow
+                  clone; run git fetch --unshallow)`; exit unchanged.
                   Item 081: only log files listed by `git ls-tree -r HEAD` are blamed (an uncommitted
                   file is skipped); a failed ls-tree is the entry `git ls-tree HEAD failed (item 081)`,
                   and a failed blame of a committed file is the entry `<file> (git blame failed; item
@@ -136,11 +163,24 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   its first I2, an unreadable 05/06/log file or a line with no valid time is listed
                   as `not computable: <ID>: <reason>` (entries joined by "; "), never flagged; an
                   item with no I3 line after its last I2 line is in progress and not evaluated.
-                  No git, so the text and exit code are the same without it. Known gaps: (w) runs
-                  pasted outside the two sections are not read (only lowers Σ); (x) fast or untimed
-                  suites can't be flagged, D covers those; (y) once an item was sent back D is off
-                  for it, and C covers only its I rounds; (z) pytest's time and the log stamp are
-                  both wall clock (time.time()), so a clock step during a run can move both.
+                  No git, so the text and exit code are the same without it.
+                  Item 090 (per-round bound): every timed I2 line is also checked against the item's
+                  latest line before it (prev, same order rule): t - BATCH_ROUND >= (Δ+1)×60 s is
+                  `<ID> I2 at <date HH:MM> (<t> s pytest run after the <agent> line at <HH:MM>, limit
+                  <L> s; impossible under the run-item order, item 090)`, also for a round after a
+                  send-back and before the in-progress skip. From TIMED_FROM on a not-computable
+                  reason in BATCH_STRICT (no time, no line before I2, no valid time) is also an
+                  INCOMPLETE entry `LOG BATCH not computable: <reason> (item 090)`, gated on 05 like
+                  the timed I2 field (strict: a person's `Waived: 01 02 03 04` item, 024's shape, has no
+                  line before I2 and is INCOMPLETE too; no waiver excuses it). Known gaps: (w) runs pasted
+                  outside the two sections are not read
+                  (only lowers Σ); (x) the bound catches a round only when its run is longer than the
+                  gap allows: with today's 74-93 s runs, same-minute (Δ0) batches; Δ >= 1 batches pass
+                  it, and below TIMED_FROM untimed suites can't be flagged (D and the round rule cover
+                  order); (y) I3's run is untimed, so an I3 batch is caught only by the round rule (b)
+                  when 06 changed; an I3 that FAILs again leaves 06 at FAIL; A1 FAIL rounds get (c)
+                  only; (z) pytest's time and the log stamp are both wall clock (time.time()), so a
+                  clock step during a run can move both.
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
@@ -152,6 +192,11 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   still counts them. Item 081: origin/main is the exact ref refs/remotes/origin/main
                   (`git for-each-ref`; origin/main/x is not it); a failed lookup or count prints
                   `MAIN AHEAD: git <cmd> failed (exit <n>) (item 081)` (exit 1), never 0.
+                  Item 090 (RI-014): in a shallow clone, with the ref present, the count can be false
+                  (main's tip looks like a root), so it prints `MAIN AHEAD: not checked (shallow clone;
+                  run git fetch --unshallow)`; exit unchanged; no ref is still 0 and no line. One source
+                  (the shallow text) gives all three not-checked lines on purpose: a shallow 0 is exact,
+                  but a uniform text was asked for, so do not "fix" it back to a count.
   UNTRACKED CHANGE  (item 053, exit 1; RI-007) a commit on HEAD's first-parent chain after the
                   cutoff UNTRACKED_FROM that changes CODE_PATHS (ccbot/, config/, scripts/, tests/,
                   .claude/, templates/) and changes no step file 01-06 of a work item that is open at
@@ -337,6 +382,9 @@ TESTS_FORMAT_FROM = 76   # item 076: from this ID on the I2 tests field is pytes
 # Item 082: from this ID on 05 has exactly one column-0 `Suite:` line equal to the last I2 log tests field;
 # numeric floor above every in-flight item (080-086).
 SUITE_FROM = 87
+# Item 090 (RI-010): from this ID on the I2 tests field keeps pytest's ` in <s>s` time (I2_TIMED); the 7th
+# `*_FROM` cutoff, a numeric floor above the in-flight items 088/089.
+TIMED_FROM = 90
 # Item 076: the parts of pytest's summary line, in KNOWN_TYPES order (pytest main/9.0.x terminal.py),
 # each at most once. "deselected" left out on purpose: a full-suite run has none.
 _N = r"[1-9]\d*"
@@ -347,6 +395,9 @@ _STATS_PARTS = (rf"{_N} failed", rf"{_N} passed", rf"{_N} skipped", rf"{_N} xfai
 _STATS = r"(?=[1-9])" + "".join(f"(?:{p}{_END})?" for p in _STATS_PARTS)
 _TAIL = r"(?: in \d+\.\d+(?:s| seconds)(?: \(\d+:\d{2}:\d{2}\))?)?(?: \(.*\))?"
 I2_BEFORE = r"\d+ files? changed \| tests (\d+)/(\d+)\b.*"    # items LOG_CHECK_FROM..TESTS_FORMAT_FROM-1
+# Item 090: the I2 field from TIMED_FROM on: the time is mandatory and stands right after the stats, so a time
+# only inside the ` (<note>)` does not count. The global _TAIL (LOG_FORMAT["I2"]) stays optional.
+I2_TIMED = rf"\d+ files? changed \| tests {_STATS} in \d+\.\d+(?:s| seconds)(?: \(\d+:\d{{2}}:\d{{2}}\))?(?: \(.*\))?"
 # Item 049: items whose log times can't be checked, with why. 048 was built on a branch cut
 # before 045 merged; its six lines were typed by hand with a time after their commit, and the
 # real times are lost. Never add a new item here.
@@ -360,6 +411,9 @@ BATCH_ROUND = 0.005   # item 086: pytest prints seconds with .2f, so the real ti
 # Item 086 (rule D): the send-back verdicts of a log line, as (LOG_FORMAT group, word); read by fullmatch,
 # never a substring (RI-012). R3's verdict is group 2 (group 1 is verified/as-is).
 SEND_BACK = {"R3": (2, "BLOCKED"), "I1": (1, "NOT A FIT"), "I3": (1, "FAIL")}
+# Item 090 (RI-010): LOG BATCH not-computable reasons that are INCOMPLETE for an ID >= TIMED_FROM; compared by
+# equality, never a substring (RI-012). "unreadable" reasons stay 089's (UNREADABLE, exit 1).
+BATCH_STRICT = ("no pytest time in 05/06/I2 line", "no line before I2", "log line with no valid time")
 # Item 086: a pytest summary line as printed, .match on the stripped line (anchored at its start, so a
 # summary inside a test ID such as `FAILED t[1 failed in 58.86s]` is not a run); seconds in group 1.
 SUMMARY_LINE = re.compile(rf"(?:=+ )?(?={_N} )(?:{_STATS}) in (\d+\.\d+)(?:s| seconds)\b")
@@ -371,6 +425,12 @@ WHOLE_DIFF_FROM = 70
 VERDICT_FROM = 71
 RULE_FILE = "scripts/check_pipeline.py"   # item 084: the file whose copy in an anchor commit's tree is read
 VERDICT_LINE = re.compile(r"Verdict:[ \t]*(?:\*\*)?(PASS|FAIL)\b(?![ \t*]*[|/])")   # .match on the line
+# Item 090 (rule D round check): the sender's step file and its verdict line (.match on the first column-0 line
+# outside fences and comments that starts with the label, i.e. the pattern up to its first ":"). The lookahead
+# makes the unfilled template lines (`FIT | FIT WITH CHANGES | NOT A FIT`, `READY | BLOCKED`) no verdict.
+VERDICT_OF = {"R3": ("03", re.compile(r"Status:[ \t]*(?:\*\*)?(READY|BLOCKED)\b(?![ \t*]*[|/])")),
+              "I1": ("04", re.compile(r"Fit verdict:[ \t]*(?:\*\*)?(NOT A FIT|FIT WITH CHANGES|FIT)\b(?![ \t*]*[|/])")),
+              "I3": ("06", VERDICT_LINE)}
 SENT_BACK_LINE = re.compile(r"Sent back to:[ \t]*(I1 I2|I1|I2|none)[ \t]*")         # .fullmatch on the line
 # Item 070: realtest's decision path: ccbot/realtest.py, the ccbot modules it imports and the config
 # files they read by literal path (tests/test_real_data_field.py keeps this list in step).
@@ -421,6 +481,9 @@ LOG_HINT = {
 }
 # Item 076: the I2 hint for items before TESTS_FORMAT_FROM (read through log_hint).
 LOG_HINT_BEFORE = {"I2": ("<n> files changed | tests <pass>/<total> (pass <= total)", "2 files changed | tests 9/9")}
+# Item 090: the I2 hint from TIMED_FROM on (read through log_hint); its example fits I2_TIMED.
+LOG_HINT_TIMED = {"I2": ("<n> files changed | tests <last line of python3 -m pytest -q, as printed, with its ` in <s>s` "
+                         "time>", "2 files changed | tests 9 passed, 1 skipped in 3.21s")}
 LOG_LINE = re.compile(r"^(\d{2}):(\d{2}) \| (R1|R2|R3|I1|I2|I3) \| (\d{3}) \| (.*)$")
 FAST_BY_PERSON = re.compile(r"^Scope:\s*FAST\s*\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*\)", re.M)
 # Older than the Scope/07 rules. Never add a new item here.
@@ -638,24 +701,31 @@ def classify(item_dir, today):
     return "in progress", f"{scope}: next {need[len(have)]}{extra}"
 
 
-def log_fields_ok(agent, item, fields, new_rule=True) -> bool:
+def log_fields_ok(agent, item, fields, new_rule=True, timed=True) -> bool:
     """Item 076: whether a log line's fields fit its agent's format for this item. I2 lines of items
     before TESTS_FORMAT_FROM use I2_BEFORE and need pass <= total; every other line LOG_FORMAT.
     Item 084: new_rule=False (the item's 05 was added under a rule file without TESTS_FORMAT_FROM)
-    applies I2_BEFORE too; write_log never passes it."""
+    applies I2_BEFORE too; write_log never passes it. Item 090: an I2 line of an item from TIMED_FROM on
+    must fullmatch I2_TIMED (the ` in <s>s` time is mandatory); timed=False (its 05 was added under a rule
+    file without TIMED_FROM) applies LOG_FORMAT's optional time instead; write_log never passes it."""
     if agent == "I2" and (int(item) < TESTS_FORMAT_FROM or not new_rule):
         m = re.fullmatch(I2_BEFORE, fields.strip())
         return bool(m) and int(m[1]) <= int(m[2])
+    if agent == "I2" and timed and int(item) >= TIMED_FROM:
+        return bool(re.fullmatch(I2_TIMED, fields.strip()))
     return bool(re.fullmatch(LOG_FORMAT[agent], fields.strip()))
 
 
-def log_hint(agent, item, new_rule=True) -> str:
+def log_hint(agent, item, new_rule=True, timed=True) -> str:
     """Item 076: the plain-words format that applies to this agent and item (LOG_HINT_BEFORE first).
     An ID that is not 3 digits (refused by write_log) gets the current form, never a traceback.
-    Item 084: new_rule=False gives LOG_HINT_BEFORE, as in log_fields_ok."""
+    Item 084: new_rule=False gives LOG_HINT_BEFORE, as in log_fields_ok. Item 090: from TIMED_FROM on
+    (timed, the default) LOG_HINT_TIMED, as in log_fields_ok."""
     if agent in LOG_HINT_BEFORE and re.fullmatch(r"\d{3}", item) and (int(item) < TESTS_FORMAT_FROM
                                                                       or not new_rule):
         return LOG_HINT_BEFORE[agent][0]
+    if agent in LOG_HINT_TIMED and timed and re.fullmatch(r"\d{3}", item) and int(item) >= TIMED_FROM:
+        return LOG_HINT_TIMED[agent][0]
     return LOG_HINT[agent][0]
 
 
@@ -717,9 +787,8 @@ def _anchor_env():
     UNCOMMITTED STEP's ls-tree HEAD (exit 1), so it is never a silent pass."""
     if _git("rev-parse", "--git-dir") is None:
         return "no git", False
-    s = _shallow_boundaries()
-    if s == "unreadable" or (isinstance(s, list) and s):
-        return "shallow clone; run git fetch --unshallow", False
+    if _is_shallow():                                       # item 090: one source with open_branches
+        return SHALLOW_TEXT, False
     head = _git("rev-parse", "--verify", "-q", "HEAD")
     if head is None:
         return "no git", False
@@ -782,7 +851,7 @@ def _suite_lines(text):
             if state == "out" and line.startswith("Suite:")]
 
 
-def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
+def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=None):
     """Item 043: what is missing from a step's own checklist ([] = nothing). Item 084: a TESTS or
     VERDICT check that would fire is dropped only if the item's 05 / 06 was added under a rule file
     without that constant (_rule_seen False) and, for I2, every I2 line passes I2_BEFORE; each such
@@ -791,7 +860,13 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
     `06 not checked (<why>; item 089)` in place of the RI-line, verdict-line and I3-line checks; an
     unreadable log file, for an item with any step file 01-06, is one entry `log lines not checked
     (<whys>; item 089)` in place of the unlogged, format, Suite and I3-line checks; an unreadable 05 at
-    the Suite check is `05 not checked (<why>; item 089)`. Nothing is computed from what is left."""
+    the Suite check is `05 not checked (<why>; item 089)`. Nothing is computed from what is left.
+    Item 090: from TIMED_FROM on, an I2 line with no ` in <s>s` time is INCOMPLETE with the timed hint; when
+    every I2 line of the item passes the untimed form it is gated on 05 by _rule_seen(TIMED_FROM): not seen
+    gives the RULE NOT SEEN pair `judged by untimed I2 form` and no entry. Any other bad I2 line keeps the
+    TESTS gate. batch_nc ({ID: reason}, from batch_log_items' not_computable): a BATCH_STRICT reason (by
+    equality) of an ID from TIMED_FROM on is the entry `LOG BATCH not computable: <reason> (item 090)`, gated
+    the same way (not seen: the pair `LOG BATCH not computable as text only`)."""
     not_seen = [] if not_seen is None else not_seen
     if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
         return []
@@ -814,7 +889,16 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
         bad = sorted({m[3] for m in (LOG_LINE.match(l) for l in text.splitlines())
                       if m and m[4] == item_dir.name and not log_fields_ok(m[3], m[4], m[5])})
         new_rule, note = True, ""
-        if "I2" in bad and int(item_dir.name) >= TESTS_FORMAT_FROM:    # item 084: TESTS gate
+        own_i2 = [m for m in (LOG_LINE.match(l) for l in text.splitlines())
+                  if m and m[3] == "I2" and m[4] == item_dir.name]
+        if "I2" in bad and int(item_dir.name) >= TIMED_FROM \
+                and all(log_fields_ok("I2", m[4], m[5], timed=False) for m in own_i2):   # item 090: TIMED gate
+            seen, sha7 = _rule_seen(item_dir, "05", "TIMED_FROM", env)
+            note = sha7 if seen is None else ""             # a git-failed or no-file note; "" otherwise
+            if seen is False:
+                bad.remove("I2")
+                not_seen.append((item_dir.name, "05", sha7, "TIMED_FROM", "090", "untimed I2 form"))
+        elif "I2" in bad and int(item_dir.name) >= TESTS_FORMAT_FROM:    # item 084: TESTS gate
             seen, sha7 = _rule_seen(item_dir, "05", "TESTS_FORMAT_FROM", env)
             note = sha7 if seen is None else ""             # a git-failed or no-file note; "" otherwise
             if seen is False:
@@ -829,10 +913,20 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None):
             missing.append(f"log line for {' '.join(bad)} does not match its format (item 045): {wants}")
         if note:
             missing.append(note)
+    nc = (batch_nc or {}).get(item_dir.name)
+    if nc in BATCH_STRICT and int(item_dir.name) >= TIMED_FROM:   # item 090 step 2: equality, never a substring
+        seen, sha7 = _rule_seen(item_dir, "05", "TIMED_FROM", env)
+        if seen is False:
+            not_seen.append((item_dir.name, "05", sha7, "TIMED_FROM", "090", "LOG BATCH not computable as text only"))
+        else:
+            missing += [f"LOG BATCH not computable: {nc} (item 090)"] + \
+                ([sha7] if seen is None and sha7 and sha7 not in missing else [])   # the same 05 note once
     report = item_dir / STEPS["05"]
     if int(item_dir.name) >= SUITE_FROM and report.exists() and not log_whys:   # item 082: Suite = last I2 field
         last = _last_log_line(logs, "I2", item_dir.name)
-        if last is not None and log_fields_ok("I2", item_dir.name, last[5]):   # else 043/045 report it
+        # else 043/045 report it; item 090: timed=False, so an untimed field still gets its Suite check (a
+        # RULE NOT SEEN TIMED_FROM item has no format entry, and a seen one has both entries)
+        if last is not None and log_fields_ok("I2", item_dir.name, last[5], timed=False):
             field = last[5].strip().split(" | tests ", 1)[1]
             body, why05 = _read(report)
             suites = _suite_lines(body) if why05 is None else []
@@ -907,11 +1001,83 @@ def _sent_back(item, logs=Path("logs")):
     return any(r.upper() == "FAIL" for r in results)
 
 
+def _first_verdict(path, agent):
+    """Item 090 (RI-012): (word, None) from the first column-0 line outside code fences and HTML comments
+    (_md_lines "out") of `path` that starts with agent's label (VERDICT_OF), matched by its pattern; never a
+    later line, never a substring. (None, "absent") with no file, (None, "<file> unreadable") when _read
+    can't read it, (None, "no readable <label> line") when that line is missing or holds no verdict word
+    (e.g. the unfilled template line)."""
+    rx = VERDICT_OF[agent][1]
+    label = rx.pattern[:rx.pattern.index(":") + 1]
+    if not path.exists():
+        return None, "absent"
+    text, why = _read(path)
+    if why:
+        return None, why
+    line = next((l for l, state in _md_lines(text)[0] if state == "out" and l.startswith(label)), None)
+    m = rx.match(line) if line is not None else None
+    return (m[1], None) if m else (None, f"no readable {label} line")
+
+
+def _round_refusal(item, agent, logs=Path("logs")):
+    """Item 090 (rule D after a send-back, RI-010): why `--log <agent> <item>` is refused for an item that
+    was sent back (_sent_back), or None. The item's log lines (_item_lines, sorted by stamp, file, line):
+    (a) L = the latest send-back line (SEND_BACK fullmatch), by S; while no later S line exists the round is
+    open, and a step after S is refused (S must log again first). (b) In that open round a step before S
+    is refused when S's file (VERDICT_OF, _first_verdict) no longer shows the send-back word, or is
+    absent, unreadable or has no readable verdict line: S ran again before this line. (c) start = the latest
+    send-back or terminal line (I3 PASS; R3 READY for RESEARCH ONLY, Scope from request.md), else the item's
+    first line; a line after start with a later step than <agent> is refused (steps in order). An
+    unreadable log file or request.md, or a line with no valid time, refuses (order not checked), never a
+    pass."""
+    lines, unreadable = _item_lines(logs)
+    if unreadable:
+        return f"{'; '.join(unreadable)}; order not checked (item 090)"
+    if any(r[0] is None for r in lines.get(item, [])):
+        return f"work/{item} has a log line with no valid time; order not checked (item 090)"
+    rows = sorted(lines.get(item, []), key=lambda r: (r[0], r[3], r[4]))
+    step = {a: s for s, a in AGENT.items()}
+
+    def word(r, group):
+        v = re.fullmatch(LOG_FORMAT[r[1]], r[5].strip())
+        return v[group] if v else None
+
+    sends = [k for k, r in enumerate(rows) if r[1] in SEND_BACK and word(r, SEND_BACK[r[1]][0]) == SEND_BACK[r[1]][1]]
+    if sends:
+        last = rows[sends[-1]]
+        sender = last[1]
+        if not any(r[1] == sender for r in rows[sends[-1] + 1:]):           # the round is open
+            if step[agent] > step[sender]:                                  # (a)
+                return (f"{sender} sent work/{item} back at {last[0]:%Y-%m-%d %H:%M} and has not logged again; "
+                        f"{sender} runs before {agent} (item 090)")
+            if step[agent] < step[sender]:                                  # (b)
+                code, _ = VERDICT_OF[sender]
+                found, why = _first_verdict(Path("work") / item / STEPS[code], sender)
+                want = SEND_BACK[sender][1]
+                if why or found != want:
+                    return (f"work/{item}/{STEPS[code]} no longer says {want} ({found or why}); {sender} ran again "
+                            f"before this line: log each step before the next one runs (item 090)")
+    req_text, why = _read(Path("work") / item / "request.md")               # item 089's reader
+    if why:                                                                 # Scope unknown: never a default
+        return f"{why}; order not checked (item 090)"
+    research_only = parse_request(req_text)[0] == "RESEARCH ONLY"
+    terminal = ("R3", 2, "READY") if research_only else ("I3", 1, "PASS")
+    marks = [k for k, r in enumerate(rows) if k in sends or (r[1] == terminal[0] and word(r, terminal[1]) == terminal[2])]
+    start = marks[-1] if marks else 0
+    after = [r for r in rows[start + 1:] if step[r[1]] > step[agent]]       # (c)
+    if rows and after:
+        first = rows[start]
+        return (f"{after[0][1]} already logged at {after[0][0]:%H:%M} after {first[1]} {first[0]:%H:%M}; "
+                f"log steps in order (item 090)")
+    return None
+
+
 def write_log(agent, item, fields, now=None):
     """Item 045: append `HH:MM | agent | ID | fields` (UTC) to today's research or implementation
     log. Exit code 2 and nothing written when the agent, ID or fields are not in the format.
     Item 086 (rule D): also refused while a later step file 01-06 of the item exists (07 and other
-    files never count), unless the item was sent back (_sent_back)."""
+    files never count), unless the item was sent back (_sent_back). Item 090: a sent-back item is checked
+    by _round_refusal instead (open round, sender's verdict, step order)."""
     if agent not in LOG_FORMAT or not re.fullmatch(r"\d{3}", item) \
             or not log_fields_ok(agent, item, fields):   # order matters: the ID check runs before int(item)
         print(f"--log refused: {agent} | {item} | {fields} does not match "
@@ -923,10 +1089,16 @@ def write_log(agent, item, fields, now=None):
         return 2
     step = next(s for s, a in AGENT.items() if a == agent)
     later = [STEPS[s] for s in sorted(AGENT) if s > step and (Path("work") / item / STEPS[s]).exists()]
-    if later and not _sent_back(item):
+    sent = _sent_back(item)
+    if later and not sent:
         print(f"--log refused: work/{item}/ already has {' '.join(later)} after {agent}'s step; write this "
               f"line before the later steps run, then redo those steps (item 086)", file=sys.stderr)
         return 2
+    elif sent:                                              # item 090: the round rule replaces "D off"
+        why = _round_refusal(item, agent)
+        if why:
+            print(f"--log refused: {why}", file=sys.stderr)
+            return 2
     now = now or dt.datetime.now(dt.timezone.utc)
     team = "research" if agent[0] == "R" else "implementation"
     log = Path("logs") / team / f"{now:%Y-%m-%d}.md"
@@ -954,13 +1126,17 @@ def orphan_log_lines():
     return orphans, whys
 
 
-def late_log_lines():
+def late_log_lines(shallow=False):
     """Item 045: committed log lines (items from LOG_CHECK_FROM on) timed after the commit that
     added them, by `git blame`. None when git is not available here. Item 081: a log file not in
     HEAD's tree (`git ls-tree`) is uncommitted and skipped; a failed ls-tree is the one entry
-    `git ls-tree HEAD failed (item 081)`, and a failed blame of a committed file is an entry."""
+    `git ls-tree HEAD failed (item 081)`, and a failed blame of a committed file is an entry.
+    Item 090 (RI-014): False (falsy, not None) in a shallow clone, where blame gives the boundary's
+    commit to older lines: main prints `LOG TIME: not checked (SHALLOW_TEXT)`, exit unchanged."""
     if _git("rev-parse", "HEAD") is None:
         return None
+    if shallow:
+        return False
     tree, why = _git_ok("ls-tree", "-r", "--name-only", "HEAD", "--", "logs/research/", "logs/implementation/")
     if why:
         return ["git ls-tree HEAD failed (item 081)"]
@@ -1056,6 +1232,12 @@ def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
     No I2 line: skipped. No I3 line after the last I2 line: in_progress (a round is open). No line
     before the first I2, no time at all (k = 0), an unreadable 05/06/log file or a line with no valid
     time: not_computable with the reason, never flagged and never read as 0 s.
+    Item 090 (per-round bound): before the in-progress skip, every I2 line whose tests part is a
+    SUMMARY_LINE with time t is checked against prev = the item's latest line before it (the same order
+    rule as start), Δ = whole minutes prev -> I2: flagged when t - BATCH_ROUND >= (Δ+1)*60, since I2 runs
+    the suite after prev's line and before its own. An I2 line with no prev is not evaluated (the whole-item
+    rule's "no line before I2" covers it). It only catches rounds whose run is longer than the gap allows:
+    with today's 74-93 s runs, same-minute (Δ0) batches; Δ >= 1 batches pass it.
     Returns {flagged, flagged_ids, excepted, not_computable, checked, in_progress}."""
     excepted = LOG_BATCH_EXCEPT if excepted is None else excepted
     order = lambda r: (r[0], r[3], r[4])                    # stamp, then file and line order
@@ -1078,6 +1260,25 @@ def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
             out["checked"] += 1
             out["not_computable"].append((item, "log line with no valid time"))
             continue
+        if item not in excepted:                            # item 090: per-round bound, before the in-progress skip
+            for r in sorted(i2, key=order):
+                m = re.match(r"\d+ files? changed \| tests (.*)", r[5].strip())
+                s = SUMMARY_LINE.match(m[1]) if m else None
+                if not s:
+                    continue                                # no time: not evaluated (never read as 0 s)
+                prev = [x for x in rows if x is not r
+                        and (x[0] <= r[0] if x[2] == "research" else order(x) < order(r))]
+                if not prev:
+                    continue
+                p = max(prev, key=order)
+                t, gap = float(s[1]), int((r[0] - p[0]).total_seconds()) // 60
+                limit = (gap + 1) * 60
+                if round(t - BATCH_ROUND, 3) >= limit:
+                    if item not in out["flagged_ids"]:
+                        out["flagged_ids"].append(item)
+                    out["flagged"].append(f"{item} I2 at {r[0]:%Y-%m-%d %H:%M} ({t:.2f} s pytest run after the "
+                                          f"{p[1]} line at {p[0]:%H:%M}, limit {limit} s; impossible under the "
+                                          f"run-item order, item 090)")
         first, last_i2 = min(i2, key=order), max(i2, key=order)
         i3 = [r for r in rows if r[1] == "I3"]
         end = max(i3, key=order) if i3 else None
@@ -1113,7 +1314,8 @@ def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
             continue
         total, limit = sum(known), (delta + 1) * 60
         if round(total - BATCH_ROUND * len(known), 3) >= limit:   # values have 2 decimals: round off float noise
-            out["flagged_ids"].append(item)
+            if item not in out["flagged_ids"]:              # item 090: a round may have flagged it already
+                out["flagged_ids"].append(item)
             out["flagged"].append(f"{item} ({total:.2f} s of pytest runs between {start[0]:%Y-%m-%d %H:%M} and "
                                   f"{end[0]:%H:%M} UTC, limit {limit} s; impossible under the run-item order, "
                                   f"item 086)")
@@ -1149,24 +1351,30 @@ def _git_ok(*args):
     return out[0], None
 
 
-def open_branches(today=None):
+def open_branches(today=None, shallow=None):
     """One dict per remote branch not merged into HEAD (items 034, 037, 038, 039): ref, items
     {item: set of step codes}, conflicts, recurring, clashes, skipped [(item, detail)],
     failed [(item, status, detail)] (item 077: I3 FAIL or A1 FAIL, never an item in skipped), last,
     errors [why] (item 081: a git read of this branch that failed; BRANCH ERROR), unrelated (item
     081 r2: True when merge-base --all exits 1; such a ref is not scanned, and its errors say whether
     it holds checked paths). None without git; the reason string when `git branch` itself fails
-    (item 081), never []."""
+    (item 081), never []. Item 090 (RI-014): shallow (None = _is_shallow(), so check_handoff's call with
+    no args computes it): main_ahead is not called (behind False), origin/main itself is skipped (its tip
+    looks unreachable from a shallow HEAD), every dict has "shallow", and an unrelated ref with checked
+    paths gets the shallow-clone error text."""
     out, why = _git_ok("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
     if why == "no git":
         return None
     if why:
         return why
     today = today or dt.datetime.now(dt.timezone.utc).date()
-    behind = isinstance(a := main_ahead(), int) and a > 0
+    shallow = _is_shallow() if shallow is None else shallow
+    behind = not shallow and isinstance(a := main_ahead(), int) and a > 0
     found = []
     for ref in out.split():
         if ref.endswith("/HEAD") or "/" not in ref:
+            continue
+        if shallow and ref == MAIN:                         # item 090: MAIN AHEAD says not checked
             continue
         # HEAD is behind main: main and refs already in main are not open work (item 051)
         if behind and (ref == MAIN or _git("merge-base", "--is-ancestor", ref, MAIN)[1] == 0):
@@ -1179,11 +1387,13 @@ def open_branches(today=None):
                                 *RULE_PATHS, *RESEARCH_CODE_PATHS)
             held = held.splitlines() if why is None else []
             errors = ([why] if why else
-                      [f"no common history with HEAD; {len(held)} file(s) on checked paths "
+                      [f"shallow clone; {len(held)} file(s) on checked paths (first: {held[0]}) not checked; "
+                       f"run git fetch --unshallow (item 090)" if shallow else
+                       f"no common history with HEAD; {len(held)} file(s) on checked paths "
                        f"(first: {held[0]}) not checked (item 081)"] if held else [])
             found.append({"ref": ref, "items": {}, "conflicts": None, "recurring": False, "clashes": [],
                           "skipped": [], "failed": [], "last": last, "rules": [], "errors": errors,
-                          "unrelated": True})
+                          "unrelated": True, "shallow": shallow})
             continue
         merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
         conflicts = None
@@ -1274,7 +1484,7 @@ def open_branches(today=None):
         found.append({"ref": ref, "items": items, "conflicts": conflicts,
                       "recurring": recurring, "clashes": clashes,
                       "skipped": skipped, "failed": failed, "last": last, "rules": rules,
-                      "errors": errors, "unrelated": False})
+                      "errors": errors, "unrelated": False, "shallow": shallow})
     return found
 
 
@@ -1320,6 +1530,14 @@ def _shallow_boundaries():
     if any(SHALLOW_LINE.fullmatch(line) is None for line in lines):
         return "unreadable"
     return list(dict.fromkeys(lines))
+
+
+def _is_shallow():
+    """Item 090 (RI-014): True when _shallow_boundaries (079) gives "unreadable" or a non-empty list of
+    boundaries, so a shallow file git or _read can't read counts as shallow (strict); "full" and an empty
+    file are False. The one test behind _anchor_env's SHALLOW_TEXT and open_branches' default."""
+    s = _shallow_boundaries()
+    return s == "unreadable" or (isinstance(s, list) and bool(s))
 
 
 def _walk(cutoff):
@@ -1545,12 +1763,17 @@ def real_data_field(cutoff=UNTRACKED_FROM, walked=None):
 
 
 MAIN = "origin/main"
+# Item 090 (RI-014): the one text for every check that is not run in a shallow clone (_anchor_env's env; main
+# compares by equality, so "no git", "unborn HEAD" or a verify failure never switch those checks off).
+SHALLOW_TEXT = "shallow clone; run git fetch --unshallow"
 
 
-def main_ahead():
+def main_ahead(shallow=False):
     """Commits on origin/main that HEAD lacks (item 051): an int, 0 when there is no
     refs/remotes/origin/main (exact refname, so origin/main/x is not it) or no git; or, item 081,
-    the error string `<why> (item 081)` when the lookup or the count fails, never 0."""
+    the error string `<why> (item 081)` when the lookup or the count fails, never 0. Item 090
+    (RI-014): None in a shallow clone when the ref exists (a shallow HEAD..main count can be false):
+    main prints `MAIN AHEAD: not checked (SHALLOW_TEXT)`, exit unchanged."""
     refs, why = _git_ok("for-each-ref", "--format=%(refname) %(objectname)", f"refs/remotes/{MAIN}")
     if why == "no git":
         return 0
@@ -1560,6 +1783,8 @@ def main_ahead():
                 if len(p) == 2 and p[0] == f"refs/remotes/{MAIN}"), None)
     if sha is None:
         return 0
+    if shallow:
+        return None
     n, why = _git_ok("rev-list", "--count", f"HEAD..{sha}")
     if why == "no git":
         return 0
@@ -1669,15 +1894,18 @@ def main(argv):
         rest = rest[2:]
     work = Path("work")
     skipped, stuck, awaiting, in_pr, failed, i3_failed, unfinished = [], [], [], [], [], [], []
-    branches = open_branches(today)
+    (env, env_failed), not_seen = _anchor_env(), []         # items 084, 088: computed once
+    shallow = env == SHALLOW_TEXT                           # item 090: before open_branches; equality only
+    branches = open_branches(today, shallow)
     blist = branches if isinstance(branches, list) else []  # item 081: None (no git) or a git error
     walked = _walk(cutoff) if _git("rev-parse", "HEAD") is not None else None
-    (env, env_failed), not_seen = _anchor_env(), []         # items 084, 088: computed once
     untracked = untracked_changes(cutoff, walked)
     research = research_code(cutoff, walked)
     real = real_data_field(cutoff, walked)                  # item 070
     uncommitted = uncommitted_steps()                       # item 077
     flagged = research[1] if research else {}
+    batch = batch_log_items()                               # item 086: no git, same text with or without it
+    batch_nc = {i: r for i, r in batch["not_computable"]}   # item 090: read by INCOMPLETE (step 2)
     listed = sorted(p for p in work.iterdir() if (p / "request.md").exists())
     for d in listed:
         status, detail = classify(d, today)
@@ -1703,7 +1931,7 @@ def main(argv):
             failed.append(d.name)
         if status == "I3 FAIL":
             i3_failed.append(d.name)
-        gaps = incomplete(d, env=env, not_seen=not_seen) + (real[1].get(d.name, []) if real else [])
+        gaps = incomplete(d, env=env, not_seen=not_seen, batch_nc=batch_nc) + (real[1].get(d.name, []) if real else [])
         if gaps:
             unfinished.append(f"{d.name} ({'; '.join(gaps)})")
     for item in sorted(set(flagged) - {d.name for d in listed}):   # item 062: no request.md here
@@ -1713,8 +1941,10 @@ def main(argv):
     print(f"AWAITING A1: {', '.join(awaiting) or 'none'}")
     unread = "not checked (see OPEN BRANCHES)" if isinstance(branches, str) else None
     print(f"IN PR: {unread or ', '.join(in_pr) or 'none'}")
-    ahead = main_ahead()
-    if isinstance(ahead, str):                              # item 081: the lookup failed, exit 1
+    ahead = main_ahead(shallow)
+    if ahead is None:                                       # item 090: shallow clone, exit unchanged
+        print(f"MAIN AHEAD: not checked ({SHALLOW_TEXT})")
+    elif isinstance(ahead, str):                            # item 081: the lookup failed, exit 1
         print(f"MAIN AHEAD: {ahead}")
     elif ahead > 0:
         print(f"MAIN AHEAD: {MAIN} has {ahead} commits not in HEAD; merge it before building (item 051)")
@@ -1726,6 +1956,9 @@ def main(argv):
         print("OPEN BRANCHES (not merged into HEAD):")
         for b in branches:
             age = f"; last commit {b['last']} ({(today - b['last']).days} days)" if b["last"] else ""
+            if b.get("unrelated") and b.get("shallow"):     # item 090: no merge base in the shallow view
+                print(f"  {b['ref']}: not checked ({SHALLOW_TEXT}){age}")
+                continue
             if b.get("unrelated"):                          # item 081 r2: not scanned
                 print(f"  {b['ref']}: no common history with HEAD; not scanned (item 081){age}")
                 continue
@@ -1756,12 +1989,14 @@ def main(argv):
         by_id.setdefault(item, []).append(f"{step} added in {sha7} without {const} ({rule}): judged by {old}")
     seen_text = ", ".join(f"{i} ({'; '.join(p)}; item 084)" for i, p in by_id.items())
     print(f"RULE NOT SEEN: {f'not checked ({env})' if env else seen_text or 'none'}")
-    late = late_log_lines()
+    late = late_log_lines(shallow)
     excepted = "; ".join(f"{i}: {why}" for i, why in sorted(LOG_TIME_EXCEPT.items())
                          if (work / i / "request.md").exists())
     excepted = f" (not checked: {excepted})" if excepted and late is not None else ""
-    print(f"LOG TIME: {'not checked (no git)' if late is None else (', '.join(late) or 'none') + excepted}")
-    batch = batch_log_items()                               # item 086: no git, same text with or without it
+    if late is False:                                       # item 090: shallow clone, exit unchanged
+        print(f"LOG TIME: not checked ({SHALLOW_TEXT})")
+    else:
+        print(f"LOG TIME: {'not checked (no git)' if late is None else (', '.join(late) or 'none') + excepted}")
     batch_text = "; ".join(batch["flagged"]) or "none"
     if batch["excepted"]:
         batch_text += f" (not checked: {'; '.join(f'{i}: {why}' for i, why in batch['excepted'])})"
