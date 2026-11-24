@@ -32,6 +32,19 @@ starting with `?` or `:`, a tab after `-` or `key:`, a quote or apostrophe
 inside a plain scalar inside a flow collection (`[it's]`), valid multi-line
 flow collections, and block-scalar content lines that start with one of
 these characters.
+
+Item 096: a column-0 frontmatter line must be blank, a `#` comment, a `key:`
+(followed by a space, a tab or the end of the line; the key does not start
+with a YAML indicator, except `-` followed by a non-space), or a `- ` item
+directly after a column-0 empty-valued key or another column-0 item. Blank
+and comment lines (at any indent) are skipped. `tools:` and
+`disallowedTools:` lines are left to `_field`. Anything else is an error.
+This says nothing about what Claude Code does with such a file. Known
+fail-closed false errors: a key with an inner colon not followed by a space
+(`a:b: c`). Also rejected (YAML's reading not checked): a column-0 item after
+an empty-valued key that carries a comment (`hooks: # c`); a column-0 item
+after the indented content of an earlier column-0 item; text split by
+`str.splitlines()` at \x0b, \x0c, \x1c, \x1d, \x1e, \x85, U+2028 or U+2029.
 """
 import re
 
@@ -44,6 +57,7 @@ NO_SHELL_ALLOWED = {"Read", "Write", "Glob", "Grep", "WebSearch", "WebFetch"}
 ENTRY_RE = re.compile(r"[A-Za-z]+(\([^()]*\))?")
 VALUE_START_RE = re.compile(r"""[ ]*(?:-[ \t]+)*(?:[^\s"'#&!*\[{?:][^:]*:[ \t]+)?(\S)""")
 DOC_MARKER_RE = re.compile(r"(?:---|\.\.\.)(?:[ \t]|$)")
+KEY_RE = re.compile(r"""(?:[^\s"'#&!*\[\]{},|>%@`?:-]|-(?=\S))[^:]*:(?=[ \t]|$)""")
 FLOW_KEYS = ("tools:", "disallowedTools:")
 AFTER_CLOSE_RE = re.compile(r"( +#.*)? *")
 
@@ -168,7 +182,8 @@ def _flow_end(line, start):
 
 
 def _frontmatter_error(front):
-    """Return the first frontmatter line the test cannot read on its own (items 080, 087)."""
+    """Return the first frontmatter line the test cannot read on its own (items 080, 087, 096)."""
+    prev_open = False
     for i, line in enumerate(front):
         n = i + 2
         if DOC_MARKER_RE.match(line):
@@ -195,6 +210,16 @@ def _frontmatter_error(front):
                     return FLOW_OPEN.format(n)
                 if not AFTER_CLOSE_RE.fullmatch(line[end:]):
                     return FLOW_AFTER.format(n)
+        if line[:1] not in ("", " ", "\t", "#") and not line.startswith(FLOW_KEYS):
+            if _is_item(line):
+                if not prev_open:
+                    return NO_KEY.format(n)
+            elif not KEY_RE.match(line):
+                return NO_KEY.format(n)
+        t = line.strip()
+        if t and not t.startswith("#"):
+            k = KEY_RE.match(line)
+            prev_open = line[0] != " " and (_is_item(line) or bool(k and not line[k.end():].strip()))
     return None
 
 
@@ -267,6 +292,7 @@ FLOW_OPEN = "unclosed flow collection on frontmatter line {} (item 087)"
 FLOW_AFTER = "text after closing bracket on frontmatter line {} (item 087)"
 TAB_BEFORE = "tab before the value on frontmatter line {} (item 087)"
 DOC = "document marker on frontmatter line {} (item 087)"
+NO_KEY = "no key on frontmatter line {} (item 096)"
 TOOLS = "tools: Read, Write"
 
 CASES = {
@@ -401,8 +427,21 @@ CASES = {
     "q27_doc_end_marker": (_fm("name: x", "...", TOOLS), None, DOC.format(3)),
     "q28_doc_start_marker": (_fm("name: x", "--- # c", TOOLS), None, DOC.format(3)),
     "q29_mid_value_markers": (_fm("description: Wait... then --- more", TOOLS), {"Read", "Write"}, None),
-    "q30_marker_prefix_text": (_fm("name: x", "...x", "---x", TOOLS), {"Read", "Write"}, None),
+    "q30_marker_prefix_text": (_fm("name: x", "...x: y", "---x: z", TOOLS), {"Read", "Write"}, None),
     "q31_mid_value_bracket": (_fm("description: see [a and {b", TOOLS), {"Read", "Write"}, None),
+    "nk1_plain_word": (_fm("name: x", "foo", TOOLS), None, NO_KEY.format(3)),
+    "nk2_plain_word_last": (_fm("name: x", TOOLS, "foo"), None, NO_KEY.format(4)),
+    "nk3_item_after_scalar": (_fm("name: x", "- a", "tools: Read"), None, NO_KEY.format(3)),
+    "nk4_map_item_after_scalar": (_fm("name: x", "- a: b", TOOLS), None, NO_KEY.format(3)),
+    "nk5_indicator_key": (_fm("name: x", "%x: y", TOOLS), None, NO_KEY.format(3)),
+    "nk6_tools_col0_list": (_fm("name: x", "tools:", "- Read", "- Write"), {"Read", "Write"}, None),
+    "nk7_item_after_empty_key": (_fm("description:", "- a", TOOLS), {"Read", "Write"}, None),
+    "nk8_item_after_nested_map": (_fm("hooks:", "  a: b", "- c", TOOLS), None, NO_KEY.format(4)),
+    "nk9_tools_blank_then_item": (_fm("tools:", "", "- Read"), None,
+                                  "blank or comment line inside tools: list (item 075)"),
+    "nk10_inner_colon_key": (_fm("a:b: c", TOOLS), None, NO_KEY.format(2)),
+    "nk11_item_first_line": (_fm("- a", TOOLS), None, NO_KEY.format(2)),
+    "nk12_indented_comment_then_item": (_fm("hooks:", "  # c", "- a", TOOLS), {"Read", "Write"}, None),
 }
 
 
@@ -455,6 +494,8 @@ TREE = {
                                NO_SHELL - {"r1-researcher"}),
     "n11_open_flow": ({"r1-researcher": f"---\ndescription: [a,\ntools: {SIX}\n]\n---\n"},
                       None, [f"{R1}: {FLOW_OPEN.format(2)}"], NO_SHELL - {"r1-researcher"}),
+    "n12_no_key_line": ({"r1-researcher": f"---\nfoo\ntools: {SIX}\n---\n"}, None,
+                        [f"{R1}: {NO_KEY.format(2)}"], NO_SHELL - {"r1-researcher"}),
 }
 
 
