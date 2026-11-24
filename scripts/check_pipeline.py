@@ -354,7 +354,7 @@ without <CONST> (<rule item>): judged by <old rule>; item 084)`, or `none`; the 
 unchanged. No git or a shallow clone (079's _shallow_boundaries) prints `RULE NOT SEEN: not checked
 (no git)` / `not checked (shallow clone; run git fetch --unshallow)` and keeps the numeric cutoffs.
 Item 095 (RI-014): in a shallow clone the anchor can't be read, so an entry a gate (TIMED, TESTS when every
-own I2 line passes I2_BEFORE, LOG BATCH not computable, Suite, round headings, verdict) would give for a step
+own I2 line passes I2_BEFORE, LOG BATCH not computable, Suite, round headings, Scratch dir, verdict) would give for a step
 file committed at HEAD is printed on `INCOMPLETE NOT CHECKED: <ID> (<entry>; <entry>), ...; rule seen not
 checked (shallow clone; run git fetch --unshallow; item 095)` (or `INCOMPLETE NOT CHECKED: none`; the line
 is printed only when shallow), not on INCOMPLETE; the exit is 1 for a non-empty list (fail closed). Only the
@@ -371,7 +371,7 @@ scripts/check_pipeline.py (item 084)`) keeps them and adds that entry (exit 1). 
 cutoff make no git call. Cost (item 088): HEAD is read once per run (+1 wrapper call); a full pair
 is 3 wrapper calls (log, ls-tree, show) = 6 git processes (each _git also runs rev-parse
 --show-toplevel); early exits make 0, 1 or 2; at most 3 pairs per item (05 TESTS, 05 SUITE, 06
-VERDICT), 5 from ROUND_HEADING_FROM on (05 and 06 ROUND_HEADING, item 091; a pair runs only when a check fires). Before 088 a full pair was 4 calls = 8 processes. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
+VERDICT), 5 from ROUND_HEADING_FROM on (05 and 06 ROUND_HEADING, item 091), 7 from SCRATCH_FROM on (05 and 06 SCRATCH_FROM, item 097; a pair runs only when a check fires). Before 088 a full pair was 4 calls = 8 processes. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
 items today); the 06 verdict vs last I3 line cross-check stays at CHECKLIST_FROM by decision;
 CHECKLIST_FROM, LOG_CHECK_FROM and their checks stay numeric; --log (write_log) stays numeric, so a
 new log line is never judged by an old rule. The constant counts only at the start of a line, so a
@@ -406,7 +406,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 STEPS = {"01": "01-research.md", "02": "02-improvements.md", "03": "03-handoff.md",
          "04": "04-build-plan.md", "05": "05-build-report.md", "06": "06-verification.md",
@@ -438,6 +438,14 @@ TIMED_FROM = 90
 # Item 091 (RI-010): from this ID on, a 05/06 run heading that LOG BATCH does not read is INCOMPLETE; the 8th
 # `*_FROM` cutoff, a numeric floor above every item open on 2026-11-21 (work/ ends at 091).
 ROUND_HEADING_FROM = 92
+# Item 097 (RI-010): from this ID on, 05 and 06 each name their scratch dir on a column-0 `Scratch dir:` line
+# (scratch_dir_problems); the 9th `*_FROM` cutoff, a numeric floor above every item with a 05 or 06 on
+# 2026-11-24 (0 of work/092-098 at >= 097 had one).
+SCRATCH_FROM = 97
+# Item 097: the basename mkdtemp makes with prefix `<agent>-<ID>-r<round>-` (agent i2 for 05, i3 for 06): 8 chars
+# of `abcdefghijklmnopqrstuvwxyz0123456789_` (CPython Lib/tempfile.py _RandomNameSequence). Used with .fullmatch.
+SCRATCH_NAME = re.compile(r"(i2|i3)-(\d{3})-r\d+-[a-z0-9_]{8}")
+SCRATCH_AGENT = {"05": "i2", "06": "i3"}
 # Item 076: the parts of pytest's summary line, in KNOWN_TYPES order (pytest main/9.0.x terminal.py),
 # each at most once. "deselected" left out on purpose: a full-suite run has none.
 _N = r"[1-9]\d*"
@@ -933,6 +941,28 @@ def _suite_lines(text):
             if state == "out" and line.startswith("Suite:")]
 
 
+def scratch_dir_problems(text, step, item):
+    """Item 097 (RI-010): the entries for the column-0 `Scratch dir:` lines of a 05/06 text outside code fences
+    and HTML comments (_md_lines "out" rows, as _suite_lines), [] when every line is good. A line is good when
+    its value (all text after `Scratch dir:`, stripped) is `none (<non-blank reason>)`, or an absolute path
+    whose basename (one trailing `/` stripped) fullmatches SCRATCH_NAME with the step's agent (i2 for 05, i3
+    for 06) and this item's ID. Only the basename is read: the parent dir is the harness's `<absolute
+    scratchpad path>`, whose name is not fixed. No line at all is one entry."""
+    values = [line[len("Scratch dir:"):].strip() for line, state in _md_lines(text)[0]
+              if state == "out" and line.startswith("Scratch dir:")]
+    if not values:
+        return [f"{step} has no Scratch dir: line (item 097)"]
+    bad = []
+    for v in values:
+        none = re.fullmatch(r"none \((.*)\)", v)
+        if none and none[1].strip():
+            continue
+        m = SCRATCH_NAME.fullmatch(PurePosixPath(v[:-1] if v.endswith("/") else v).name)
+        if not (PurePosixPath(v).is_absolute() and m and m[1] == SCRATCH_AGENT[step] and m[2] == item):
+            bad.append(f"{step} Scratch dir '{v}' is not the mkdtemp form (item 097)")
+    return bad
+
+
 def _unsure(item_dir, step, env, committed):
     """Item 095 (RI-014): True when a gated entry on `step` can't be judged: the clone is shallow
     (env == SHALLOW_TEXT, equality only; no git, unborn HEAD and a failed verify stay strict) and the
@@ -970,12 +1000,15 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
     the same way (not seen: the pair `LOG BATCH not computable as text only`). Item 091: from ROUND_HEADING_FROM
     on, stray_run_headings of 05 and 06 is one entry per file, gated on that file by _rule_seen(ROUND_HEADING_FROM)
     (not seen: the pair `no round-heading check`); an unreadable file is `<step> round headings not checked`.
+    Item 097: from SCRATCH_FROM on, each existing 05 and 06 gives scratch_dir_problems' entries, gated on that
+    file by _rule_seen(SCRATCH_FROM) (not seen: the pair `no Scratch dir check`); an unreadable file is
+    `<step> scratch dir not checked (<why>; item 097)`; an absent file gives none (classify reports it).
     Item 095 (RI-014): `unchecked` is a list of (ID, entry), like not_seen. Where a gate's anchor is not read
     and _unsure(item_dir, step, env, committed) is True (a shallow clone, the step file committed at HEAD or
     HEAD's tree unreadable), the entry goes to `unchecked` instead of the return value: the TIMED entry; the
     TESTS entry only when every own I2 line passes I2_BEFORE (else it is exact and stays); only I2 moves out
-    of a format entry, other agents stay; LOG BATCH not computable; Suite; round headings (05 and 06); the
-    verdict checks. With `unchecked` None (no caller collects it) nothing moves: strict, never dropped."""
+    of a format entry, other agents stay; LOG BATCH not computable; Suite; round headings (05 and 06); Scratch
+    dir (05 and 06, item 097); the verdict checks. With `unchecked` None (no caller collects it) nothing moves: strict, never dropped."""
     not_seen = [] if not_seen is None else not_seen
 
     def unsure(step):                                       # item 095: only when a caller collects them
@@ -1088,6 +1121,24 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
                     unchecked.append((item_dir.name, fired))
                 else:
                     missing += [fired] + ([sha7] if seen is None and sha7 else [])
+    if int(item_dir.name) >= SCRATCH_FROM:                  # item 097: the scratch dir each build/verify step used
+        for step in ("05", "06"):
+            path = item_dir / STEPS[step]
+            if not path.exists():                           # classify reports a missing step file
+                continue
+            body, why = _read(path)
+            if why:
+                missing.append(f"{step} scratch dir not checked ({why}; item 097)")
+                continue
+            problems = scratch_dir_problems(body, step, item_dir.name)
+            if problems:
+                seen, sha7 = _rule_seen(item_dir, step, "SCRATCH_FROM", env)   # item 084 gate
+                if seen is False:                           # below SCRATCH_FROM there is no such check
+                    not_seen.append((item_dir.name, step, sha7, "SCRATCH_FROM", "097", "no Scratch dir check"))
+                elif unsure(step):    # item 095
+                    unchecked += [(item_dir.name, f) for f in problems]
+                else:
+                    missing += problems + ([sha7] if seen is None and sha7 else [])
     if ver_text is not None:                                # item 071 (a)-(d); item 089: 06 was read
         verdict, target = _i3_verdict_text(ver_text)
         if int(item_dir.name) >= VERDICT_FROM:

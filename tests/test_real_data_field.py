@@ -7,7 +7,7 @@ import sys
 import pytest
 
 from conftest import REPO
-from test_pipeline_check import _item, _git, _run, _history, _write, _commit, NO_GIT, ALL, _cp, FIELDS
+from test_pipeline_check import _item, _git, _run, _history, _write, _commit, NO_GIT, ALL, _cp, FIELDS, _scratch_line
 
 HEAD = "## Real-data effect (diff_reports output, pasted)"
 TOTAL = ("TOTAL: files 1, only-before 0, only-after 0, not compared 0, json changes 1, "
@@ -25,9 +25,10 @@ def _rd_item(repo, item, body05=FILLED, body06=FILLED, files=ALL, scope="FULL"):
     _item(repo, item, files, scope=scope, date=DATE)
     d = repo / "work" / item
     if "05-build-report.md" in files:
-        (d / "05-build-report.md").write_text(f"# 05\nSuite: {SUITE}\n{body05}", encoding="utf-8")   # item 082
+        (d / "05-build-report.md").write_text(f"# 05\nSuite: {SUITE}\n{_scratch_line('05', item)}{body05}",
+                                              encoding="utf-8")   # items 082, 097
     if "06-verification.md" in files:
-        (d / "06-verification.md").write_text(f"# 06\nVerdict: PASS (round 1)\nSent back to: none\nRecurring issues checked: RI-007\n{body06}",
+        (d / "06-verification.md").write_text(f"# 06\nVerdict: PASS (round 1)\nSent back to: none\nRecurring issues checked: RI-007\n{_scratch_line('06', item)}{body06}",
                                               encoding="utf-8")
 
 

@@ -1,4 +1,5 @@
 # 05 Build report - <ID>
+Scratch dir: <absolute path printed by mkdtemp; one line per dir used, or none (<reason>)>
 ## Changes made (file: what changed)
 ## Connectivity check
 - [ ] every new function/rule is used

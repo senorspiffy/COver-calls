@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,12 @@ FIELDS = {"R1": "brief written | 0", "R2": "3 for / 3 against | languages: N/A",
 I2_BEFORE_FIELD = "1 files changed | tests 1/1"
 
 
+def _scratch_line(step, item):
+    """Item 097: a fixture's good `Scratch dir:` line for its 05 (i2) or 06 (i3), from SCRATCH_FROM (97) on."""
+    return f"Scratch dir: /tmp/x/scratchpad/{'i2' if step == '05' else 'i3'}-{item}-r1-ab_cd123\n" \
+        if item.isdigit() and int(item) >= 97 else ""
+
+
 def _field(agent, item):
     """The well-formed log field for this agent and item (item 076: old I2 form below 76)."""
     return I2_BEFORE_FIELD if agent == "I2" and int(item) < 76 else FIELDS[agent]
@@ -30,7 +37,8 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
     """A fixture item. Its 06 carries the step-0 line and each step gets its log line (item 043).
     Item 071: 06 starts with `Verdict: <verdict> (round 1)` (none when verdict is None) and
     `Sent back to: <t>` (auto: none on PASS, I2 on FAIL; none when sent_back is None).
-    Item 082: 05 is `x` plus a `Suite:` line equal to the tests part of this item's I2 field."""
+    Item 082: 05 is `x` plus a `Suite:` line equal to the tests part of this item's I2 field.
+    Item 097: from SCRATCH_FROM on, 05 and 06 also carry a good `Scratch dir:` line (_scratch_line)."""
     if scope == "FAST":
         scope = "FAST (person, 2026-10-31)"
     d = root / "work" / item
@@ -42,11 +50,12 @@ def _item(root, item, files, scope="FULL", date="2026-10-31", waived=None, a1="A
     for f in files:
         body = f"x\n{a1}\n" if f == "07-audit-task.md" and a1 else "x\n"
         if f == "05-build-report.md":                         # item 082: the Suite line equals the I2 tests field
-            body = f"x\nSuite: {_field('I2', item).split(' | tests ', 1)[1]}\n"
+            body = f"x\nSuite: {_field('I2', item).split(' | tests ', 1)[1]}\n" + _scratch_line("05", item)
         if f == "06-verification.md":
             t = {"PASS": "none", "FAIL": "I2"}.get(verdict) if sent_back == "auto" else sent_back
             body = (f"Verdict: {verdict} (round 1)\n" if verdict is not None else "") \
-                + (f"Sent back to: {t}\n" if t is not None else "") + body + "Recurring issues checked: RI-007\n"
+                + (f"Sent back to: {t}\n" if t is not None else "") + body + "Recurring issues checked: RI-007\n" \
+                + _scratch_line("06", item)
         (d / f).write_text(body, encoding="utf-8")
         agent = AGENTS.get(f[:2])
         if agent and logged:
@@ -414,8 +423,8 @@ def test_incomplete_06_and_missing_log_line(tmp_path):
     """043: from 041 on, 06 names the recurring issues checked and every step has a log line."""
     _item(tmp_path, "130", ALL, logged=False)
     _item(tmp_path, "131", ALL)
-    (tmp_path / "work" / "131" / "06-verification.md").write_text("Verdict: PASS (round 1)\nSent back to: none\nx\n",
-                                                               encoding="utf-8")
+    (tmp_path / "work" / "131" / "06-verification.md").write_text("Verdict: PASS (round 1)\nSent back to: none\nx\n"
+                                                               + _scratch_line("06", "131"), encoding="utf-8")
     _item(tmp_path, "040", ALL, logged=False)          # before CHECKLIST_FROM: not re-checked
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-04")
     assert code == 1
@@ -1096,7 +1105,8 @@ def test_cutoff_missing_in_full_repo_fails(tmp_path):
 @NO_GIT
 def test_commits_before_cutoff_ignored(tmp_path):
     repo, _ = _history(tmp_path)
-    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed in 0.01s\n## Follow-up\n")
+    _write(repo, "work/150/05-build-report.md", "x\nSuite: 1 passed in 0.01s\n" + _scratch_line("05", "150")
+           + "## Follow-up\n")
     _write(repo, "config/x.json", '{"a": 1}\n')
     later = _commit(repo, "follow-up, before the cutoff")
     code, line = _untracked(repo, later)
@@ -2143,7 +2153,8 @@ def _rounds_item(root, item, files):
     _item(root, item, files, logged=False)
     (root / "work" / item / "06-verification.md").write_text(
         f"# 06 Verification - {item}\nVerdict: PASS (round 2; earlier rounds: FAIL round 1)\nSent back to: none\n"
-        "Recurring issues checked: RI-007\n# Round 1\nVerdict: FAIL (round 1)\nSent back to: I2\n", encoding="utf-8")
+        f"Recurring issues checked: RI-007\n{_scratch_line('06', item)}# Round 1\nVerdict: FAIL (round 1)\n"
+        "Sent back to: I2\n", encoding="utf-8")
     for team, date, lines in (
             ("research", "2026-11-17", [f"10:00 | {a} | {item} | {FIELDS[a]}" for a in ("R1", "R2", "R3")]),
             ("implementation", "2026-11-17", [f"11:00 | {a} | {item} | {FIELDS[a]}" for a in ("I1", "I2")]
@@ -3060,12 +3071,12 @@ def _batch_item(root, item, research=(), impl=(), t05=None, t06=None, full=False
     if t05 is not None:
         i2 = [f for _, _, agent, f in impl if agent == "I2"]
         suite = f"Suite: {i2[-1].split(' | tests ', 1)[1]}\n" if full and i2 else ""   # item 082 (full only)
-        (d / "05-build-report.md").write_text(f"# 05\n{suite}## Test output (pasted, not summarized)\n{t05}\n"
-                                              f"## Deviations from plan\n", encoding="utf-8")
+        (d / "05-build-report.md").write_text(f"# 05\n{suite}{_scratch_line('05', item)}## Test output (pasted, "
+                                              f"not summarized)\n{t05}\n## Deviations from plan\n", encoding="utf-8")
     if t06 is not None:
         head = "Verdict: PASS (round 1)\nSent back to: none\nRecurring issues checked: RI-010\n" if full else ""
-        (d / "06-verification.md").write_text(f"{head}## Tests re-run (output)\n{t06}\n## Findings\n",
-                                              encoding="utf-8")
+        (d / "06-verification.md").write_text(f"{head}{_scratch_line('06', item)}## Tests re-run (output)\n{t06}\n"
+                                              f"## Findings\n", encoding="utf-8")
     if full:
         for s in ("01", "02", "03", "04"):
             (d / STEP_NAMES[s]).write_text("x\n", encoding="utf-8")
@@ -3646,7 +3657,8 @@ def _suite_item(root, suite05, i2=(FIELDS["I2"],), item="151"):
     """Item `item` with every step and log line (_item), then 05 replaced by `suite05` and its one I2
     log line replaced by the lines `i2`, in that order (an empty tuple: no I2 line)."""
     _item(root, item, ALL, date=SUITE_DAY)
-    (root / "work" / item / "05-build-report.md").write_text(suite05, encoding="utf-8")
+    (root / "work" / item / "05-build-report.md").write_text(_scratch_line("05", item) + suite05,
+                                                             encoding="utf-8")   # item 097
     log = root / "logs" / "implementation" / f"{SUITE_DAY}.md"
     text = log.read_text(encoding="utf-8")
     old = f"12:00 | I2 | {item} | {FIELDS['I2']}\n"
@@ -3713,12 +3725,15 @@ def test_two_suite_lines_are_incomplete(tmp_path):
 
 
 def test_unfilled_template_suite_line_is_incomplete(tmp_path):
-    """S7: 05 is templates/build-report.md as shipped: its placeholder is not the field."""
+    """S7: 05 is templates/build-report.md as shipped: its placeholder is not the field. Item 097 (N9): its
+    unfilled `Scratch dir:` placeholder is an entry too (the good line _suite_item adds does not hide it)."""
     template = (REPO / "templates" / "build-report.md").read_text(encoding="utf-8")
     _suite_item(tmp_path, template)
     _, inc = _inc(tmp_path)
     holder = [l for l in template.splitlines() if l.startswith("Suite:")][0][len("Suite:"):].strip()
-    assert inc == f"INCOMPLETE: 151 ({_mismatch(holder, '1 passed in 0.01s')})"
+    scratch = [l for l in template.splitlines() if l.startswith("Scratch dir:")][0][len("Scratch dir:"):].strip()
+    assert inc == (f"INCOMPLETE: 151 ({_mismatch(holder, '1 passed in 0.01s')}; 05 Scratch dir '{scratch}' is not "
+                   f"the mkdtemp form (item 097))")
 
 
 def test_suite_with_no_i2_line_adds_no_suite_entry(tmp_path):
@@ -4128,9 +4143,11 @@ def test_unreadable_06(tmp_path):
             "work/151/06-verification.md (not UTF-8 at byte 5)") in lines, out
     inc = _pick1(out, "INCOMPLETE:")[0]
     assert ("150 (06 not checked (work/150/06-verification.md unreadable; item 089); no log line for I3; 06 round "
-            "headings not checked (work/150/06-verification.md unreadable; item 091))") in inc, out   # 091: >= 92
+            "headings not checked (work/150/06-verification.md unreadable; item 091); 06 scratch dir not checked "
+            "(work/150/06-verification.md unreadable; item 097))") in inc, out   # 091: >= 92; 097: >= 97
     assert ("151 (06 not checked (work/151/06-verification.md unreadable; item 089); 06 round headings not checked "
-            "(work/151/06-verification.md unreadable; item 091))") in inc, out
+            "(work/151/06-verification.md unreadable; item 091); 06 scratch dir not checked "
+            "(work/151/06-verification.md unreadable; item 097))") in inc, out
     assert "151: UNREADABLE (work/151/06-verification.md unreadable)" in lines, out
 
 
@@ -4233,7 +4250,8 @@ def test_unreadable_05_at_suite_check(tmp_path):
     assert code == 1, out
     inc = _pick1(out, "INCOMPLETE:")[0]
     assert ("150 (05 not checked (work/150/05-build-report.md unreadable; item 089); 05 round headings not "
-            "checked (work/150/05-build-report.md unreadable; item 091))") in inc, out   # 091: 150 >= 92
+            "checked (work/150/05-build-report.md unreadable; item 091); 05 scratch dir not checked "
+            "(work/150/05-build-report.md unreadable; item 097))") in inc, out   # 091: 150 >= 92; 097: >= 97
     assert "not computable: 150: work/150/05-build-report.md unreadable" in _pick1(out, "LOG BATCH:")[0], out
 
 
@@ -5207,6 +5225,137 @@ def test_i2_detach_phrase():
 def test_scratch_dir_line_in_agent_texts(f):
     """RI-010: the duty the Scratch dir check enforces (step C) is written in the agent text."""
     assert (REPO / f).read_text(encoding="utf-8").count(SCRATCH_DIR_SENTENCE) == 1, f
+
+
+# Item 097 step 4 (RI-010): the `Scratch dir:` line of 05/06, checked by INCOMPLETE from SCRATCH_FROM (97) on.
+SCRATCH_TEMPLATE_LINE = "Scratch dir: <absolute path printed by mkdtemp; one line per dir used, or none (<reason>)>"
+SD_GOOD = "/tmp/x/scratchpad/i2-150-r1-ab_cd123"
+
+
+@pytest.mark.parametrize("f", ["templates/build-report.md", "templates/verification.md"])
+def test_scratch_dir_template_line(f):
+    """The template line, once, with nothing after the placeholder (a filled line is `Scratch dir: <path>`)."""
+    assert (REPO / f).read_text(encoding="utf-8").splitlines().count(SCRATCH_TEMPLATE_LINE) == 1, f
+
+
+def _sd_item(root, body, step="05", item=RH_ID):
+    """A complete item (_rh_item) whose 05 or 06 has its fixture `Scratch dir:` line replaced by `body`."""
+    d = _rh_item(root, item=item)
+    f = d / STEP_NAMES[step]
+    kept = [l for l in f.read_text(encoding="utf-8").splitlines(keepends=True) if not l.startswith("Scratch dir:")]
+    f.write_text("".join(kept) + body, encoding="utf-8")
+    return d
+
+
+def _sd_bad(v, step="05"):
+    return f"{step} Scratch dir '{v}' is not the mkdtemp form (item 097)"
+
+
+@pytest.mark.parametrize("body", [
+    f"Scratch dir: {SD_GOOD}\n",
+    "Scratch dir: /home/u/elsewhere/i2-150-r2-ab_cd123/\n",
+    f"Scratch dir: {SD_GOOD}\nScratch dir: /tmp/x/scratchpad/i2-150-r2-zz9_0abc\n",
+    "Scratch dir: none (text-only item)\n",
+], ids=["P1", "P2-no-scratchpad-trailing-slash", "P3-two-rounds", "N6-none-with-reason"])
+def test_scratch_dir_good_lines(tmp_path, body):
+    _sd_item(tmp_path, body)
+    code, inc, out = _rh_inc(tmp_path)
+    assert inc == "INCOMPLETE: none" and code == 0, out
+
+
+@pytest.mark.parametrize("body, entry", [
+    ("Scratch dir: /tmp/claude-0/scratch/i2-150/\n", _sd_bad("/tmp/claude-0/scratch/i2-150/")),
+    ("Scratch dir: /tmp/x/scratchpad/i2-150r2-UxQ8\n", _sd_bad("/tmp/x/scratchpad/i2-150r2-UxQ8")),
+    ("Scratch dir: /tmp/x/scratchpad/i3-150-r1-ab_cd123\n", _sd_bad("/tmp/x/scratchpad/i3-150-r1-ab_cd123")),
+    ("", "05 has no Scratch dir: line (item 097)"),
+    ("Scratch dir: none ()\n", _sd_bad("none ()")),
+    ("Scratch dir: /tmp/x/scratchpad/i2-150-r1-ab_cd1234\n", _sd_bad("/tmp/x/scratchpad/i2-150-r1-ab_cd1234")),
+    ("Scratch dir: scratchpad/i2-150-r1-ab_cd123\n", _sd_bad("scratchpad/i2-150-r1-ab_cd123")),
+    (SCRATCH_TEMPLATE_LINE + "\n", _sd_bad(SCRATCH_TEMPLATE_LINE[len("Scratch dir: "):])),
+    ("Scratch dir: /tmp/x/scratchpad/i2-151-r1-ab_cd123\n", _sd_bad("/tmp/x/scratchpad/i2-151-r1-ab_cd123")),
+    (f"```\nScratch dir: {SD_GOOD}\n```\n", "05 has no Scratch dir: line (item 097)"),
+    (f"Scratch dir: {SD_GOOD} (round 1)\n", _sd_bad(f"{SD_GOOD} (round 1)")),
+    (f"Scratch dir: {SD_GOOD}\nScratch dir: /tmp/claude-0/scratch/i2-150/\n",
+     _sd_bad("/tmp/claude-0/scratch/i2-150/")),
+], ids=["N1-fixed-path", "N2-mktemp-shape", "N3-agent-not-i2", "N4-no-line", "N5-empty-reason", "N7-9-chars",
+        "N8-relative", "N9-template-placeholder", "N10-wrong-id", "N11-only-in-fence", "N12-trailing-text",
+        "one-bad-of-two"])
+def test_scratch_dir_bad_lines(tmp_path, body, entry):
+    _sd_item(tmp_path, body)
+    code, inc, out = _rh_inc(tmp_path)
+    assert inc == f"INCOMPLETE: {RH_ID} ({entry})" and code == 1, out
+
+
+def test_scratch_dir_06_is_tied_to_i3(tmp_path):
+    """06 names an i2 dir: the agent is tied to the file (06 -> i3)."""
+    _sd_item(tmp_path, f"Scratch dir: {SD_GOOD}\n", step="06")
+    code, inc, out = _rh_inc(tmp_path)
+    assert inc == f"INCOMPLETE: {RH_ID} ({_sd_bad(SD_GOOD, '06')})" and code == 1, out
+
+
+@pytest.mark.parametrize("item, entry", [("097", True), ("096", False)], ids=["FROM", "FROM-1"])
+def test_scratch_dir_cutoff_boundary(tmp_path, item, entry):
+    """N1 at SCRATCH_FROM (097) is an entry; at 096 there is no check."""
+    _sd_item(tmp_path, "Scratch dir: /tmp/claude-0/scratch/i2-097/\n", item=item)
+    code, inc, out = _rh_inc(tmp_path)
+    want = f"INCOMPLETE: 097 ({_sd_bad('/tmp/claude-0/scratch/i2-097/')})" if entry else "INCOMPLETE: none"
+    assert inc == want, out
+
+
+def test_scratch_dir_real_mkdtemp_name(tmp_path):
+    """The basename a real tempfile.mkdtemp makes on the installed Python passes, under any parent dir."""
+    (tmp_path / "any").mkdir()
+    made = tempfile.mkdtemp(prefix="i2-150-r1-", dir=tmp_path / "any")
+    _sd_item(tmp_path / "root", f"Scratch dir: {made}\n")
+    code, inc, out = _rh_inc(tmp_path / "root")
+    assert inc == "INCOMPLETE: none" and code == 0, (made, out)
+
+
+def test_scratch_dir_absent_step_file_no_entry(tmp_path):
+    """Missing input: an item with 01-04 only has no 05/06, so no Scratch dir entry (classify reports it)."""
+    _item(tmp_path, RH_ID, ALL[:4], date=RH_DAY)
+    _, inc, out = _rh_inc(tmp_path)
+    assert "Scratch dir" not in inc and "scratch dir" not in inc, out
+
+
+def test_scratch_dir_unreadable_05_not_checked(tmp_path):
+    """Missing input: a non-UTF-8 05 is `05 scratch dir not checked (<why>; item 097)` and is on UNREADABLE."""
+    d = _rh_item(tmp_path)
+    (d / "05-build-report.md").write_bytes(b"Scratch dir: /tmp/\xff\n")
+    code, inc, out = _rh_inc(tmp_path)
+    path = f"work/{RH_ID}/05-build-report.md"
+    assert f"05 scratch dir not checked ({path} unreadable; item 097)" in inc, out
+    assert f"UNREADABLE: {path} (not UTF-8 at byte 18)" in out.splitlines(), out
+    assert code == 1, out
+
+
+def test_scratch_dir_no_anchor_env_is_strict(tmp_path):
+    """Missing input: with env set (no git, shallow, ...) _rule_seen reads no anchor and the rule applies."""
+    cp = _cp()
+    d = _sd_item(tmp_path, "Scratch dir: /tmp/claude-0/scratch/i2-150/\n")
+    assert _sd_bad("/tmp/claude-0/scratch/i2-150/") in cp.incomplete(d, logs=tmp_path / "logs", env="no git")
+
+
+@NO_GIT
+@pytest.mark.parametrize("seen", [False, True], ids=["G-not-seen", "G-seen"])
+def test_scratch_dir_gate_follows_rule_file_of_05_commit(tmp_path, seen):
+    """G: N1's 05 added in a commit whose rule file has no SCRATCH_FROM: RULE NOT SEEN, no entry (item 084
+    gate). With the constant there: the INCOMPLETE entry and RULE NOT SEEN none."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    rules = "TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\nSUITE_FROM = 87\nTIMED_FROM = 90\nROUND_HEADING_FROM = 92\n"
+    _write(repo, "scripts/check_pipeline.py", rules + ("SCRATCH_FROM = 97\n" if seen else ""))
+    _sd_item(repo, "Scratch dir: /tmp/claude-0/scratch/i2-150/\n")
+    root = _commit(repo, "150 built")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", RH_DAY)
+    if seen:
+        assert _pick(out, "INCOMPLETE:") == f"INCOMPLETE: {RH_ID} ({_sd_bad('/tmp/claude-0/scratch/i2-150/')})", out
+        assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+    else:
+        assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+        assert _pick(out, "RULE NOT SEEN:") == (f"RULE NOT SEEN: {RH_ID} (05 added in {root[:7]} without "
+                                                "SCRATCH_FROM (097): judged by no Scratch dir check; item 084)"), out
 
 
 # Item 094 (RI-014): a single-branch clone has no ref for other branches, so OPEN BRANCHES, IN PR, RULES BRANCH,

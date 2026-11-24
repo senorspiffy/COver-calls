@@ -2,6 +2,7 @@
 Verdict: PASS | FAIL (round <n>; earlier rounds: <verdicts>)
 Sent back to: <I1 | I2 | I1 I2 | none>
 <!-- On every round, FAIL too, update these two lines first. Verdict: its first word is PASS or FAIL (bold allowed), then the latest round. Sent back to: I1, I2 or I1 I2 on FAIL, none on PASS. check_pipeline.py reads the first Verdict and Sent back line outside code fences (item 071). -->
+Scratch dir: <absolute path printed by mkdtemp; one line per dir used, or none (<reason>)>
 ## I1 audit (plan vs research)
 ## I2 audit (build vs plan)
 ## Tests re-run (output)
