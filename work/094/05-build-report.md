@@ -61,7 +61,10 @@ $ python3 -m pytest -q
 FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
 1 failed, 866 passed, 1 skipped in 131.75s (0:02:11)
 ```
+Round 1 `Suite:` line, kept in a fence (item 082):
+```
 Suite: 1 failed, 866 passed, 1 skipped in 131.75s (0:02:11)
+```
 
 The one failure is expected (item 071). It is not a defect of this build. `test_repo_pipeline_has_no_skipped_items` asserts `code == 0` of check_pipeline on HEAD, and the only failing lines in its output are:
 ```
@@ -163,3 +166,92 @@ Checked against each open or ESCALATED entry in logs/recurring-issues.md:
 Guardrail status for A1 to copy on main (item 036):
 RI-014: guardrail extended (094): single-branch clone gives OPEN BRANCHES/IN PR/RULES BRANCH/ID CLASH not checked and --next-id refuses; m1-m7 each fail a named test; stays OPEN until 079/081/090/094 are merged and M11 and m1 fail on main.
 RI-009: unchanged (GUARDED); 094 closes the single-branch near miss of 2026-11-22.
+
+## Round 2 changes (file: what changed)
+Input: the `## Round 2` section of work/094/04-build-plan.md (I3 round 1 FAIL, P1/P2, mutation m9). Base HEAD 0fbdf25. Scratch dir (mkdtemp, item 091): /tmp/claude-0/-home-claude/17dd566b-e13e-58fe-b556-13d450b5acde/scratchpad/I2-094-r2-c3zl26w3, with a worktree of 0fbdf25 at `wt/` for the mutations.
+- tests/test_pipeline_check.py only (R2-C3: no change to scripts/check_pipeline.py or the census):
+  - New module constants `FETCH_KEY` and `URL_KEY` (the two `_patched_git` keys).
+  - `test_fetch_coverage_fakes` (R2-C1): parameter is now `answers`, a dict passed whole to `_patched_git`. S8, S11, S12 keep their answers as `{FETCH_KEY: answer}` and their expected results. Added S13 (`{FETCH_KEY: ("", 1), URL_KEY: ("", 128)}` -> `"git config failed (exit 128)"`) and the optional S14 (url `("", 3)` -> `"git config failed (exit 3)"`), literal strings, exact `==` (RI-012). Ids `["S8", "S11", "S12", "S13", "S14"]`; docstring has the planned S13 clause plus one S14 clause.
+  - `test_config_failure_end_to_end` (R2-C2): after the existing asserts, the S13 answers are patched in the same real full clone; `cp.open_branches() == "git config failed (exit 128)"`, and `main()` prints `OPEN BRANCHES: git config failed (exit 128) (item 081)` and returns 1. One docstring sentence added. The second `_patched_git` wraps the first; its own table answers FETCH_KEY first, so the earlier fetch-128 fake is shadowed and URL_KEY is new.
+
+File counts (item 012), taken before this round's 05 edit:
+```
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'
+0
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'
+1
+```
+So round 2: 1 file changed, 0 new code files.
+
+## Connectivity check (round 2)
+- [x] Every new name is used: `FETCH_KEY`, `URL_KEY` are read by `test_fetch_coverage_fakes` and `test_config_failure_end_to_end`. No new function.
+- [x] Inputs/outputs: the new cases feed the url read of `fetch_coverage` (03 step 1(d) "Any other") and its result reaches `open_branches` and the OPEN BRANCHES line through the existing `cov.startswith("git config failed")` return.
+- [x] Every branch of `fetch_coverage` is now pinned by a test that fails when it is changed: the url "any other" branch by S13/S14 and the end-to-end assert (m9, m9b below).
+- [x] No TODO, no unused file: `git diff -U0 | grep -E '^\+'` over the missing-data pattern plus `TODO` and `: float = ` gives 0 hits.
+- Missing-data grep on ccbot/: 38 hits, all pre-existing (`git diff --stat -- ccbot/ config/` empty; round 2 changes only the test file). No dataclass field and no `>`/`<` comparison added.
+
+## Test output (round 2, pasted)
+Full suite from the repo root, working tree with the round 2 change (HEAD 0fbdf25):
+```
+$ python3 -m pytest -q
+...
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 872 passed, 1 skipped in 128.88s (0:02:08)
+```
+Suite: 1 failed, 872 passed, 1 skipped in 128.88s (0:02:08)
+
+872 = 870 (I3 round 1) + S13 + S14. The one failure is `test_repo_pipeline_has_no_skipped_items`; `python3 scripts/check_pipeline.py` exits 1 here, and its only non-none, non-complete, non-LEGACY lines are:
+```
+094: I3 FAIL (FULL; sent back to I1 I2, needs a later PASS round in 06 (item 071))
+095: in progress (FULL: next 05)
+097: in progress (FULL: next 05)
+098: in progress (FULL: next 05)
+I3 FAIL: 094
+INBOX: not checked (2026-11-24.md added in 9419d56; its templates/daily-audit.md has no ## Inbox)
+```
+`I3 FAIL: 094` is this item's own send-back, expected while 06 says FAIL (item 071). The INBOX line comes from the daily-audit commit 9419d56 (`Daily audit 2026-11-24: ...`), not from this build: round 2 changes no script, so check_pipeline's output is the same at base. The in-progress lines are other items' open steps. `UNTRACKED CHANGE:`, SKIPPED, INCOMPLETE and UNREADABLE are none.
+
+Focused run of the changed tests:
+```
+$ python3 -m pytest -q tests/test_pipeline_check.py -k "fetch_coverage_fakes or config_failure_end_to_end"
+6 passed, 419 deselected in 1.19s
+```
+py_compile (RI-008):
+```
+$ python3.11 -m py_compile tests/test_pipeline_check.py; echo "py_compile exit $?"
+py_compile exit 0
+```
+
+Mutations (in /tmp/claude-0/-home-claude/17dd566b-e13e-58fe-b556-13d450b5acde/scratchpad/I2-094-r2-c3zl26w3/wt, each applied alone to scripts/check_pipeline.py with the round 2 test file copied in, restored from a saved copy after each; `git status --short` in wt then shows only the copied test file):
+```
+m9  (final `return f"git config failed (exit {url[1]})"` -> `return "no origin"`):
+    FAILED test_fetch_coverage_fakes[S13], test_fetch_coverage_fakes[S14], test_config_failure_end_to_end
+    3 failed, 3 passed, 419 deselected in 4.60s
+    (end-to-end: open_branches returned [{'ref': 'origin/claude/probe-092', ...}], a list, not the error)
+m9b (same line -> `return SINGLE_TEXT`):
+    FAILED test_fetch_coverage_fakes[S13], test_fetch_coverage_fakes[S14], test_config_failure_end_to_end
+    3 failed, 3 passed, 419 deselected in 4.01s
+m8  (exit 0 with no value counts as full: `(not values or full)`), re-run because S8 was restructured:
+    FAILED test_fetch_coverage_fakes[S8]
+    1 failed, 4 passed, 420 deselected in 0.24s
+m10 (open_branches `or cov.startswith("git config failed")` removed), re-run because the end-to-end test grew:
+    FAILED test_config_failure_end_to_end
+    1 failed, 424 deselected in 0.70s
+```
+m1-m7 detect through tests round 2 did not change (S12/S8/S11 answers and expectations unchanged); I3 re-runs m1-m10 per the plan.
+
+Feasibility numbers (round 2): 13 pinned shapes now plus S14; "full" still holds for 4 of 12 counted shapes (S1, S2, S4a, S4b); S13 and S14 give the 081 error; the 3 of 3 plain `--depth 1` tests stay `code == 0` (unchanged code).
+
+## Deviations from plan (round 2)
+- None. Both optional parts (S14 and the R2-C2 assert) were added. The R2-C2 assert is a second case inside `test_config_failure_end_to_end`, one of the two places the plan allowed. `FETCH_KEY`/`URL_KEY` are module constants so the test and the end-to-end case share the keys.
+
+## Recurring issues checked (round 2, item 013)
+Checked against each open or ESCALATED entry in logs/recurring-issues.md:
+- RI-001 (ESCALATED): no new filter rule; counts unchanged (4 of 12, 3 of 3).
+- RI-010 (ESCALATED): no log line typed by hand; the I2 line is written by `check_pipeline.py --log` and committed by `commit_step.py`.
+- RI-014 (OPEN, this family): the url-read failure is now pinned as an 081 error, never "no origin"/"none" (m9, m9b fail 3 tests each).
+- GUARDED entries touched: RI-002 (failed read never "no origin" or SINGLE_TEXT), RI-006 (census unchanged, no new `_git` call), RI-008 (py_compile 3.11), RI-012 (exact `==` on literals).
+
+Guardrail status for A1 to copy on main (item 036), round 2:
+RI-014: guardrail extended (094 r2): url-read failure after an absent fetch key pinned by test_fetch_coverage_fakes[S13]/[S14] and test_config_failure_end_to_end; m9 and m9b each fail 3 tests; stays OPEN until 079/081/090/094 are merged and M11 and m1 fail on main.

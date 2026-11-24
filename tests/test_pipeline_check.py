@@ -5015,23 +5015,32 @@ def test_fetch_coverage_shapes(tmp_path, monkeypatch, shape):
         assert cp.fetch_coverage() == "full"
 
 
-@pytest.mark.parametrize("answer, want", [
-    (("", 0), None),                                          # S8: exit 0, no value
-    (("++refs/heads/*:refs/remotes/origin/*\n", 0), None),    # S11: only one `+` is removed
-    (("", 128), "git config failed (exit 128)"),             # S12
-], ids=["S8", "S11", "S12"])
-def test_fetch_coverage_fakes(tmp_path, monkeypatch, answer, want):
-    """Item 094 (03 step 8c): shapes real git config cannot give, through _patched_git."""
+FETCH_KEY = ("config", "--get-all", "remote.origin.fetch")
+URL_KEY = ("config", "--get", "remote.origin.url")
+
+
+@pytest.mark.parametrize("answers, want", [
+    ({FETCH_KEY: ("", 0)}, None),                                         # S8: exit 0, no value
+    ({FETCH_KEY: ("++refs/heads/*:refs/remotes/origin/*\n", 0)}, None),   # S11: only one `+` is removed
+    ({FETCH_KEY: ("", 128)}, "git config failed (exit 128)"),            # S12
+    ({FETCH_KEY: ("", 1), URL_KEY: ("", 128)}, "git config failed (exit 128)"),  # S13
+    ({FETCH_KEY: ("", 1), URL_KEY: ("", 3)}, "git config failed (exit 3)"),      # S14
+], ids=["S8", "S11", "S12", "S13", "S14"])
+def test_fetch_coverage_fakes(tmp_path, monkeypatch, answers, want):
+    """Item 094 (03 step 8c): shapes real git config cannot give, through _patched_git.
+    S13: fetch key absent (exit 1), url read fails (exit 128): the 081 error, never 'no origin' (item 094, m9).
+    S14: the same with url exit 3 (config file invalid), so the code does not special-case 128."""
     cp = _cp()
     monkeypatch.chdir(tmp_path)
-    _patched_git(monkeypatch, cp, {("config", "--get-all", "remote.origin.fetch"): answer})
+    _patched_git(monkeypatch, cp, answers)
     assert cp.fetch_coverage() == (cp.SINGLE_TEXT if want is None else want)
 
 
 @NO_GIT
 def test_config_failure_end_to_end(tmp_path, monkeypatch, capsys):
     """Item 094 (03 step 8d): in a real full clone a failing fetch read (exit 128) is the 081 error: main
-    exits 1 with `OPEN BRANCHES: git config failed (exit 128) (item 081)`, and --next-id refuses (exit 2)."""
+    exits 1 with `OPEN BRANCHES: git config failed (exit 128) (item 081)`, and --next-id refuses (exit 2).
+    Round 2: a failing url read after an absent fetch key (S13 answers) gives the same OPEN BRANCHES line."""
     cp = _cp()
     repo = _sb_clone(tmp_path, _sb_source(tmp_path), "full")
     monkeypatch.chdir(repo)
@@ -5048,6 +5057,13 @@ def test_config_failure_end_to_end(tmp_path, monkeypatch, capsys):
     assert (code, cap.out) == (2, "")
     assert cap.err == ("--next-id refused: git config failed (exit 128); not counting open branches would risk "
                        "an ID clash (item 037). Fix the clone (git fetch origin) and re-run.\n")
+    # Round 2 (R2-C2, m9): fetch key absent (exit 1), url read fails (exit 128) reaches OPEN BRANCHES too.
+    _patched_git(monkeypatch, cp, {FETCH_KEY: ("", 1), URL_KEY: ("", 128)})
+    assert cp.open_branches() == "git config failed (exit 128)"
+    code = cp.main(args)
+    out = capsys.readouterr().out
+    assert _pick(out, "OPEN BRANCHES:") == "OPEN BRANCHES: git config failed (exit 128) (item 081)", out
+    assert code == 1, out
 
 
 @NO_GIT
