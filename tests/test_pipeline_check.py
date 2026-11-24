@@ -2398,6 +2398,8 @@ GIT_CENSUS = {
     ("_anchor_env", "_git"): (2, "084: no-git probe; 088: rev-parse --verify HEAD read once: exit 1 = no commit "
                                  "(unborn) -> not checked, None -> no git, other non-zero -> not checked + exit 1"),
     ("_rule_seen", "_git_ok"): (3, "084: log/ls-tree/show failure -> 'anchor: git failed' entry, strict"),
+    ("fetch_coverage", "_git"): (2, "fetch read: exit 0 values, exit 1 -> url read, other -> 'git config failed' (081); "
+                                    "url read: exit 1 = no origin, 0 = SINGLE_TEXT, other -> failed (094)"),
 }
 
 
@@ -2433,7 +2435,7 @@ def test_git_call_census():
     walk(tree, None)
     assert dict(seen) == {k: v[0] for k, v in GIT_CENSUS.items()}
     assert all(reason.strip() for _, reason in GIT_CENSUS.values())
-    assert sum(seen.values()) == 47                    # 41 (081) + 5 (084) + 1 (081 r2)
+    assert sum(seen.values()) == 49                    # 41 (081) + 5 (084) + 1 (081 r2) + 2 (094)
 
 
 def test_all_git_fails_no_line_says_none(tmp_path, monkeypatch, capsys):
@@ -4733,7 +4735,9 @@ def test_open_branches_default_computes_shallow(monkeypatch):
     with no ref is still 0 (no line)."""
     cp = _cp()
     branch = ("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
-    monkeypatch.setattr(cp, "_git", lambda *a: ("origin/main\n", 0) if a == branch else ("", 0))
+    fetch = ("config", "--get-all", "remote.origin.fetch")      # item 094: a full clone's refspec
+    monkeypatch.setattr(cp, "_git", lambda *a: ("origin/main\n", 0) if a == branch else
+                        ("+refs/heads/*:refs/remotes/origin/*\n", 0) if a == fetch else ("", 0))
     monkeypatch.setattr(cp, "main_ahead", lambda *a: (_ for _ in ()).throw(AssertionError("main_ahead called")))
     monkeypatch.setattr(cp, "_is_shallow", lambda: True)
     assert cp.open_branches() == []
@@ -4894,3 +4898,189 @@ def test_scratch_sentence_same_in_four_files():
     for f in (".claude/commands/run-item.md", ".claude/agents/i2-builder.md", ".claude/agents/i3-verifier.md",
               ".claude/agents/a1-auditor.md"):
         assert (REPO / f).read_text(encoding="utf-8").count(SCRATCH) == 1, f
+
+
+# Item 094 (RI-014): a single-branch clone has no ref for other branches, so OPEN BRANCHES, IN PR, RULES BRANCH,
+# ID CLASH and --next-id are not checked there. Literals, not built from cp.SINGLE_TEXT (an edit fails a test).
+SINGLE_LINE = ("OPEN BRANCHES: not checked (single-branch clone; run git remote set-branches origin '*' && "
+               "git fetch origin)")
+SINGLE_SENTENCE = ("If `git config --get-all remote.origin.fetch` has no `+refs/heads/*:refs/remotes/origin/*` line "
+                   "(with or without the `+`) or has a line starting with `^`, run `git remote set-branches origin "
+                   "'*' && git fetch origin`, then test again; until then report OPEN BRANCHES, IN PR, RULES BRANCH "
+                   "and ID CLASH as 'not checked', never 'none', and take no ID from `--next-id` (item 094).")
+GLOB_LINE = "+refs/heads/*:refs/remotes/origin/*\n"
+SB_DAY = "2026-11-24"
+
+
+def _sb_source(tmp_path):
+    """Item 094: a bare origin (HEAD -> main) whose main holds work/091/request.md, and a pushed branch
+    claude/probe-092 that adds work/092/request.md (the F2 example: full 093, HEAD only 092)."""
+    origin, src = tmp_path / "origin.git", tmp_path / "src"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    _git(tmp_path, "clone", "-q", f"file://{origin}", str(src))
+    _git(src, "checkout", "-q", "-b", "main")
+    _item(src, "091", [], date=SB_DAY, logged=False)
+    _commit(src, "091")
+    _git(src, "push", "-q", "origin", "main")
+    _git(src, "checkout", "-q", "-b", "claude/probe-092")
+    _item(src, "092", [], date=SB_DAY, logged=False)
+    _commit(src, "092")
+    _git(src, "push", "-q", "origin", "claude/probe-092")
+    return origin
+
+
+def _sb_clone(tmp_path, origin, name, *args):
+    """A `file://` clone (C3: a plain path implies --local, which copies refs)."""
+    repo = tmp_path / name
+    _git(tmp_path, "clone", "-q", *args, f"file://{origin}", str(repo))
+    return repo
+
+
+def _next_id_run(repo):
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_pipeline.py"), "--next-id"], cwd=repo,
+                       capture_output=True, text=True, encoding="utf-8")
+    return r.returncode, r.stdout, r.stderr
+
+
+def _fetch_lines(repo):
+    return subprocess.run(["git", "config", "--get-all", "remote.origin.fetch"], cwd=repo, capture_output=True,
+                          text=True).stdout
+
+
+@NO_GIT
+def test_single_branch_clone_not_checked(tmp_path):
+    """Item 094 (03 step 8a, C3): a full clone lists the branch and --next-id says 093. A --single-branch
+    clone, a plain --depth 1 clone and that clone after --unshallow print SINGLE_LINE, IN PR / RULES BRANCH /
+    ID CLASH not checked, no BRANCH ERROR, exit 0, and --next-id refuses (exit 2, never 092). After the
+    recovery command the sb clone has one glob line and --next-id says 093."""
+    origin = _sb_source(tmp_path)
+    full = _sb_clone(tmp_path, origin, "full")
+    assert _fetch_lines(full) == GLOB_LINE
+    assert _next_id_run(full)[:2] == (0, "093\n")
+    code, out = _run(full, "check_pipeline.py", "--untracked-from", _root(full), "--today", SB_DAY)
+    assert any(l.startswith("  origin/claude/probe-092: ") for l in out.splitlines()), out
+    sb = _sb_clone(tmp_path, origin, "sb", "--single-branch")
+    d1s = _sb_clone(tmp_path, origin, "d1s", "--depth", "1")
+    d1u = _sb_clone(tmp_path, origin, "d1u", "--depth", "1")
+    _git(d1u, "fetch", "-q", "--unshallow")
+    for repo in (sb, d1s, d1u):
+        code, out = _run(repo, "check_pipeline.py", "--untracked-from", _root(repo), "--today", SB_DAY)
+        assert _pick(out, "OPEN BRANCHES:") == SINGLE_LINE, (repo.name, out)
+        for p in ("IN PR:", "RULES BRANCH:", "ID CLASH:"):
+            assert _pick(out, p) == f"{p} not checked (see OPEN BRANCHES)", (repo.name, out)
+        assert "BRANCH ERROR" not in out, (repo.name, out)
+        assert code == 0, (repo.name, out)
+        code, stdout, stderr = _next_id_run(repo)
+        assert (code, stdout) == (2, ""), (repo.name, stdout, stderr)
+        assert stderr.startswith("--next-id refused: single-branch clone;"), (repo.name, stderr)
+    _git(sb, "remote", "set-branches", "origin", "*")
+    _git(sb, "fetch", "-q", "origin")
+    assert _fetch_lines(sb) == GLOB_LINE
+    assert _next_id_run(sb)[:2] == (0, "093\n")
+
+
+SHAPES = {   # 03 Self-check table: (fetch values, keep url, fetch_coverage result; None = SINGLE_TEXT)
+    "S1": (["+refs/heads/*:refs/remotes/origin/*"], True, "full"),
+    "S2": (["refs/heads/*:refs/remotes/origin/*"], True, "full"),
+    "S3": (["+refs/heads/main:refs/remotes/origin/main"], True, None),
+    "S4a": (["+refs/heads/main:refs/remotes/origin/main", "+refs/heads/*:refs/remotes/origin/*"], True, "full"),
+    "S4b": (["+refs/heads/*:refs/remotes/origin/*", "+refs/heads/main:refs/remotes/origin/main"], True, "full"),
+    "S5": (["+refs/heads/*:refs/remotes/origin/*", "^refs/heads/claude/*"], True, None),
+    "S6": (["+refs/heads/master:refs/remotes/origin/master",
+            "+refs/heads/experiment:refs/remotes/origin/experiment"], True, None),
+    "S7": (["+refs/heads/*:refs/remotes/upstream/*"], True, None),
+    "S9": ([], False, "no origin"),
+    "S10": ([], True, None),
+}
+
+
+@NO_GIT
+@pytest.mark.parametrize("shape", list(SHAPES), ids=list(SHAPES))
+def test_fetch_coverage_shapes(tmp_path, monkeypatch, shape):
+    """Item 094 (03 step 8b): real `git config` shapes on a full file:// clone; S5 also runs the recovery,
+    which leaves exactly one glob line."""
+    cp = _cp()
+    values, url, want = SHAPES[shape]
+    repo = _sb_clone(tmp_path, _sb_source(tmp_path), "c")
+    _git(repo, "config", "--unset-all", "remote.origin.fetch")
+    for v in values:
+        _git(repo, "config", "--add", "remote.origin.fetch", v)
+    if not url:
+        _git(repo, "config", "--unset", "remote.origin.url")
+    monkeypatch.chdir(repo)
+    assert cp.fetch_coverage() == (cp.SINGLE_TEXT if want is None else want), _fetch_lines(repo)
+    if shape == "S5":
+        _git(repo, "remote", "set-branches", "origin", "*")
+        assert _fetch_lines(repo) == GLOB_LINE
+        assert cp.fetch_coverage() == "full"
+
+
+@pytest.mark.parametrize("answer, want", [
+    (("", 0), None),                                          # S8: exit 0, no value
+    (("++refs/heads/*:refs/remotes/origin/*\n", 0), None),    # S11: only one `+` is removed
+    (("", 128), "git config failed (exit 128)"),             # S12
+], ids=["S8", "S11", "S12"])
+def test_fetch_coverage_fakes(tmp_path, monkeypatch, answer, want):
+    """Item 094 (03 step 8c): shapes real git config cannot give, through _patched_git."""
+    cp = _cp()
+    monkeypatch.chdir(tmp_path)
+    _patched_git(monkeypatch, cp, {("config", "--get-all", "remote.origin.fetch"): answer})
+    assert cp.fetch_coverage() == (cp.SINGLE_TEXT if want is None else want)
+
+
+@NO_GIT
+def test_config_failure_end_to_end(tmp_path, monkeypatch, capsys):
+    """Item 094 (03 step 8d): in a real full clone a failing fetch read (exit 128) is the 081 error: main
+    exits 1 with `OPEN BRANCHES: git config failed (exit 128) (item 081)`, and --next-id refuses (exit 2)."""
+    cp = _cp()
+    repo = _sb_clone(tmp_path, _sb_source(tmp_path), "full")
+    monkeypatch.chdir(repo)
+    args = ["--untracked-from", _root(repo), "--today", SB_DAY]
+    assert cp.main(args) == 0, capsys.readouterr().out        # control: unpatched, the same clone passes
+    capsys.readouterr()
+    _patched_git(monkeypatch, cp, {("config", "--get-all", "remote.origin.fetch"): ("", 128)})
+    code = cp.main(args)
+    out = capsys.readouterr().out
+    assert _pick(out, "OPEN BRANCHES:") == "OPEN BRANCHES: git config failed (exit 128) (item 081)", out
+    assert code == 1, out
+    code = cp.main(["--next-id"])
+    cap = capsys.readouterr()
+    assert (code, cap.out) == (2, "")
+    assert cap.err == ("--next-id refused: git config failed (exit 128); not counting open branches would risk "
+                       "an ID clash (item 037). Fix the clone (git fetch origin) and re-run.\n")
+
+
+@NO_GIT
+def test_check_handoff_single_branch(tmp_path, monkeypatch, capsys):
+    """Item 094 (03 step 8e): check_handoff --all says not checked (open branches: SINGLE_TEXT), exit 1: once
+    with open_branches faked to SINGLE_TEXT, once in a real --single-branch clone."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_handoff
+    cp = sys.modules["check_pipeline"] if "check_pipeline" in sys.modules else _cp()
+    want = ("150: not checked (open branches: single-branch clone; run git remote set-branches origin '*' && "
+            "git fetch origin)")
+    (tmp_path / "w" / "150").mkdir(parents=True)
+    with monkeypatch.context() as m:
+        m.setattr(cp, "open_branches", lambda *a: cp.SINGLE_TEXT)
+        assert check_handoff.check_all(tmp_path / "w") == 1
+        assert want in capsys.readouterr().out.splitlines()
+    sb = _sb_clone(tmp_path, _sb_source(tmp_path), "sb", "--single-branch")
+    (sb / "work" / "150").mkdir(parents=True)
+    monkeypatch.chdir(sb)
+    assert check_handoff.check_all(Path("work")) == 1
+    assert want in capsys.readouterr().out.splitlines()
+
+
+def test_single_branch_sentence_same_in_three_files():
+    """Item 094 (step 7): the single-branch sentence, byte for byte, once in each file, after UNSHALLOW."""
+    for f in (".claude/commands/run-item.md", ".claude/commands/daily-audit.md", ".claude/agents/a1-auditor.md"):
+        text = (REPO / f).read_text(encoding="utf-8")
+        assert text.count(SINGLE_SENTENCE) == 1, f
+        assert text.index(UNSHALLOW) < text.index(SINGLE_SENTENCE), f
+
+
+def test_check_pipeline_docstring_names_094():
+    """Item 094 (step 6): the module, fetch_coverage, open_branches and next_id docstrings name the item."""
+    cp = _cp()
+    for doc in (cp.__doc__, cp.fetch_coverage.__doc__, cp.open_branches.__doc__, cp.next_id.__doc__):
+        assert "(item 094)" in doc

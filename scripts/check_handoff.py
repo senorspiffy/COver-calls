@@ -143,7 +143,8 @@ def _branch_with_handoff(item):
 def check_all(work=Path("work")):
     """One line per work item: PASS, LEGACY, FAIL, 'IN PR (<branch>)' (the hand-off is only on an
     open branch, item 044), 'no hand-off', or 'not checked (open branches: <why>)' when git cannot list
-    the branches (item 081). Exit 1 on FAIL or not checked."""
+    the branches (item 081). Exit 1 on FAIL or not checked. Item 094: in a single-branch clone the line is
+    `not checked (open branches: <SINGLE_TEXT>)`, exit 1 (open_branches returns SINGLE_TEXT as its reason)."""
     import contextlib
     import io
     failed = []

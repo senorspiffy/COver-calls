@@ -75,6 +75,16 @@ and its last commit date and age (039). Three more lines come from the branches:
                   a failing `git branch -r` prints `OPEN BRANCHES: git branch failed (exit <n>) (item
                   081)`, and IN PR, RULES BRANCH and ID CLASH say `not checked (see OPEN BRANCHES)`
                   (exit 1). A git repo with no open branch prints `OPEN BRANCHES: none`.
+                  Item 094 (RI-014): a single-branch clone (`--single-branch`, plain `--depth 1`, or
+                  either one after `--unshallow`) has no remote-tracking ref for other branches, so its
+                  `none` would be false. When `remote.origin.fetch` has no `refs/heads/*:refs/remotes/
+                  origin/*` line (one leading `+` allowed) or has a `^` line, it prints `OPEN BRANCHES:
+                  not checked (SINGLE_TEXT)` and IN PR, RULES BRANCH and ID CLASH say `not checked (see
+                  OPEN BRANCHES)`. The main exit is unchanged (as for a shallow clone, item 090);
+                  --next-id refuses (exit 2) and check_handoff --all says not checked (exit 1). A failing
+                  `git config` read is `OPEN BRANCHES: git config failed (exit <n>) (item 081)`, exit 1.
+                  Known gaps: a full refspec that was never fetched still reports local refs only, and
+                  remotes other than origin are not checked (item 094).
                   A branch with no common history with HEAD (`git merge-base --all` exit 1, a real
                   answer; item 081 round 2) is not scanned. OPEN BRANCHES shows `<ref>: no common
                   history with HEAD; not scanned (item 081)`, and the exit is unchanged when its tree
@@ -298,6 +308,8 @@ never pick the same number. Outside a git repo (or without git) the branch part 
 Item 081: when `git branch -r` or a branch's `git ls-tree <ref> -- work/` fails, it prints
 `--next-id refused: <why>; ...` to stderr, nothing on stdout, and exits 2 (never a guessed ID). A
 branch with no work/ adds no ID. In a repo with no commit: --next-id refuses; make the first commit.
+Item 094: in a single-branch clone (see OPEN BRANCHES) --next-id refuses with `--next-id refused:
+<SINGLE_TEXT>; ...`, exit 2, nothing on stdout; a failing `git config` read refuses as above.
 Known gap (item 081): when `--is-shallow-repository` and `--git-common-dir` both fail,
 _shallow_boundaries returns "full", so _walk prints the squash/rebase text for UNTRACKED CHANGE:
 the reason is wrong, but it still exits 1.
@@ -1448,6 +1460,43 @@ def _git_ok(*args):
     return out[0], None
 
 
+def fetch_coverage():
+    """Item 094 (RI-014): does origin's fetch refspec bring every branch into refs/remotes/origin/?
+    Returns exactly one of "full", "no origin", "no git", SINGLE_TEXT or `git config failed (exit <n>)`.
+    Reads `git config --get-all remote.origin.fetch` (all values, so a glob line before a named one still
+    counts; `--includes` is on by default for reads, so an [include] line counts as git fetch sees it):
+    exit 0 is "full" only if at least one value, with one leading `+` removed, equals _GLOB and no value
+    starts with `^`; anything else (no value, named branches only, another dst, two `+`) is SINGLE_TEXT.
+    A `^` line of any kind gives SINGLE_TEXT, even one that would hide no claude/* branch: this over-reports
+    "not checked" and fails closed on purpose (C7). Exit 1 means the key is absent: git-config also uses
+    exit 1 for an invalid section or key, but both keys here are fixed constants, so for us it means only
+    absent; a later edit that builds a key from input must revisit this (C5). Then `git config --get
+    remote.origin.url`: exit 1 is "no origin" (today's path), exit 0 is SINGLE_TEXT (a fetch line was
+    removed), any other exit is the error string. Any other exit on the fetch read is the error string,
+    never "full". A clone of a detached HEAD with --single-branch has no fetch line or a non-glob one, so
+    it is SINGLE_TEXT too (C6). _git is called directly (not _git_ok) because exit 1 is an answer here.
+    Known gaps: a full refspec never fetched still has only local refs (the rule files require `git fetch
+    origin` first; ls-remote would need the network), and remotes other than origin are not checked
+    (item 094)."""
+    out = _git("config", "--get-all", "remote.origin.fetch")
+    if out is None:
+        return "no git"
+    if out[1] == 0:
+        values = [v for v in out[0].splitlines() if v]
+        full = any((v[1:] if v.startswith("+") else v) == _GLOB for v in values)
+        return "full" if full and not any(v.startswith("^") for v in values) else SINGLE_TEXT
+    if out[1] != 1:
+        return f"git config failed (exit {out[1]})"
+    url = _git("config", "--get", "remote.origin.url")
+    if url is None:
+        return "no git"
+    if url[1] == 1:
+        return "no origin"
+    if url[1] == 0:
+        return SINGLE_TEXT
+    return f"git config failed (exit {url[1]})"
+
+
 def open_branches(today=None, shallow=None):
     """One dict per remote branch not merged into HEAD (items 034, 037, 038, 039): ref, items
     {item: set of step codes}, conflicts, recurring, clashes, skipped [(item, detail)],
@@ -1458,12 +1507,16 @@ def open_branches(today=None, shallow=None):
     (item 081), never []. Item 090 (RI-014): shallow (None = _is_shallow(), so check_handoff's call with
     no args computes it): main_ahead is not called (behind False), origin/main itself is skipped (its tip
     looks unreachable from a shallow HEAD), every dict has "shallow", and an unrelated ref with checked
-    paths gets the shallow-clone error text."""
+    paths gets the shallow-clone error text. Item 094 (RI-014): after a successful branch read, fetch_coverage
+    is read; SINGLE_TEXT or `git config failed (exit <n>)` is returned as the reason string (item 094)."""
     out, why = _git_ok("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
     if why == "no git":
         return None
     if why:
         return why
+    cov = fetch_coverage()                                  # item 094: after the branch read, before shallow
+    if cov == SINGLE_TEXT or cov.startswith("git config failed"):
+        return cov
     today = today or dt.datetime.now(dt.timezone.utc).date()
     shallow = _is_shallow() if shallow is None else shallow
     behind = not shallow and isinstance(a := main_ahead(), int) and a > 0
@@ -1863,6 +1916,10 @@ MAIN = "origin/main"
 # Item 090 (RI-014): the one text for every check that is not run in a shallow clone (_anchor_env's env; main
 # compares by equality, so "no git", "unborn HEAD" or a verify failure never switch those checks off).
 SHALLOW_TEXT = "shallow clone; run git fetch --unshallow"
+# Item 094 (RI-014): the one text for a clone whose origin fetch refspec does not cover every branch; main,
+# open_branches and next_id compare by equality only (RI-012).
+SINGLE_TEXT = "single-branch clone; run git remote set-branches origin '*' && git fetch origin"
+_GLOB = "refs/heads/*:refs/remotes/origin/*"
 
 
 def main_ahead(shallow=False):
@@ -1893,11 +1950,16 @@ def main_ahead(shallow=False):
 def next_id():
     """The next free work item ID over HEAD and every unmerged remote branch (item 037):
     (id, None), or (None, why) when a git read fails (item 081), so no ID is guessed. Without git,
-    HEAD's work/ only. A branch with no work/ adds no ID."""
+    HEAD's work/ only. A branch with no work/ adds no ID. Item 094 (RI-014): after a successful branch
+    read, a single-branch clone or a failed config read (fetch_coverage) is (None, that reason) (item 094)."""
     ids = [int(p.name) for p in Path("work").iterdir() if p.name.isdigit()] if Path("work").is_dir() else []
     out, why = _git_ok("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
     if why not in (None, "no git"):
         return None, why
+    if why is None:
+        cov = fetch_coverage()                              # item 094: hidden refs would give a clashing ID
+        if cov == SINGLE_TEXT or cov.startswith("git config failed"):
+            return None, cov
     for ref in (out.split() if why is None else []):
         listing, why = _git_ok("ls-tree", "-d", "--name-only", ref, "--", "work/")
         if why is not None:
@@ -1970,6 +2032,10 @@ def main(argv):
     today = dt.datetime.now(dt.timezone.utc).date()
     if argv[:1] == ["--next-id"]:
         nid, why = next_id()
+        if why == SINGLE_TEXT:                              # item 094: single-branch clone
+            print(f"--next-id refused: {SINGLE_TEXT}; not counting open branches would risk an ID clash "
+                  f"(item 037). Re-run after that.", file=sys.stderr)
+            return 2
         if why:                                             # item 081: never guess an ID
             print(f"--next-id refused: {why}; not counting open branches would risk an ID clash "
                   f"(item 037). Fix the clone (git fetch origin) and re-run.", file=sys.stderr)
@@ -2045,7 +2111,9 @@ def main(argv):
         print(f"MAIN AHEAD: {ahead}")
     elif ahead > 0:
         print(f"MAIN AHEAD: {MAIN} has {ahead} commits not in HEAD; merge it before building (item 051)")
-    if isinstance(branches, str):                           # item 081: git branch failed, exit 1
+    if branches == SINGLE_TEXT:                             # item 094: single-branch clone, exit unchanged
+        print(f"OPEN BRANCHES: not checked ({SINGLE_TEXT})")
+    elif isinstance(branches, str):                         # item 081: git branch failed, exit 1
         print(f"OPEN BRANCHES: {branches} (item 081)")
     elif branches == []:
         print("OPEN BRANCHES: none")
@@ -2120,7 +2188,8 @@ def main(argv):
         return 1
     print(f"SKIPPED: {', '.join(skipped) or 'none'}")
     return 1 if skipped or failed or i3_failed or unfinished or late or orphans or (untracked and untracked[1]) \
-        or (real and real[2]) or (uncommitted and uncommitted[1]) or isinstance(branches, str) \
+        or (real and real[2]) or (uncommitted and uncommitted[1]) \
+        or (isinstance(branches, str) and branches != SINGLE_TEXT) \
         or branch_errors or isinstance(ahead, str) or batch["flagged"] or env_failed or unreadable else 0
 
 
