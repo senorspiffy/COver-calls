@@ -357,7 +357,9 @@ request.md as absent text, so the item is listed, never dropped; INBOX prints `n
 unreadable)` or `not checked (<report> not committed; its templates/daily-audit.md unreadable)`. A shallow
 file that exists but can't be read makes _shallow_boundaries "unreadable" even when the flag is not a sure
 true (git died on it), so UNTRACKED CHANGE and RULE NOT SEEN say `not checked (shallow clone; ...)`, never
-the squash/rebase text or none. Known gap: scripts/check_handoff.py still reads its files strictly.
+the squash/rebase text or none. scripts/check_handoff.py reads 01 and 03 through _read (item 092).
+Known gaps: check_handoff --all never reads the 01 of an item with no 03 (092 01 F17), and
+check_handoff ignores the why from open_branches' _read of request.md (092 01 F22).
 """
 import datetime as dt
 import os

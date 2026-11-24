@@ -3829,6 +3829,166 @@ def test_unreadable_log_exits_1_alone(tmp_path):
     assert order.index("ORPHAN LOG") + 1 == order.index("UNREADABLE") == order.index("INBOX") - 1, out
 
 
+
+# Item 092 (RI-014): check_handoff.py reads 01 and 03 through check_pipeline's _read; an unreadable file is a
+# FAIL line and exit 1, never a traceback, a count from "" or LEGACY.
+def _run3h(root, *args):
+    """(exit code, stdout decoded with replace, stderr bytes) of check_handoff.py in `root` (item 092)."""
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_handoff.py"), *args], cwd=root,
+                       capture_output=True)
+    return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr
+
+
+def _h03(d, body=b""):
+    """A clean 03 in folder d (one fact row, matching Totals line, Self-check), prefixed with `body`."""
+    d.mkdir(parents=True, exist_ok=True)
+    clean = ("# 03\n## Fact check\n| a | b |\n|---|---|\n| x | y |\n"
+             "1 rows checked \u2192 1 VERIFIED as-is, 0 fixed, 0 removed\n## Self-check\nok\n")
+    (d / "03-handoff.md").write_bytes(body + clean.encode("utf-8"))
+
+
+def _ok3(code, out, err, want_code, lines):
+    assert b"Traceback" not in err, err
+    for line in lines:
+        assert line in out.splitlines(), out
+    assert code == want_code, out
+
+
+def test_handoff_bad_01_no_03(tmp_path):
+    """092 (a): a non-UTF-8 01 and no 03: not-computed sources line, FAIL line, exit 1 (M-a, M-c)."""
+    bad, clean = tmp_path / "bad", tmp_path / "clean"
+    (bad / "work" / "150").mkdir(parents=True)
+    (bad / "work" / "150" / "01-research.md").write_bytes(BAD + b"see https://x.example/a\n")
+    code, out, err = _run3h(bad, "150")
+    _ok3(code, out, err, 1, [
+        "sources count (unique URLs in 01-research.md): not computed "
+        "(work/150/01-research.md unreadable (not UTF-8 at byte 0))",
+        "FAIL: work/150/01-research.md unreadable (not UTF-8 at byte 0)",
+        "no work/150/03-handoff.md; nothing else to check"])
+    assert not any(re.fullmatch(r"sources count \(unique URLs in 01-research.md\): \d+", l)
+                   for l in out.splitlines()), out
+    (clean / "work" / "150").mkdir(parents=True)
+    (clean / "work" / "150" / "01-research.md").write_bytes(b"see https://x.example/a\n")
+    code, out, err = _run3h(clean, "150")
+    _ok3(code, out, err, 0, ["sources count (unique URLs in 01-research.md): 1",
+                             "no work/150/03-handoff.md; nothing else to check"])
+    assert not any(l.startswith("FAIL:") for l in out.splitlines()), out
+
+
+def test_handoff_bad_03(tmp_path):
+    """092 (b): a non-UTF-8 03 next to a good 01: FAIL line, 1 problem(s), no table checks (M-b, M-d, M-g)."""
+    bad, clean = tmp_path / "bad", tmp_path / "clean"
+    for root, body in ((bad, BAD), (clean, b"")):
+        d = root / "work" / "150"
+        _h03(d, body)
+        (d / "01-research.md").write_bytes(b"see https://x.example/a\n")
+    code, out, err = _run3h(bad, "150")
+    _ok3(code, out, err, 1, ["FAIL: work/150/03-handoff.md unreadable (not UTF-8 at byte 0)", "1 problem(s)"])
+    assert not any(l.startswith("fact-check rows:") for l in out.splitlines()), out
+    code, out, err = _run3h(clean, "150")
+    _ok3(code, out, err, 0, ["sources count (unique URLs in 01-research.md): 1", "PASS"])
+
+
+def test_handoff_all_one_bad_03(tmp_path):
+    """092 (c): --all over three items, one 03 unreadable: that item is FAIL, the rest PASS (M-b, M-d).
+    Every folder has a 03, so no git call is made. No 01: no sources count line."""
+    bad, clean = tmp_path / "bad", tmp_path / "clean"
+    for root in (bad, clean):
+        for item in ("150", "151", "152"):
+            _h03(root / "work" / item, BAD if root is bad and item == "151" else b"")
+    code, out, err = _run3h(bad, "--all")
+    _ok3(code, out, err, 1, ["150: PASS", "151: FAIL: work/151/03-handoff.md unreadable (not UTF-8 at byte 0)",
+                             "152: PASS", "FAIL on 151"])
+    code, out, err = _run3h(clean, "--all")
+    _ok3(code, out, err, 0, ["150: PASS", "151: PASS", "152: PASS", "no new failures"])
+    code, out, err = _run3h(clean, "150")
+    _ok3(code, out, err, 0, ["PASS"])
+    assert not any(l.startswith("sources count") for l in out.splitlines()), out
+
+
+def test_handoff_03_is_directory(tmp_path):
+    """092 (d): a 03 that is a directory is IsADirectoryError, exit 1 (M-b, M-d, M-g)."""
+    bad, clean = tmp_path / "bad", tmp_path / "clean"
+    (bad / "work" / "150" / "03-handoff.md").mkdir(parents=True)
+    code, out, err = _run3h(bad, "150")
+    _ok3(code, out, err, 1, ["FAIL: work/150/03-handoff.md unreadable (IsADirectoryError)", "1 problem(s)"])
+    _h03(clean / "work" / "150")
+    code, out, err = _run3h(clean, "150")
+    _ok3(code, out, err, 0, ["PASS"])
+
+
+def test_handoff_legacy_bad_03_is_fail(tmp_path):
+    """092 (e): an unreadable 03 of a LEGACY ID is FAIL under --all, never LEGACY (M-b, M-d, M-f)."""
+    bad, clean = tmp_path / "bad", tmp_path / "clean"
+    _h03(bad / "work" / "003", BAD)
+    code, out, err = _run3h(bad, "--all")
+    _ok3(code, out, err, 1, ["003: FAIL: work/003/03-handoff.md unreadable (not UTF-8 at byte 0)", "FAIL on 003"])
+    d = clean / "work" / "003"
+    d.mkdir(parents=True)
+    (d / "03-handoff.md").write_text("# 03\n## Fact check\n| a | b |\n|---|---|\n| x | y |\n", encoding="utf-8")
+    code, out, err = _run3h(clean, "--all")
+    _ok3(code, out, err, 0, ["no new failures"])
+    assert any(l.startswith("003: LEGACY (") for l in out.splitlines()), out
+
+
+def test_handoff_all_bad_01_good_03(tmp_path):
+    """092 (f): under --all a bad 01 next to a good 03 is FAIL, though every 03 check passes (M-a, M-d)."""
+    bad, clean = tmp_path / "bad", tmp_path / "clean"
+    for root, body in ((bad, BAD), (clean, b"")):
+        d = root / "work" / "151"
+        _h03(d)
+        (d / "01-research.md").write_bytes(body + b"see https://x.example/a\n")
+    code, out, err = _run3h(bad, "--all")
+    _ok3(code, out, err, 1, ["151: FAIL: work/151/01-research.md unreadable (not UTF-8 at byte 0)", "FAIL on 151"])
+    code, out, err = _run3h(clean, "--all")
+    _ok3(code, out, err, 0, ["151: PASS", "no new failures"])
+
+
+def test_unreadable_problem_fullmatch_only():
+    """092 step 4 (RI-012): only a whole unreadable-file problem skips LEGACY, never a substring."""
+    sys.path.insert(0, str(REPO / "scripts"))
+    import check_handoff
+    rx = check_handoff.UNREADABLE_PROBLEM
+    assert rx.fullmatch("work/003/03-handoff.md unreadable (not UTF-8 at byte 0)")
+    assert rx.fullmatch("work/003/03-handoff.md unreadable (IsADirectoryError)")
+    assert rx.fullmatch("no Totals line ('<n> rows checked -> ...')") is None
+    assert rx.fullmatch("x unreadable (not UTF-8 at byte 0); y") is None
+
+
+def test_handoff_read_census():
+    """092 step 6: check_handoff.py has no raw read (read_text, read_bytes, open); main reads 01 and 03 by
+    exactly 2 `_read` attribute calls (positive control, counted from the AST, RI-006)."""
+    import ast
+    import collections
+    tree = ast.parse((REPO / "scripts" / "check_handoff.py").read_text(encoding="utf-8"))
+    seen = collections.Counter()
+    reads = collections.Counter()
+
+    def walk(node, fn):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, ast.Call):
+                if isinstance(ch.func, ast.Attribute) and ch.func.attr in ("read_text", "read_bytes", "open"):
+                    seen[(fn, ch.func.attr)] += 1
+                elif isinstance(ch.func, ast.Name) and ch.func.id == "open":
+                    seen[(fn, "open")] += 1
+                if isinstance(ch.func, ast.Attribute) and ch.func.attr == "_read":
+                    reads[fn] += 1
+            walk(ch, ch.name if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)) else fn)
+
+    walk(tree, None)
+    assert dict(seen) == {}
+    assert sum(seen.values()) == 0
+    assert dict(reads) == {"main": 2}
+
+
+def test_r1_log_refuses_not_computed():
+    """092 known gap 2: `--log R1` refuses a not-computed sources value, so the item stays INCOMPLETE."""
+    cp = _cp()
+    assert cp.log_fields_ok("R1", "092", "brief written | not computed (work/092/01-research.md unreadable "
+                                         "(not UTF-8 at byte 0))") is False
+    assert cp.log_fields_ok("R1", "092", "brief written | 7") is True
+
+
 def test_unreadable_log_directory(tmp_path):
     """089 6b: a log path that is a directory is IsADirectoryError, exit 1 (M2)."""
     f = _tree(tmp_path, None)
