@@ -178,8 +178,17 @@ def test_repo_pipeline_has_no_skipped_items(tmp_path):
                           text=True, encoding="utf-8")
     if flag.returncode != 0 or flag.stdout.strip() != "false":
         pytest.skip("REPO is a shallow clone: 083 is judged strictly (item 084); run git fetch --unshallow")
+    stash = subprocess.run(["git", "stash", "list"], cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace")         # item 097: the HEAD worktree shares refs/stash
+    assert stash.returncode == 0, stash.stderr
     code, out = _run_head(REPO, tmp_path, "check_pipeline.py")
-    assert code == 0, out
+    if stash.stdout.strip():                           # a stash entry: exit 1 by the STASH line alone
+        n = len([l for l in stash.stdout.splitlines() if l.strip()])
+        assert code == 1, out
+        assert _pick(out, "STASH:").startswith(f"STASH: {n} (first: "), out
+    else:
+        assert code == 0, out
+        assert "STASH: none" in out.splitlines(), out
     assert "RESEARCH CODE: none" in out                 # item 062
     assert "061: complete" in out                      # item 064: 061 stays complete with work/ .py as code
     assert "I3 FAIL: none" in out  # item 071
@@ -2368,7 +2377,7 @@ def test_agent_texts_name_item_071(path, must, must_not):
 # Item 081 (RI-014): a failed git read is an error or "not checked", never none, 0 or [].
 GIT_LINES = ("LOG TIME:", "OPEN BRANCHES", "IN PR:", "RULES BRANCH:", "ID CLASH:", "MAIN AHEAD:",
              "UNTRACKED CHANGE:", "RESEARCH CODE:", "REAL-DATA FIELD:", "UNCOMMITTED STEP:", "INBOX:",
-             "RULE NOT SEEN:")   # item 089 (E1, from 088): after 089's shallow decode change
+             "RULE NOT SEEN:", "STASH:")   # item 089 (E1, from 088): after 089's shallow decode change; 097
 # Every _git / _git_ok call in scripts/check_pipeline.py by (innermost function, callee): (count, reason).
 # A new git call adds or bumps one entry with its reason (items 084, 086 build on this).
 GIT_CENSUS = {
@@ -2401,6 +2410,8 @@ GIT_CENSUS = {
     ("fetch_coverage", "_git"): (2, "fetch read: exit 0 values, exit 1 -> url read, other -> 'git config failed' (081); "
                                     "url read: exit 1 = no origin, 0 = SINGLE_TEXT, other -> failed (094)"),
     ("_head_work_files", "_git_ok"): (1, "095: failure -> None -> entries stay not checked, exit 1"),
+    ("main", "_git_ok"): (1, "097: stash list; no git -> not checked, other failure -> not checked + exit 1, "
+                             "entries -> exit 1"),
 }
 
 
@@ -2436,7 +2447,7 @@ def test_git_call_census():
     walk(tree, None)
     assert dict(seen) == {k: v[0] for k, v in GIT_CENSUS.items()}
     assert all(reason.strip() for _, reason in GIT_CENSUS.values())
-    assert sum(seen.values()) == 50                    # 41 (081) + 5 (084) + 1 (081 r2) + 2 (094) + 1 (095)
+    assert sum(seen.values()) == 51                    # 41 (081) + 5 (084) + 1 (081 r2) + 2 (094) + 1 (095) + 1 (097)
 
 
 def test_all_git_fails_no_line_says_none(tmp_path, monkeypatch, capsys):
@@ -2474,9 +2485,99 @@ def test_malformed_shallow_real_git_nothing_none(tmp_path):
     code, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", "2026-11-20")
     for p, lines in _git_lines(out).items():
         assert lines, f"{p} missing:\n{out}"
+        if p == "STASH:":       # item 097: no refs/stash, so no history read (stash.c list_stash): a true none
+            assert lines == ["STASH: none"], out
+            continue
         assert not any(l.rstrip().endswith(": none") for l in lines), out
     assert code == 1, out
     assert _run(repo, "check_pipeline.py", "--next-id") == (2, "")
+
+
+# Item 097 (RI-009): STASH from `git stash list`, decided by its exit code and empty stdout only (RI-012).
+STASH_TAIL = "; local to this checkout; only the person drops an entry (item 097)"
+
+
+def _stash_repo(tmp_path):
+    """_history's repo with config/x.json edited, ready for a `git stash push`."""
+    repo, c = _history(tmp_path)
+    _write(repo, "config/x.json", '{"a": 1}\n')
+    return repo, c
+
+
+def _short(repo):
+    return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+@NO_GIT
+def test_stash_entry_is_listed_then_none_after_drop(tmp_path):
+    """(a) one stash entry: `STASH: 1 (first: stash@{0}: WIP on main: <sha7> cutoff)...`, exit 1.
+    (b) after `git stash drop`: `STASH: none`, exit 0 (exit 0 + empty stdout on the installed git)."""
+    repo, c = _stash_repo(tmp_path)
+    _git(repo, "stash", "push", "-q")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", c, "--today", "2026-11-20")
+    assert _pick(out, "STASH:") == f"STASH: 1 (first: stash@{{0}}: WIP on main: {_short(repo)} cutoff){STASH_TAIL}", out
+    assert code == 1, out
+    _git(repo, "stash", "drop", "-q")
+    raw = subprocess.run(["git", "stash", "list"], cwd=repo, capture_output=True, text=True)
+    assert (raw.returncode, raw.stdout) == (0, "")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", c, "--today", "2026-11-20")
+    assert _pick(out, "STASH:") == "STASH: none", out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_stash_failed_read_is_not_checked(tmp_path, monkeypatch, capsys):
+    """(c) `git stash list` exits 128: not checked with the reason, exit 1; stdout is not read (it holds text)."""
+    cp = _cp()
+    repo, c = _history(tmp_path)
+    monkeypatch.chdir(repo)
+    _patched_git(monkeypatch, cp, {("stash", "list"): ("stash@{0}: WIP on main: abc x\n", 128)})
+    code = cp.main(["--untracked-from", c, "--today", "2026-11-20"])
+    out = capsys.readouterr().out
+    assert _pick(out, "STASH:") == "STASH: not checked (git stash failed (exit 128)) (item 097)", out
+    assert code == 1, out
+
+
+def test_stash_no_git_is_not_checked_exit_unchanged(tmp_path, monkeypatch, capsys):
+    """No git: `STASH: not checked (no git)`, never none; the line alone does not change the exit."""
+    cp = _cp()
+    _item(tmp_path, "150", ALL)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cp, "_git", lambda *a: None)
+    code = cp.main(["--today", "2026-11-20"])
+    out = capsys.readouterr().out
+    assert _pick(out, "STASH:") == "STASH: not checked (no git)", out
+    assert code == 0, out
+
+
+@NO_GIT
+def test_stash_in_detached_worktree_is_seen_by_main_checkout(tmp_path):
+    """(d) a stash pushed in a `git worktree add --detach` worktree shows in the main checkout (refs/stash is
+    shared by every worktree)."""
+    repo, c = _history(tmp_path)
+    wt = tmp_path / "wt"
+    _git(repo, "worktree", "add", "--detach", "-q", str(wt), "HEAD")
+    _write(wt, "config/x.json", '{"a": 1}\n')
+    _git(wt, "stash", "push", "-q")
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", c, "--today", "2026-11-20")
+    assert _pick(out, "STASH:") == (f"STASH: 1 (first: stash@{{0}}: WIP on (no branch): {_short(repo)} cutoff)"
+                                    f"{STASH_TAIL}"), out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_stash_entry_with_bad_shallow_is_never_none(tmp_path):
+    """(e) a stash entry made before the shallow file is corrupted: `git stash list` runs `git log -g`,
+    which dies; measured exit 1 on git 2.43.0 (05). The line is not checked with that exit, never none."""
+    repo, c = _stash_repo(tmp_path)
+    _git(repo, "stash", "push", "-q")
+    (repo / ".git" / "shallow").write_text(f"{c}\nzz\n", encoding="utf-8")
+    raw = subprocess.run(["git", "stash", "list"], cwd=repo, capture_output=True, text=True)
+    assert raw.returncode != 0, raw
+    code, out = _run(repo, "check_pipeline.py", "--untracked-from", c, "--today", "2026-11-20")
+    assert _pick(out, "STASH:") == f"STASH: not checked (git stash failed (exit {raw.returncode})) (item 097)", out
+    assert code == 1, out
 
 
 @NO_GIT
@@ -2490,7 +2591,10 @@ def test_non_utf8_shallow_line_no_traceback(tmp_path):
     out = r.stdout.decode("utf-8", "replace")
     assert b"Traceback" not in r.stderr, r.stderr
     assert r.returncode == 1, out
-    for lines in _git_lines(out).values():
+    for p, lines in _git_lines(out).items():
+        if p == "STASH:":       # item 097: no refs/stash, so no history read (stash.c list_stash): a true none
+            assert lines == ["STASH: none"], out
+            continue
         assert not any(l.rstrip().endswith(": none") for l in lines), out
     # item 089: the shallow file is unreadable (not UTF-8), so the reason is shallow clone, never squash/rebase
     lines = out.splitlines()

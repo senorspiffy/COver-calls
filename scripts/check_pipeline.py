@@ -309,6 +309,14 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   of the working tree against HEAD's commit state. Known gaps: (a) a file and its log
                   line written but not committed is not listed; (b) a modified tracked step file (e.g.
                   a round-2 06) is not listed; (c) 07 and other files outside 01-06 are not checked.
+  STASH           (item 097, RI-009, exit 1) `git stash list` in this checkout (refs/stash is shared by every
+                  worktree of the repo). Exit 0 with empty output prints `STASH: none`; exit 0 with output
+                  prints `STASH: <n> (first: <first line>); local to this checkout; only the person drops an
+                  entry (item 097)` (exit 1). Decided by the exit code and empty stdout only, never by line text
+                  (RI-012); <n> counts non-empty lines and is shown only (a log config that adds lines can raise
+                  it, never turn entries into none). Without git `STASH: not checked (no git)`, exit unchanged;
+                  any other failure `STASH: not checked (git stash failed (exit <n>)) (item 097)`, exit 1, and
+                  stdout is not read. Known gap: it sees only entries left behind, not a push and drop in one run.
 --next-id prints the next free ID over HEAD and every unmerged remote branch, so two threads
 never pick the same number. Outside a git repo (or without git) the branch part is skipped.
 Item 081: when `git branch -r` or a branch's `git ls-tree <ref> -- work/` fails, it prints
@@ -2257,6 +2265,20 @@ def main(argv):
     print(f"RESEARCH CODE: {'not checked (no git)' if research is None else research[0]}")
     print(f"REAL-DATA FIELD: {'not checked (no git)' if real is None else real[0]}")
     print(f"UNCOMMITTED STEP: {'not checked (no git)' if uncommitted is None else uncommitted[0]}")
+    stash_out, stash_why = _git_ok("stash", "list")         # item 097 (RI-009): decided by exit code only
+    stash_bad = False
+    if stash_why == "no git":                              # exit unchanged, never none
+        print("STASH: not checked (no git)")
+    elif stash_why:                                         # stdout is not read on a failed read
+        print(f"STASH: not checked ({stash_why}) (item 097)")
+        stash_bad = True
+    elif stash_out.strip() == "":
+        print("STASH: none")
+    else:
+        entries = [l for l in stash_out.splitlines() if l.strip()]   # n is shown only, never decides
+        print(f"STASH: {len(entries)} (first: {entries[0]}); local to this checkout; only the person drops an "
+              f"entry (item 097)")
+        stash_bad = True
     orphans, orphan_whys = orphan_log_lines()
     if orphan_whys:                                         # item 089: never a bare none for a lost file
         lost = "; ".join(orphan_whys)
@@ -2276,7 +2298,7 @@ def main(argv):
         or (real and real[2]) or (uncommitted and uncommitted[1]) \
         or (isinstance(branches, str) and branches != SINGLE_TEXT) \
         or branch_errors or isinstance(ahead, str) or batch["flagged"] or env_failed or unreadable \
-        or unchecked else 0
+        or unchecked or stash_bad else 0
 
 
 if __name__ == "__main__":
