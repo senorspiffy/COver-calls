@@ -8,3 +8,4 @@ What A1 should look at:
 4. Unit-test scope: the printed `INCOMPLETE NOT CHECKED:` line and the `committed` wiring from `_head_work_files` are not covered by 101; they stay with 095 M5/M11. Confirm those still fail on the branch.
 5. Full-clone output: I3's diff of `check_pipeline.py` with/without the test file at 2483481 is empty; no scripts/, templates/, .claude/, config/, ccbot/ change.
 6. RI status to copy on main: RI-014 OPEN, unchanged (tests only; 8 of 8 `elif unsure` sites in `incomplete` now pinned). RI-001 and RI-010 ESCALATED, unchanged. No RULE_PATHS file is touched.
+A1 result: PASS (2026-11-24, logs/audit/2026-11-24-101.md: 959 passed, 1 skipped; 5 elif-False + 3 key mutants fail the named ids, no -nogit id; 095 M5/M11 still fail; no scripts/ change)
