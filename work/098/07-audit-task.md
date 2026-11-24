@@ -9,3 +9,4 @@ What A1 should look at:
 5. Residuals not built (03): (a) the broad SUMMARY_LINE-outside-read-section rule (needs a measurement over 076-091), (b) FROM/FROM-1 pins for the other 7 cutoffs, (c) the mutant-rule sentence in the i1 text. Each needs a follow-up item.
 6. RULE_PATHS are touched (run-item.md, check_pipeline.py, tests), so the person's OK is needed at PR review.
 7. RI status to copy on main: RI-010 guardrail extended (build-round headings from 099; trailers through commit_step, no amend), stays ESCALATED. RI-014 is OPEN and unchanged (no new git call, census 51). RI-001 is unchanged.
+A1 result: PASS (2026-11-24, logs/audit/2026-11-24-098.md)
