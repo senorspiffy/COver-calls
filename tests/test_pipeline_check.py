@@ -5056,16 +5056,53 @@ def test_section_flags_match_run_seconds_rule():
 
 
 # Item 091 step 7 (RI-007): one scratch-dir sentence in four rule files (text only: no check sees a collision).
-SCRATCH = ("Every agent works in its own new scratch dir, made with `python3 -c 'import tempfile; "
-           "print(tempfile.mkdtemp(prefix=\"<agent>-<ID>-r<round>-\", dir=\"<absolute scratchpad path>\"))'`, and "
-           "never reuses or writes into another agent's dir, even for the same item; agents with no shell (R1-R3, "
-           "I1) get theirs from the orchestrator (item 091).")
+# Item 097 replaced it; 091's text is kept as OLD_SCRATCH so a file left on it fails.
+OLD_SCRATCH = ("Every agent works in its own new scratch dir, made with `python3 -c 'import tempfile; "
+               "print(tempfile.mkdtemp(prefix=\"<agent>-<ID>-r<round>-\", dir=\"<absolute scratchpad path>\"))'`, "
+               "and never reuses or writes into another agent's dir, even for the same item; agents with no shell "
+               "(R1-R3, I1) get theirs from the orchestrator (item 091).")
+SCRATCH = ("Every agent works in its own new scratch dir and never reuses or writes into another agent's dir, even for "
+           "the same item. Agents with a shell (I2, I3, A1) make their own with `python3 -c 'import tempfile; "
+           "print(tempfile.mkdtemp(prefix=\"<agent>-<ID>-r<round>-\", dir=\"<absolute scratchpad path>\"))'` "
+           "(`<agent>` in lower case, e.g. i3) and put any worktree inside it with `git worktree add --detach`; the "
+           "orchestrator names no scratch path to them. For an agent with no shell (R1-R3, I1), the orchestrator runs "
+           "that same command and passes on the path it printed, never a path it typed, a fixed path or `mktemp -d`. "
+           "No one runs `git stash` in any checkout (refs/stash is shared by every worktree of the repo); restore a "
+           "probe file in the scratch worktree with `git checkout HEAD -- <file>`, or from a copy, never in the main "
+           "checkout (items 091, 097).")
+SCRATCH_FILES = (".claude/commands/run-item.md", ".claude/agents/i2-builder.md", ".claude/agents/i3-verifier.md",
+                 ".claude/agents/a1-auditor.md")
 
 
 def test_scratch_sentence_same_in_four_files():
-    for f in (".claude/commands/run-item.md", ".claude/agents/i2-builder.md", ".claude/agents/i3-verifier.md",
-              ".claude/agents/a1-auditor.md"):
-        assert (REPO / f).read_text(encoding="utf-8").count(SCRATCH) == 1, f
+    """Items 091, 097: the new sentence once in each of the 4 files, 091's sentence in none."""
+    assert "git stash" in SCRATCH and "--detach" in SCRATCH
+    for f in SCRATCH_FILES:
+        text = (REPO / f).read_text(encoding="utf-8")
+        assert text.count(SCRATCH) == 1, f
+        assert text.count(OLD_SCRATCH) == 0, f
+
+
+# Item 097 step 2 (RI-009): the end-of-item check names STASH; text pins, each exactly once.
+STASH_CLAUSE = ("and `LOG BATCH:` must not name it (item 086) and `STASH:` must be `none`; only the person drops or "
+                "clears a stash entry, and an agent never drops one it did not make (item 097)")
+DETACH_PHRASE = "(a `git worktree add --detach` worktree or a copied folder)"
+SCRATCH_DIR_SENTENCE = ("05 (I2) / 06 (I3) has one column-0 `Scratch dir: <path mkdtemp printed>` line per dir used, "
+                        "or `Scratch dir: none (<reason>)` (item 097).")
+
+
+def test_run_item_stash_clause():
+    assert (REPO / ".claude/commands/run-item.md").read_text(encoding="utf-8").count(STASH_CLAUSE) == 1
+
+
+def test_i2_detach_phrase():
+    assert (REPO / ".claude/agents/i2-builder.md").read_text(encoding="utf-8").count(DETACH_PHRASE) == 1
+
+
+@pytest.mark.parametrize("f", [".claude/agents/i2-builder.md", ".claude/agents/i3-verifier.md"])
+def test_scratch_dir_line_in_agent_texts(f):
+    """RI-010: the duty the Scratch dir check enforces (step C) is written in the agent text."""
+    assert (REPO / f).read_text(encoding="utf-8").count(SCRATCH_DIR_SENTENCE) == 1, f
 
 
 # Item 094 (RI-014): a single-branch clone has no ref for other branches, so OPEN BRANCHES, IN PR, RULES BRANCH,
