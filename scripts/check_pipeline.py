@@ -97,12 +97,18 @@ and its last commit date and age (039). Three more lines come from the branches:
                   unrelated branch shows `no hand-off` there; this BRANCH ERROR is the loud signal.
                   Item 090 (RI-014): in a shallow clone origin/main is not listed (it is not merged in
                   the shallow view; MAIN AHEAD says not checked) and main_ahead is not called; an
-                  unrelated ref prints `<ref>: not checked (shallow clone; run git fetch --unshallow)`,
-                  and with checked paths its BRANCH ERROR is `shallow clone; <n> file(s) on checked paths
-                  (first: <p>) not checked; run git fetch --unshallow (item 090)` (exit 1, as before).
+                  unrelated ref is not scanned and, with checked paths, is a BRANCH ERROR (exit 1).
+                  Item 095 (RI-014): all such refs fold into one sub-line `  shallow clone: <n> ref(s)
+                  with no merge base not checked (<ref>, <ref>, ...); run git fetch --unshallow (item
+                  095)` (refs in open_branches order, the per-ref age dropped) and, when k >= 1 of them
+                  hold files on checked paths (the dict's `held` count, never error text), one BRANCH
+                  ERROR `shallow clone; <k> of <n> ref(s) hold files on checked paths, not checked
+                  (<refs with held > 0>); run git fetch --unshallow (item 095)`. A ref whose ls-tree
+                  failed (`held` None) keeps its own `<ref> (<why>)` BRANCH ERROR. A full clone is
+                  unchanged (081's per-ref unrelated line).
                   Known gaps: a branch with a shared shallow base is scanned as today and was not
-                  checked by 090; refs already in main are listed (not merged in the shallow view); a
-                  single-branch clone hides branches (sent to A1).
+                  checked by 090; refs already in main are listed (not merged in the shallow view), and
+                  merged and open unrelated refs are not told apart in the fold (item 095).
 --log <agent> <ID> "<fields>" (item 045) appends `HH:MM | <agent> | <ID> | <fields>` with the
 current UTC time to logs/research or logs/implementation/<UTC date>.md, and refuses (exit 2)
 fields that don't match the agent's format (LOG_FORMAT). Every step logs this way, right after
@@ -339,6 +345,16 @@ none). Each such pair is printed after INCOMPLETE as `RULE NOT SEEN: <ID> (<step
 without <CONST> (<rule item>): judged by <old rule>; item 084)`, or `none`; the exit code is
 unchanged. No git or a shallow clone (079's _shallow_boundaries) prints `RULE NOT SEEN: not checked
 (no git)` / `not checked (shallow clone; run git fetch --unshallow)` and keeps the numeric cutoffs.
+Item 095 (RI-014): in a shallow clone the anchor can't be read, so an entry a gate (TIMED, TESTS when every
+own I2 line passes I2_BEFORE, LOG BATCH not computable, Suite, round headings, verdict) would give for a step
+file committed at HEAD is printed on `INCOMPLETE NOT CHECKED: <ID> (<entry>; <entry>), ...; rule seen not
+checked (shallow clone; run git fetch --unshallow; item 095)` (or `INCOMPLETE NOT CHECKED: none`; the line
+is printed only when shallow), not on INCOMPLETE; the exit is 1 for a non-empty list (fail closed). Only the
+I2 part of a format entry moves; other agents stay on INCOMPLETE. A step file not in HEAD's tree (ls-tree
+-r HEAD -- work/, read once and only when shallow) keeps its entries on INCOMPLETE, as a full clone does;
+a failed HEAD tree read leaves them not checked (exit 1). Known gaps: no-git and unborn-HEAD entries are
+not labelled; the finer test of which step files lie above the shallow boundary is not built; an exact
+TESTS entry keeps the new-rule hint where the full clone shows the I2_BEFORE hint (both INCOMPLETE).
 Item 088: an uncommitted 05/06 (any check run before its commit) keeps them with no entry; an unborn
 HEAD prints `not checked (unborn HEAD)` and keeps them; a failed HEAD verify prints `not checked (git
 rev-parse --verify HEAD failed (exit <n>))`, keeps them and gives exit 1. A failed git call (`<step>
@@ -909,7 +925,26 @@ def _suite_lines(text):
             if state == "out" and line.startswith("Suite:")]
 
 
-def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=None):
+def _unsure(item_dir, step, env, committed):
+    """Item 095 (RI-014): True when a gated entry on `step` can't be judged: the clone is shallow
+    (env == SHALLOW_TEXT, equality only; no git, unborn HEAD and a failed verify stay strict) and the
+    step file is committed at HEAD (`committed`, from _head_work_files), or HEAD's tree could not be
+    read (`committed` None: not checked, exit 1). An uncommitted step file gives False: a full clone
+    keeps its entries too ((None, "") from _rule_seen, item 088), so a shallow clone keeps them (C1)."""
+    if env != SHALLOW_TEXT:
+        return False
+    return committed is None or f"work/{item_dir.name}/{STEPS[step]}" in committed
+
+
+def _head_work_files():
+    """Item 095 (C1): the set of paths under work/ in HEAD's tree (never the index or the working tree),
+    or None when the ls-tree fails (the caller then treats every gated entry as not checked)."""
+    out, why = _git_ok("ls-tree", "-r", "--name-only", "HEAD", "--", "work/")
+    return None if why else set(out.splitlines())
+
+
+def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=None, unchecked=None,
+               committed=None):
     """Item 043: what is missing from a step's own checklist ([] = nothing). Item 084: a TESTS or
     VERDICT check that would fire is dropped only if the item's 05 / 06 was added under a rule file
     without that constant (_rule_seen False) and, for I2, every I2 line passes I2_BEFORE; each such
@@ -926,8 +961,18 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
     equality) of an ID from TIMED_FROM on is the entry `LOG BATCH not computable: <reason> (item 090)`, gated
     the same way (not seen: the pair `LOG BATCH not computable as text only`). Item 091: from ROUND_HEADING_FROM
     on, stray_run_headings of 05 and 06 is one entry per file, gated on that file by _rule_seen(ROUND_HEADING_FROM)
-    (not seen: the pair `no round-heading check`); an unreadable file is `<step> round headings not checked`."""
+    (not seen: the pair `no round-heading check`); an unreadable file is `<step> round headings not checked`.
+    Item 095 (RI-014): `unchecked` is a list of (ID, entry), like not_seen. Where a gate's anchor is not read
+    and _unsure(item_dir, step, env, committed) is True (a shallow clone, the step file committed at HEAD or
+    HEAD's tree unreadable), the entry goes to `unchecked` instead of the return value: the TIMED entry; the
+    TESTS entry only when every own I2 line passes I2_BEFORE (else it is exact and stays); only I2 moves out
+    of a format entry, other agents stay; LOG BATCH not computable; Suite; round headings (05 and 06); the
+    verdict checks. With `unchecked` None (no caller collects it) nothing moves: strict, never dropped."""
     not_seen = [] if not_seen is None else not_seen
+
+    def unsure(step):                                       # item 095: only when a caller collects them
+        return unchecked is not None and _unsure(item_dir, step, env, committed)
+
     if not item_dir.name.isdigit() or int(item_dir.name) < CHECKLIST_FROM:
         return []
     missing = []
@@ -958,6 +1003,10 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
             if seen is False:
                 bad.remove("I2")
                 not_seen.append((item_dir.name, "05", sha7, "TIMED_FROM", "090", "untimed I2 form"))
+            elif unsure("05"):   # item 095: anchor not read in a shallow clone
+                bad.remove("I2")
+                unchecked.append((item_dir.name, f"log line for I2 does not match its format (item 045): "
+                                                 f'I2 wants "{log_hint("I2", item_dir.name, new_rule)}"'))
         elif "I2" in bad and int(item_dir.name) >= TESTS_FORMAT_FROM:    # item 084: TESTS gate
             seen, sha7 = _rule_seen(item_dir, "05", "TESTS_FORMAT_FROM", env)
             note = sha7 if seen is None else ""             # a git-failed or no-file note; "" otherwise
@@ -968,6 +1017,11 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
                        if m and m[3] == "I2" and m[4] == item_dir.name):
                     bad.remove("I2")
                     not_seen.append((item_dir.name, "05", sha7, "TESTS_FORMAT_FROM", "076", "I2_BEFORE"))
+            elif unsure("05") \
+                    and all(log_fields_ok("I2", m[4], m[5], new_rule=False) for m in own_i2):   # item 095
+                bad.remove("I2")
+                unchecked.append((item_dir.name, f"log line for I2 does not match its format (item 045): "
+                                                 f'I2 wants "{log_hint("I2", item_dir.name, new_rule)}"'))
         if bad:
             wants = "; ".join(f'{a} wants "{log_hint(a, item_dir.name, new_rule)}"' for a in bad)
             missing.append(f"log line for {' '.join(bad)} does not match its format (item 045): {wants}")
@@ -978,6 +1032,8 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
         seen, sha7 = _rule_seen(item_dir, "05", "TIMED_FROM", env)
         if seen is False:
             not_seen.append((item_dir.name, "05", sha7, "TIMED_FROM", "090", "LOG BATCH not computable as text only"))
+        elif unsure("05"):    # item 095
+            unchecked.append((item_dir.name, f"LOG BATCH not computable: {nc} (item 090)"))
         else:
             missing += [f"LOG BATCH not computable: {nc} (item 090)"] + \
                 ([sha7] if seen is None and sha7 and sha7 not in missing else [])   # the same 05 note once
@@ -1003,6 +1059,8 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
                 seen, sha7 = _rule_seen(item_dir, "05", "SUITE_FROM", env)
                 if seen is False:                           # below SUITE_FROM there is no Suite check
                     not_seen.append((item_dir.name, "05", sha7, "SUITE_FROM", "082", "no Suite check"))
+                elif unsure("05"):    # item 095
+                    unchecked.append((item_dir.name, fired))
                 else:
                     missing += [fired] + ([sha7] if seen is None and sha7 else [])
     if int(item_dir.name) >= ROUND_HEADING_FROM:            # item 091: run headings LOG BATCH can't read
@@ -1018,6 +1076,8 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
                 if seen is False:                           # below ROUND_HEADING_FROM there is no such check
                     not_seen.append((item_dir.name, step, sha7, "ROUND_HEADING_FROM", "091",
                                      "no round-heading check"))
+                elif unsure(step):    # item 095
+                    unchecked.append((item_dir.name, fired))
                 else:
                     missing += [fired] + ([sha7] if seen is None and sha7 else [])
     if ver_text is not None:                                # item 071 (a)-(d); item 089: 06 was read
@@ -1034,6 +1094,8 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
                 seen, sha7 = _rule_seen(item_dir, "06", "VERDICT_FROM", env)
                 if seen is False:                           # below VERDICT_FROM there is no verdict-line check
                     not_seen.append((item_dir.name, "06", sha7, "VERDICT_FROM", "071", "no Sent-back check"))
+                elif unsure("06"):    # item 095
+                    unchecked += [(item_dir.name, f) for f in fired]
                 else:
                     missing += fired + ([sha7] if seen is None and sha7 else [])
         if verdict is not None and not log_whys:           # item 089: no I3-line check on a lost log
@@ -1507,7 +1569,9 @@ def open_branches(today=None, shallow=None):
     (item 081), never []. Item 090 (RI-014): shallow (None = _is_shallow(), so check_handoff's call with
     no args computes it): main_ahead is not called (behind False), origin/main itself is skipped (its tip
     looks unreachable from a shallow HEAD), every dict has "shallow", and an unrelated ref with checked
-    paths gets the shallow-clone error text. Item 094 (RI-014): after a successful branch read, fetch_coverage
+    paths gets the shallow-clone error text. Item 095 (RI-014): an unrelated ref's dict also has "held", the
+    number of files on checked paths in its tree, or None when that ls-tree failed (main folds shallow
+    unrelated refs on it, never on error text). Item 094 (RI-014): after a successful branch read, fetch_coverage
     is read; SINGLE_TEXT or `git config failed (exit <n>)` is returned as the reason string (item 094)."""
     out, why = _git_ok("branch", "-r", "--no-merged", "HEAD", "--format=%(refname:short)")
     if why == "no git":
@@ -1536,6 +1600,7 @@ def open_branches(today=None, shallow=None):
             held, why = _git_ok("ls-tree", "-r", "--name-only", ref, "--", "work/", RECURRING,
                                 *RULE_PATHS, *RESEARCH_CODE_PATHS)
             held = held.splitlines() if why is None else []
+            count = len(held) if why is None else None      # item 095: None = not known, never 0
             errors = ([why] if why else
                       [f"shallow clone; {len(held)} file(s) on checked paths (first: {held[0]}) not checked; "
                        f"run git fetch --unshallow (item 090)" if shallow else
@@ -1543,7 +1608,7 @@ def open_branches(today=None, shallow=None):
                        f"(first: {held[0]}) not checked (item 081)"] if held else [])
             found.append({"ref": ref, "items": {}, "conflicts": None, "recurring": False, "clashes": [],
                           "skipped": [], "failed": [], "last": last, "rules": [], "errors": errors,
-                          "unrelated": True, "shallow": shallow})
+                          "unrelated": True, "shallow": shallow, "held": count})
             continue
         merge = _git("merge-tree", "--write-tree", "--name-only", "--no-messages", "HEAD", ref)
         conflicts = None
@@ -2059,6 +2124,8 @@ def main(argv):
     skipped, stuck, awaiting, in_pr, failed, i3_failed, unfinished = [], [], [], [], [], [], []
     (env, env_failed), not_seen = _anchor_env(), []         # items 084, 088: computed once
     shallow = env == SHALLOW_TEXT                           # item 090: before open_branches; equality only
+    unchecked = []                                          # item 095: (ID, entry) not checked when shallow
+    committed = _head_work_files() if shallow else None     # item 095 (C1): read once, only when shallow
     branches = open_branches(today, shallow)
     blist = branches if isinstance(branches, list) else []  # item 081: None (no git) or a git error
     walked = _walk(cutoff) if _git("rev-parse", "HEAD") is not None else None
@@ -2094,7 +2161,8 @@ def main(argv):
             failed.append(d.name)
         if status == "I3 FAIL":
             i3_failed.append(d.name)
-        gaps = incomplete(d, env=env, not_seen=not_seen, batch_nc=batch_nc) + (real[1].get(d.name, []) if real else [])
+        gaps = incomplete(d, env=env, not_seen=not_seen, batch_nc=batch_nc, unchecked=unchecked,
+                          committed=committed) + (real[1].get(d.name, []) if real else [])
         if gaps:
             unfinished.append(f"{d.name} ({'; '.join(gaps)})")
     for item in sorted(set(flagged) - {d.name for d in listed}):   # item 062: no request.md here
@@ -2111,6 +2179,7 @@ def main(argv):
         print(f"MAIN AHEAD: {ahead}")
     elif ahead > 0:
         print(f"MAIN AHEAD: {MAIN} has {ahead} commits not in HEAD; merge it before building (item 051)")
+    folded = []                                             # item 095: shallow unrelated refs
     if branches == SINGLE_TEXT:                             # item 094: single-branch clone, exit unchanged
         print(f"OPEN BRANCHES: not checked ({SINGLE_TEXT})")
     elif isinstance(branches, str):                         # item 081: git branch failed, exit 1
@@ -2121,8 +2190,8 @@ def main(argv):
         print("OPEN BRANCHES (not merged into HEAD):")
         for b in branches:
             age = f"; last commit {b['last']} ({(today - b['last']).days} days)" if b["last"] else ""
-            if b.get("unrelated") and b.get("shallow"):     # item 090: no merge base in the shallow view
-                print(f"  {b['ref']}: not checked ({SHALLOW_TEXT}){age}")
+            if b.get("unrelated") and b.get("shallow"):     # items 090, 095: no merge base in the shallow view
+                folded.append(b)
                 continue
             if b.get("unrelated"):                          # item 081 r2: not scanned
                 print(f"  {b['ref']}: no common history with HEAD; not scanned (item 081){age}")
@@ -2132,6 +2201,9 @@ def main(argv):
                      f"CONFLICTS: {', '.join(conflicts)}" if conflicts else "merges cleanly")
             note = f"; edits {RECURRING} (item 036)" if b["recurring"] else ""
             print(f"  {b['ref']}: items {', '.join(sorted(b['items'])) or 'none'}; {merge}{note}{age}")
+        if folded:                                          # item 095: one line, names kept, age dropped
+            print(f"  shallow clone: {len(folded)} ref(s) with no merge base not checked "
+                  f"({', '.join(b['ref'] for b in folded)}); run git fetch --unshallow (item 095)")
     if _git("rev-parse", "HEAD") is not None:
         ruling = [f"{b['ref']} changes {', '.join(b['rules'])}" for b in blist if b["rules"]]
         print(f"RULES BRANCH: {unread or ('; '.join(ruling) + '; build new items on top of it (item 049)' if ruling else 'none')}")
@@ -2143,12 +2215,25 @@ def main(argv):
     for b in blist:                                         # item 077: information, exit unchanged
         for item, status, detail in b["failed"]:
             print(f"BRANCH FAIL: {item} ({b['ref']}: {status}; {detail})")
-    branch_errors = [f"{b['ref']} ({why})" for b in blist for why in b["errors"]]
+    branch_errors = [f"{b['ref']} ({why})" for b in blist for why in b["errors"]
+                     if not (any(b is f for f in folded) and isinstance(b.get("held"), int))]
+    holding = [b["ref"] for b in folded if isinstance(b.get("held"), int) and b["held"] > 0]
+    if holding:                                             # item 095: one summary; held None keeps its own
+        branch_errors.append(f"shallow clone; {len(holding)} of {len(folded)} ref(s) hold files on checked paths, "
+                             f"not checked ({', '.join(holding)}); run git fetch --unshallow (item 095)")
     for line in branch_errors:                              # item 081: exit 1
         print(f"BRANCH ERROR: {line}")
     print(f"I3 FAIL: {', '.join(i3_failed) or 'none'}")
     print(f"A1 FAIL: {', '.join(failed) or 'none'}")
     print(f"INCOMPLETE: {', '.join(unfinished) or 'none'}")
+    if shallow:                                             # item 095: not checked, exit 1 (fail closed)
+        by_unsure = {}
+        for item, entry in unchecked:
+            by_unsure.setdefault(item, []).append(entry)
+        listed_nc = ", ".join(f"{i} ({'; '.join(e)})" for i, e in by_unsure.items())
+        if listed_nc:
+            listed_nc += f"; rule seen not checked ({SHALLOW_TEXT}; item 095)"
+        print(f"INCOMPLETE NOT CHECKED: {listed_nc or 'none'}")
     by_id = {}                                              # item 084: information, exit unchanged
     for item, step, sha7, const, rule, old in not_seen:
         by_id.setdefault(item, []).append(f"{step} added in {sha7} without {const} ({rule}): judged by {old}")
@@ -2190,7 +2275,8 @@ def main(argv):
     return 1 if skipped or failed or i3_failed or unfinished or late or orphans or (untracked and untracked[1]) \
         or (real and real[2]) or (uncommitted and uncommitted[1]) \
         or (isinstance(branches, str) and branches != SINGLE_TEXT) \
-        or branch_errors or isinstance(ahead, str) or batch["flagged"] or env_failed or unreadable else 0
+        or branch_errors or isinstance(ahead, str) or batch["flagged"] or env_failed or unreadable \
+        or unchecked else 0
 
 
 if __name__ == "__main__":

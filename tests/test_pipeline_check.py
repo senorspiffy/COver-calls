@@ -2400,6 +2400,7 @@ GIT_CENSUS = {
     ("_rule_seen", "_git_ok"): (3, "084: log/ls-tree/show failure -> 'anchor: git failed' entry, strict"),
     ("fetch_coverage", "_git"): (2, "fetch read: exit 0 values, exit 1 -> url read, other -> 'git config failed' (081); "
                                     "url read: exit 1 = no origin, 0 = SINGLE_TEXT, other -> failed (094)"),
+    ("_head_work_files", "_git_ok"): (1, "095: failure -> None -> entries stay not checked, exit 1"),
 }
 
 
@@ -2435,7 +2436,7 @@ def test_git_call_census():
     walk(tree, None)
     assert dict(seen) == {k: v[0] for k, v in GIT_CENSUS.items()}
     assert all(reason.strip() for _, reason in GIT_CENSUS.values())
-    assert sum(seen.values()) == 49                    # 41 (081) + 5 (084) + 1 (081 r2) + 2 (094)
+    assert sum(seen.values()) == 50                    # 41 (081) + 5 (084) + 1 (081 r2) + 2 (094) + 1 (095)
 
 
 def test_all_git_fails_no_line_says_none(tmp_path, monkeypatch, capsys):
@@ -2497,6 +2498,7 @@ def test_non_utf8_shallow_line_no_traceback(tmp_path):
             f"--untracked-from)") in lines, out
     assert any(l.startswith("UNREADABLE: ") and "shallow (not UTF-8 at byte 41)" in l for l in lines), out
     assert "RULE NOT SEEN: not checked (shallow clone; run git fetch --unshallow)" in lines, out
+    assert len(_pick1(out, "INCOMPLETE NOT CHECKED:")) == 1, out   # item 095: the shallow path is taken
 
 
 @NO_GIT
@@ -2758,7 +2760,8 @@ def test_rule_anchor_without_rule_file(tmp_path):
 
 @NO_GIT
 def test_rule_not_seen_shallow_and_no_git(tmp_path):
-    """(e1) a shallow clone is not checked and strict (M5); unshallowed it is the control.
+    """(e1) a shallow clone is not checked (M5; item 095: 150's gated entries are on INCOMPLETE NOT CHECKED,
+    not INCOMPLETE); unshallowed it is the control.
     (e2) without git: not checked, and 150's INCOMPLETE text is today's exactly."""
     repo, root, _, rules = _rules_repo(tmp_path / "g")
     _merge_main_into_rules(repo)
@@ -2766,7 +2769,8 @@ def test_rule_not_seen_shallow_and_no_git(tmp_path):
     _shallow(repo, rules)
     _, out = _run(repo, "check_pipeline.py", *args)
     assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: not checked (shallow clone; run git fetch --unshallow)", out
-    assert "150 (" in _pick(out, "INCOMPLETE:"), out
+    assert "150 (" in _pick(out, "INCOMPLETE NOT CHECKED:"), out     # item 095: not checked, not INCOMPLETE
+    assert "150 (" not in _pick(out, "INCOMPLETE:"), out
     _unshallow(repo)
     _, out = _run(repo, "check_pipeline.py", *args)
     assert "150 (" not in _pick(out, "INCOMPLETE:"), out
@@ -3708,7 +3712,9 @@ def test_suite_label_in_template_and_i2_text():
 
 UNSHALLOW = ("If `git rev-parse --is-shallow-repository` prints true, run `git fetch --unshallow`, then test "
              "again. If it is still true, report UNTRACKED CHANGE, RESEARCH CODE, REAL-DATA FIELD, LOG TIME, "
-             "MAIN AHEAD, OPEN BRANCHES and RULE NOT SEEN as 'not checked', never 'none' (items 079, 084, 090).")
+             "MAIN AHEAD, OPEN BRANCHES and RULE NOT SEEN as 'not checked', never 'none'; the `INCOMPLETE NOT "
+             "CHECKED:` entries and the one `shallow clone:` OPEN BRANCHES line with its BRANCH ERROR are 'not "
+             "checked', not errors, though the run exits 1 for them (items 079, 084, 090, 095).")
 
 
 def test_unshallow_sentence_same_in_three_files():
@@ -3716,6 +3722,7 @@ def test_unshallow_sentence_same_in_three_files():
     for f in (".claude/commands/run-item.md", ".claude/commands/daily-audit.md", ".claude/agents/a1-auditor.md"):
         assert (REPO / f).read_text(encoding="utf-8").count(UNSHALLOW) == 1, f
     assert "RULE NOT SEEN" in UNSHALLOW                 # item 091 step 4: 084's not-checked form is named
+    assert "INCOMPLETE NOT CHECKED" in UNSHALLOW and "095" in UNSHALLOW   # item 095 step 4
 
 
 def test_run_item_commit_subject_rule():
@@ -4649,10 +4656,11 @@ def test_round_unreadable_log_refused(tmp_path):
 SHALLOW_LINE_TEXT = "not checked (shallow clone; run git fetch --unshallow)"
 
 
-def _shallow_source(tmp_path, monkeypatch, late=True, branch="claude-x"):
+def _shallow_source(tmp_path, monkeypatch, late=True, branch="claude-x", merged=0):
     """origin (HEAD -> dev): main = c1 (work/150 + a log line `23:59` or `01:00` on 2026-11-20, committed
     2026-11-20 01:30) and c2 (2026-11-21 00:30); dev = main + c3 (HEAD's tip one commit ahead of main); an open
-    branch off main with one .claude/x.md commit, or (branch=None) an orphan README-only branch `docs`."""
+    branch off main with one .claude/x.md commit, or (branch=None) an orphan README-only branch `docs`.
+    Item 095: `merged` branches claude-old1..N, each at c1 (merged into dev, holding work/150)."""
     origin, src = tmp_path / "origin.git", tmp_path / "src"
     _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
     _git(tmp_path, "clone", "-q", str(origin), str(src))
@@ -4661,7 +4669,7 @@ def _shallow_source(tmp_path, monkeypatch, late=True, branch="claude-x"):
     _write(src, "logs/implementation/2026-11-20.md",
            f"{'23:59' if late else '01:00'} | I3 | 150 | PASS | sent to audit: yes\n")
     monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-20T01:30:00+00:00")
-    _commit(src, "c1")
+    c1 = _commit(src, "c1")
     monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-21T00:30:00+00:00")
     _write(src, "notes/a.md")
     _commit(src, "c2")
@@ -4673,6 +4681,8 @@ def _shallow_source(tmp_path, monkeypatch, late=True, branch="claude-x"):
         _git(src, "push", "-q", "origin", branch)
     else:
         _orphan(src, "docs", {})
+    for n in range(1, merged + 1):                          # item 095
+        _git(src, "push", "-q", "origin", f"{c1}:refs/heads/claude-old{n}")
     _git(src, "checkout", "-q", "-b", "dev", "main")
     _write(src, "notes/b.md")
     _commit(src, "c3")
@@ -4707,10 +4717,11 @@ def test_shallow_three_readers_not_checked(tmp_path, monkeypatch):
     assert flag == "true"
     assert _pick(out, "LOG TIME:") == f"LOG TIME: {SHALLOW_LINE_TEXT}", out
     assert _pick(out, "MAIN AHEAD:") == f"MAIN AHEAD: {SHALLOW_LINE_TEXT}", out
-    assert any(l.startswith(f"  origin/claude-x: {SHALLOW_LINE_TEXT}") for l in lines), out
+    assert ("  shallow clone: 1 ref(s) with no merge base not checked (origin/claude-x); run git fetch "
+            "--unshallow (item 095)") in lines, out                 # item 095: the folded form
     assert not any(l.startswith("  origin/main:") for l in lines), out
-    assert _pick(out, "BRANCH ERROR:").startswith("BRANCH ERROR: origin/claude-x (shallow clone; "), out
-    assert "run git fetch --unshallow (item 090))" in _pick(out, "BRANCH ERROR:"), out
+    assert _pick(out, "BRANCH ERROR:") == ("BRANCH ERROR: shallow clone; 1 of 1 ref(s) hold files on checked paths, "
+                                           "not checked (origin/claude-x); run git fetch --unshallow (item 095)"), out
     assert code == 1, out
 
 
@@ -4724,9 +4735,166 @@ def test_shallow_docs_only_orphan_exit_0(tmp_path, monkeypatch):
     assert flag == "true"
     assert _pick(out, "LOG TIME:") == f"LOG TIME: {SHALLOW_LINE_TEXT}", out
     assert _pick(out, "MAIN AHEAD:") == f"MAIN AHEAD: {SHALLOW_LINE_TEXT}", out
-    assert any(l.startswith(f"  origin/docs: {SHALLOW_LINE_TEXT}") for l in lines), out
+    assert ("  shallow clone: 1 ref(s) with no merge base not checked (origin/docs); run git fetch --unshallow "
+            "(item 095)") in lines, out                             # item 095: the folded form
     assert "BRANCH ERROR" not in out and not any(l.startswith("  origin/main:") for l in lines), out
     assert code == 0, out
+
+
+# Item 095 (RI-014): in a shallow clone a gated entry is INCOMPLETE NOT CHECKED, and shallow unrelated refs fold.
+NC_TAIL = "; rule seen not checked (shallow clone; run git fetch --unshallow; item 095)"
+I2_ENTRY = f"log line for I2 does not match its format (item 045): {NEW_I2_WANT}"
+FOLD_D1 = ("  shallow clone: 3 ref(s) with no merge base not checked (origin/claude-old1, origin/claude-old2, "
+           "origin/claude-x); run git fetch --unshallow (item 095)")
+FOLD_ERR = ("BRANCH ERROR: shallow clone; 3 of 3 ref(s) hold files on checked paths, not checked (origin/claude-old1, "
+            "origin/claude-old2, origin/claude-x); run git fetch --unshallow (item 095)")
+
+
+def _shallow_rules(tmp_path, i2="1 files changed | tests 9/9"):
+    """Fixture (a): 084's PR #33 + main shape, `rules` merged main, the shallow boundary at the rules commit."""
+    repo, root, added, rules = _rules_repo(tmp_path, i2)
+    _merge_main_into_rules(repo)
+    _shallow(repo, rules)
+    return repo, root, added, ("--untracked-from", root, "--today", "2026-11-02")
+
+
+@NO_GIT
+def test_shallow_gated_entries_not_checked(tmp_path):
+    """T-a (M1, M5): shallow: 150's and 151's gated entries are on INCOMPLETE NOT CHECKED, not INCOMPLETE,
+    and exit 1; unshallowed: the full-clone control (150 RULE NOT SEEN, 151 INCOMPLETE, no 095 line)."""
+    repo, _, added, args = _shallow_rules(tmp_path)
+    code, out = _run(repo, "check_pipeline.py", *args)
+    assert "150 (" not in _pick(out, "INCOMPLETE:"), out
+    assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out    # M5: NOT CHECKED is the only exit-1 source
+    assert _pick(out, "INCOMPLETE NOT CHECKED:") == (f"INCOMPLETE NOT CHECKED: 150 ({I2_ENTRY}; {NO_SENT_BACK}), "
+                                                     f"151 ({I2_ENTRY}; {NO_SENT_BACK}){NC_TAIL}"), out
+    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: not checked (shallow clone; run git fetch --unshallow)", out
+    assert code == 1, out
+    _unshallow(repo)
+    code, out = _run(repo, "check_pipeline.py", *args)
+    assert _pick(out, "RULE NOT SEEN:") == SEEN_150.format(sha=added[:7]), out
+    inc = _pick(out, "INCOMPLETE:")
+    assert "150 (" not in inc and "151 (" in inc, out
+    assert not any(l.startswith("INCOMPLETE NOT CHECKED") for l in out.splitlines()), out
+    assert "item 095" not in out, out
+
+
+@NO_GIT
+def test_depth1_clone_083_shape_not_incomplete(tmp_path):
+    """T-a2 (M1): a real `git clone --depth 1 --no-single-branch` of fixture (a) with `rules` checked out."""
+    repo, root, _, _ = _rules_repo(tmp_path / "g")
+    _merge_main_into_rules(repo)
+    d1 = tmp_path / "d1"
+    _git(tmp_path, "clone", "-q", "--depth", "1", "--no-single-branch", f"file://{repo}", str(d1))
+    flag = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=d1, capture_output=True, text=True)
+    assert flag.stdout.strip() == "true"
+    code, out = _run(d1, "check_pipeline.py", "--untracked-from", _root(d1), "--today", "2026-11-02")
+    assert "150 (" not in _pick(out, "INCOMPLETE:"), out
+    nc = _pick(out, "INCOMPLETE NOT CHECKED:")
+    assert f"150 ({I2_ENTRY}; {NO_SENT_BACK})" in nc and nc.endswith(NC_TAIL), out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_shallow_exact_tests_entry_stays_incomplete(tmp_path):
+    """T-a3 (M4): 150's I2 line fails I2_BEFORE too (10/9): exact, it stays on INCOMPLETE (with the new-rule
+    hint, a known gap); only 150's verdict entry is not checked."""
+    repo, _, _, args = _shallow_rules(tmp_path, i2="1 files changed | tests 10/9")
+    code, out = _run(repo, "check_pipeline.py", *args)
+    assert f"150 ({I2_ENTRY})" in _pick(out, "INCOMPLETE:"), out
+    nc = _pick(out, "INCOMPLETE NOT CHECKED:")
+    assert nc.startswith(f"INCOMPLETE NOT CHECKED: 150 ({NO_SENT_BACK}), 151 ("), out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_shallow_other_agent_format_entry_stays(tmp_path):
+    """T-a4: a bad R1 line for 150 stays on INCOMPLETE; only 150's I2 part of the format entry moves."""
+    repo, _, _, args = _shallow_rules(tmp_path)
+    with (repo / "logs" / "research" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+        fh.write("12:00 | R1 | 150 | x\n")
+    code, out = _run(repo, "check_pipeline.py", *args)
+    assert "150 (log line for R1 does not match its format" in _pick(out, "INCOMPLETE:"), out
+    assert f"150 ({I2_ENTRY}; {NO_SENT_BACK})" in _pick(out, "INCOMPLETE NOT CHECKED:"), out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_shallow_uncommitted_step_stays_incomplete(tmp_path):
+    """T-a5 (C1, M3): 153 written but not committed: a full clone keeps its entries, so a shallow one does too."""
+    repo, _, _, args = _shallow_rules(tmp_path)
+    _defective(repo, "153")
+    want = f"153 ({I2_ENTRY}; {NO_SENT_BACK})"
+    code, out = _run(repo, "check_pipeline.py", *args)
+    assert want in _pick(out, "INCOMPLETE:"), out
+    assert "153 (" not in _pick(out, "INCOMPLETE NOT CHECKED:"), out
+    assert code == 1, out
+    _unshallow(repo)
+    code, out = _run(repo, "check_pipeline.py", *args)
+    assert want in _pick(out, "INCOMPLETE:"), out
+
+
+@NO_GIT
+def test_unsure_unit_and_head_tree_failure(tmp_path, monkeypatch):
+    """T-a6: committed None (HEAD's tree unreadable) -> not checked; committed set() -> strict; a failed
+    ls-tree gives _head_work_files None, never an empty set."""
+    cp = _cp()
+    repo, _, _, _ = _shallow_rules(tmp_path)
+    monkeypatch.chdir(repo)
+    item = Path("work/150")
+    u = []
+    gaps = cp.incomplete(item, Path("logs"), env=cp.SHALLOW_TEXT, unchecked=u, committed=None)
+    assert u == [("150", I2_ENTRY), ("150", NO_SENT_BACK)] and gaps == [], (u, gaps)
+    u = []
+    gaps = cp.incomplete(item, Path("logs"), env=cp.SHALLOW_TEXT, unchecked=u, committed=set())
+    assert u == [] and gaps == [I2_ENTRY, NO_SENT_BACK], (u, gaps)
+    assert cp.incomplete(item, Path("logs"), env=cp.SHALLOW_TEXT) == [I2_ENTRY, NO_SENT_BACK]   # no collector
+    assert "work/150/05-build-report.md" in cp._head_work_files()
+    _patched_git(monkeypatch, cp, {("ls-tree", "-r", "--name-only", "HEAD", "--", "work/"): ("", 128)})
+    assert cp._head_work_files() is None
+
+
+@NO_GIT
+def test_shallow_merged_refs_fold_to_one_line(tmp_path, monkeypatch):
+    """T-b (M6): two refs merged into dev plus claude-x. Full clone: only claude-x, scanned. Depth 1: one
+    folded sub-line and one summary BRANCH ERROR (3 of 3), no per-ref line, exit 1."""
+    origin = _shallow_source(tmp_path, monkeypatch, merged=2)
+    flag, code, out = _clone(tmp_path, origin, "full")
+    lines = out.splitlines()
+    assert flag == "false"
+    assert any(l.startswith("  origin/claude-x: items none; merges cleanly") for l in lines), out
+    assert "claude-old" not in out and "BRANCH ERROR" not in out, out
+    flag, code, out = _clone(tmp_path, origin, "d1", "--depth", "1")
+    lines = out.splitlines()
+    assert flag == "true"
+    assert [l for l in lines if "ref(s) with no merge base not checked" in l] == [FOLD_D1], out
+    assert [l for l in lines if l.startswith("BRANCH ERROR:")] == [FOLD_ERR], out
+    assert not any(l.startswith("  origin/claude-old") or l.startswith("  origin/claude-x") for l in lines), out
+    assert code == 1, out
+
+
+@NO_GIT
+def test_shallow_fold_held_unknown_keeps_own_error(tmp_path, monkeypatch, capsys):
+    """T-b2 (M8): the unrelated ref's ls-tree fails: held None (never 0), its own BRANCH ERROR, no summary."""
+    import datetime as dt
+    cp = _cp()
+    origin = _shallow_source(tmp_path, monkeypatch)
+    flag, _, _ = _clone(tmp_path, origin, "d1", "--depth", "1")
+    assert flag == "true"
+    repo = tmp_path / "d1"
+    monkeypatch.chdir(repo)
+    ls = ("ls-tree", "-r", "--name-only", "origin/claude-x", "--", "work/", cp.RECURRING, *cp.RULE_PATHS,
+          *cp.RESEARCH_CODE_PATHS)
+    _patched_git(monkeypatch, cp, {ls: ("", 128)})
+    b = [b for b in cp.open_branches(dt.date(2026, 11, 21), shallow=True) if b["ref"] == "origin/claude-x"][0]
+    assert b["unrelated"] is True and b["held"] is None and b["errors"] == ["git ls-tree failed (exit 128)"]
+    code = cp.main(["--untracked-from", _root(repo), "--today", "2026-11-21"])
+    out = capsys.readouterr().out
+    errs = [l for l in out.splitlines() if l.startswith("BRANCH ERROR:")]
+    assert errs == ["BRANCH ERROR: origin/claude-x (git ls-tree failed (exit 128))"], out
+    assert ("  shallow clone: 1 ref(s) with no merge base not checked (origin/claude-x); run git fetch --unshallow "
+            "(item 095)") in out.splitlines(), out
+    assert code == 1, out
 
 
 def test_open_branches_default_computes_shallow(monkeypatch):
