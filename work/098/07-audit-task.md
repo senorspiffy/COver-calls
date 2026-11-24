@@ -1,0 +1,11 @@
+# 07 Audit task - 098
+Item: 098 (EFFICIENCY, FULL). It covers four sub-asks. (1) `commit_step.py --trailer`, passed to commit-tree as one final `-m` paragraph, so a step commit needs no `--amend`. (2) Pins for three surviving 091 mutants: ROUND_HEADING_FROM 92/93, the subdir cwd refusal, and the named symlink. (3) A `## Round N build` heading check from ROUND_BUILD_FROM = 99, gated by `_rule_seen` and the 095 shallow route. (4) A neutral `HEAD names no commit: unborn or unresolvable` label. Head 0a9b022 (+ the I3 commit) on daily-fixes/2026-11-24, base 7eaa676. I3 PASS round 1.
+
+What A1 should look at:
+1. `scripts/commit_step.py` `_trailer_ok` and `main`: the four refusals run before any git call, and a lone `--trailer` gives the usage text. `--trailer=...` is refused as a bad ID. Check whether a value made only of spaces after the `": "`, or a key with a trailing `-`, matters. Git accepts both, so they are not refused here.
+2. The no-amend claim. For each 098 commit after the I2 commit (I3, A1), `%(trailers:key=...,valueonly)` should hold both session trailers, and `git reflog` should show `commit_step: <subject>` with no `commit (amend)`. I3 checked 0a9b022 (06, I2 audit).
+3. The `incomplete()` ROUND_BUILD_FROM block. An unreadable file adds nothing (C3, relying on the 091 entry). `unsure(step)` → `unchecked` (C1). Not seen → the `no round-build check` RULE NOT SEEN row. Re-run any of the mutants in 06, including I3's b-fence and its b-unread form.
+4. The `_anchor_env` label change and the updated text in the module, docstring, `_unsure` and SHALLOW_TEXT comment (`unborn HEAD` count 0). P-g's corrupt/dangling fixture pins git 2.43's rev-parse 1 / ls-tree 128.
+5. Residuals not built (03): (a) the broad SUMMARY_LINE-outside-read-section rule (needs a measurement over 076-091), (b) FROM/FROM-1 pins for the other 7 cutoffs, (c) the mutant-rule sentence in the i1 text. Each needs a follow-up item.
+6. RULE_PATHS are touched (run-item.md, check_pipeline.py, tests), so the person's OK is needed at PR review.
+7. RI status to copy on main: RI-010 guardrail extended (build-round headings from 099; trailers through commit_step, no amend), stays ESCALATED. RI-014 is OPEN and unchanged (no new git call, census 51). RI-001 is unchanged.
