@@ -1,13 +1,19 @@
 """Commit one item's step files with only that item's own log lines (item 091, 086 F4, RI-010).
 
 Usage, from the repo top:
-  python3 scripts/commit_step.py <ID> "<subject>" <path>...
+  python3 scripts/commit_step.py [--trailer "<Key>: <value>"]... <ID> "<subject>" <path>...
+
+`--trailer` (item 098) is read only before <ID>, only in the two-argument form (`--trailer=...` is not an
+option: it is read as the ID and refused as not 3 digits), and may be given more than once.
 
 The shared daily log files (logs/research/YYYY-MM-DD.md, logs/implementation/YYYY-MM-DD.md) hold lines
 of several items at once. `git add` of such a file would commit another item's uncommitted line too
 (91ade51 carried 081's I3 line). This helper builds the commit in a temporary index, never touching
 the shared one until the commit is made:
-  (i)   refuses (exit 2, nothing written) when git is missing, the cwd is not the repo top, HEAD is
+  (i)   refuses (exit 2, nothing written), before any git call, when a trailer has no `": "`, its key (the
+        text before the first `": "`) is not ASCII letters, digits and `-`, its value is empty after strip,
+        or it holds a CR or LF (item 098); a `--trailer` with no value is the usage text, exit 2. Then
+        when git is missing, the cwd is not the repo top, HEAD is
         unborn, the ID is not 3 digits, a named path is outside the repo top, missing (deletions are
         not supported) or a directory, or a log file under logs/research/ or logs/implementation/ (the
         helper finds those itself). Every named path, relative or absolute, is first made relative to
@@ -22,7 +28,9 @@ the shared one until the commit is made:
         filtered log blob (`hash-object -w --stdin --path`, `update-index --cacheinfo`), `write-tree`;
   (iv)  subject: with 0 own log lines added, any subject; with 1, it must equal `Item <ID>: ` + that line
         (run-item's item-082 rule); with 2 or more, refused (a batch, item 045);
-  (v)   `commit-tree <tree> -p <old>`, then `update-ref HEAD <new> <old>`: if HEAD moved since it was
+  (v)   `commit-tree <tree> -p <old> -m <subject>` (with trailers, one more `-m` holding them joined by
+        newlines, so the message is the subject, a blank line, then one trailer paragraph; with none, the
+        call is today's), then `update-ref HEAD <new> <old>`: if HEAD moved since it was
         read, refused (exit 2) and HEAD is unchanged;
   (vi)  `git reset -q -- <paths> <staged log files>` on the shared index, so other staged files stay
         staged and the log files show only the other items' lines as changed. If that fails: exit 1,
@@ -132,9 +140,24 @@ def _log_blobs(item, old, run):
     return blobs, own
 
 
-def commit(item, subject, paths, run=run, old=None):
+def _trailer_ok(t):
+    """Item 098: raises Refused naming the bad part of one `--trailer` value (module text (i))."""
+    if "\r" in t or "\n" in t:
+        raise Refused(f"trailer {t!r}: holds a CR or LF (item 098)")
+    if ": " not in t:
+        raise Refused(f"trailer {t!r}: no ': ' after the key (item 098)")
+    key, value = t.split(": ", 1)
+    if not re.fullmatch(r"[A-Za-z0-9-]+", key):
+        raise Refused(f"trailer {t!r}: key {key!r} is not ASCII letters, digits and '-' (item 098)")
+    if not value.strip():
+        raise Refused(f"trailer {t!r}: empty value (item 098)")
+
+
+def commit(item, subject, paths, run=run, old=None, trailers=()):
     """Make the commit (see the module text). Returns the exit code; messages go to stdout/stderr."""
     try:
+        for t in trailers:                                  # item 098: before any git call
+            _trailer_ok(t)
         top = run(["rev-parse", "--show-toplevel"])
         if top is None:
             raise Refused("no git (item 091)")
@@ -185,7 +208,8 @@ def commit(item, subject, paths, run=run, old=None):
                 os.unlink(idx)
             except FileNotFoundError:
                 pass
-        new = _git(run, ["commit-tree", tree, "-p", old, "-m", subject]).decode("utf-8").strip()
+        msg = ["-m", subject] + (["-m", "\n".join(trailers)] if trailers else [])   # item 098
+        new = _git(run, ["commit-tree", tree, "-p", old, *msg]).decode("utf-8").strip()
         moved = run(["update-ref", "-m", f"commit_step: {subject}", "HEAD", new, old])
         if moved is None or moved[1] != 0:
             cur = run(["rev-parse", "--verify", "-q", "HEAD"])
@@ -207,10 +231,17 @@ def commit(item, subject, paths, run=run, old=None):
 
 
 def main(argv):
+    trailers = []
+    while argv and argv[0] == "--trailer":                 # item 098: leading pairs, only before <ID>
+        if len(argv) < 2:
+            print(__doc__, file=sys.stderr)
+            return 2
+        trailers.append(argv[1])
+        argv = argv[2:]
     if len(argv) < 3:
         print(__doc__, file=sys.stderr)
         return 2
-    return commit(argv[0], argv[1], argv[2:])
+    return commit(argv[0], argv[1], argv[2:], trailers=trailers)
 
 
 if __name__ == "__main__":

@@ -207,8 +207,14 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   INCOMPLETE entry `<05|06> heading '<heading>'[, '<heading>'] is not read by LOG BATCH;
                   use '## Test output (round N, pasted)' / '## Tests re-run (round N)' (item 091)`, gated
                   on that file like SUITE_FROM; an unreadable 05/06 is `<05|06> round headings not
-                  checked (<why>; item 091)`. Known gaps: runs with no heading of their own (076/05 under
-                  `## Round 2 build`), headings indented 1-3 spaces, and the template lines are text only.
+                  checked (<why>; item 091)`. Known gaps: runs with no heading of their own, headings
+                  indented 1-3 spaces, and the template lines are text only.
+                  Item 098 (RI-010): from ROUND_BUILD_FROM on, a 05/06 build-round heading
+                  (ROUND_BUILD_HEADING: `#{1,6} round N build`, case-insensitive, at the line start;
+                  076/05's `## Round 2 build`) outside code fences and outside a read section is the
+                  INCOMPLETE entry `<05|06> heading '<heading>' is a build-round heading LOG BATCH does
+                  not read; put its runs under '## Test output (round N, pasted)' / '## Tests re-run
+                  (round N)' (item 098)`, gated on that file like ROUND_HEADING_FROM.
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
@@ -360,18 +366,19 @@ checked (shallow clone; run git fetch --unshallow; item 095)` (or `INCOMPLETE NO
 is printed only when shallow), not on INCOMPLETE; the exit is 1 for a non-empty list (fail closed). Only the
 I2 part of a format entry moves; other agents stay on INCOMPLETE. A step file not in HEAD's tree (ls-tree
 -r HEAD -- work/, read once and only when shallow) keeps its entries on INCOMPLETE, as a full clone does;
-a failed HEAD tree read leaves them not checked (exit 1). Known gaps: no-git and unborn-HEAD entries are
+a failed HEAD tree read leaves them not checked (exit 1). Known gaps: no-git and no-commit-HEAD entries are
 not labelled; the finer test of which step files lie above the shallow boundary is not built; an exact
 TESTS entry keeps the new-rule hint where the full clone shows the I2_BEFORE hint (both INCOMPLETE).
-Item 088: an uncommitted 05/06 (any check run before its commit) keeps them with no entry; an unborn
-HEAD prints `not checked (unborn HEAD)` and keeps them; a failed HEAD verify prints `not checked (git
+Item 088: an uncommitted 05/06 (any check run before its commit) keeps them with no entry; a HEAD that
+names no commit (unborn, a corrupt ref or a dangling symbolic HEAD) prints `not checked (HEAD names no
+commit: unborn or unresolvable)` (item 098) and keeps them; a failed HEAD verify prints `not checked (git
 rev-parse --verify HEAD failed (exit <n>))`, keeps them and gives exit 1. A failed git call (`<step>
 anchor: git failed (item 084)`) or an anchor tree without RULE_FILE (`<step> anchor <sha7> has no
 scripts/check_pipeline.py (item 084)`) keeps them and adds that entry (exit 1). Items below either
 cutoff make no git call. Cost (item 088): HEAD is read once per run (+1 wrapper call); a full pair
 is 3 wrapper calls (log, ls-tree, show) = 6 git processes (each _git also runs rev-parse
 --show-toplevel); early exits make 0, 1 or 2; at most 3 pairs per item (05 TESTS, 05 SUITE, 06
-VERDICT), 5 from ROUND_HEADING_FROM on (05 and 06 ROUND_HEADING, item 091), 7 from SCRATCH_FROM on (05 and 06 SCRATCH_FROM, item 097; a pair runs only when a check fires). Before 088 a full pair was 4 calls = 8 processes. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
+VERDICT), 5 from ROUND_HEADING_FROM on (05 and 06 ROUND_HEADING, item 091), 7 from SCRATCH_FROM on (05 and 06 SCRATCH_FROM, item 097), 9 from ROUND_BUILD_FROM on (05 and 06 ROUND_BUILD_FROM, item 098; a pair runs only when a check fires). Before 088 a full pair was 4 calls = 8 processes. Known or decided gaps: WHOLE_DIFF_FROM (REAL-DATA FIELD) is not gated (0
 items today); the 06 verdict vs last I3 line cross-check stays at CHECKLIST_FROM by decision;
 CHECKLIST_FROM, LOG_CHECK_FROM and their checks stay numeric; --log (write_log) stays numeric, so a
 new log line is never judged by an old rule. The constant counts only at the start of a line, so a
@@ -442,6 +449,9 @@ ROUND_HEADING_FROM = 92
 # (scratch_dir_problems); the 9th `*_FROM` cutoff, a numeric floor above every item with a 05 or 06 on
 # 2026-11-24 (0 of work/092-098 at >= 097 had one).
 SCRATCH_FROM = 97
+# Item 098 (RI-010): from this ID on, a 05/06 `## Round N build` heading (ROUND_BUILD_HEADING) outside a read
+# section is INCOMPLETE; the 10th `*_FROM` cutoff, a numeric floor above every item open on 2026-11-24 (098).
+ROUND_BUILD_FROM = 99
 # Item 097: the basename mkdtemp makes with prefix `<agent>-<ID>-r<round>-` (agent i2 for 05, i3 for 06): 8 chars
 # of `abcdefghijklmnopqrstuvwxyz0123456789_` (CPython Lib/tempfile.py _RandomNameSequence). Used with .fullmatch.
 SCRATCH_NAME = re.compile(r"(i2|i3)-(\d{3})-r\d+-[a-z0-9_]{8}")
@@ -481,6 +491,8 @@ BATCH_STRICT = ("no pytest time in 05/06/I2 line", "no line before I2", "log lin
 # and the stray-heading check. STRAY_RUN_HEADING is used with .match (anchored at the line start, RI-012).
 RUN_HEADING = {"05": r"## Test output\b", "06": r"## Tests re-run\b"}
 STRAY_RUN_HEADING = re.compile(r"#{1,6} (?:round \d+ )?(?:test output|tests re-run)\b", re.I)
+# Item 098: a build-round heading (076/05's `## Round 2 build`), used only with .match (RI-012).
+ROUND_BUILD_HEADING = re.compile(r"#{1,6} round \d+ build\b", re.I)
 SUMMARY_LINE = re.compile(rf"(?:=+ )?(?={_N} )(?:{_STATS}) in (\d+\.\d+)(?:s| seconds)\b")
 # Item 070: the Real-data effect field is checked from this ID on; earlier items are not re-checked.
 WHOLE_DIFF_FROM = 70
@@ -868,13 +880,12 @@ def _anchor_env():
     """Items 084, 088 (RI-014): (env, failed). env is None when git can give the commit that added a
     step file; else the reason no anchor is read, and every item keeps the numeric cutoffs (strict):
     "no git"; "shallow clone; run git fetch --unshallow" when _shallow_boundaries (079) gives
-    boundaries or "unreadable"; "unborn HEAD" when `rev-parse --verify -q HEAD` exits 1; any other
-    exit gives "git rev-parse --verify HEAD failed (exit <n>)" with failed True (main exits 1). HEAD
-    is read once per run here, not per pair in _rule_seen (item 088). Known gap: exit 1 means HEAD
-    names no commit: unborn, or a ref git can't resolve; both are strict, and the second also fails
-    UNCOMMITTED STEP's ls-tree HEAD (non-zero; 128 measured on a corrupt ref and a dangling symbolic
-    HEAD, logs/audit/2026-11-21-088.md, item 091), so it is never a silent pass. Both print
-    `not checked (unborn HEAD)`; the label is not accurate for the second (follow-up, not changed here)."""
+    boundaries or "unreadable"; "HEAD names no commit: unborn or unresolvable" when `rev-parse --verify -q
+    HEAD` exits 1; any other exit gives "git rev-parse --verify HEAD failed (exit <n>)" with failed True
+    (main exits 1). HEAD is read once per run here, not per pair in _rule_seen (item 088). Exit 1 means HEAD
+    names no commit: unborn, or a ref git can't resolve (a corrupt ref or a dangling symbolic HEAD); the one
+    label covers both (item 098), and both are strict. The second also fails UNCOMMITTED STEP's ls-tree
+    HEAD (non-zero; 128 measured, logs/audit/2026-11-21-088.md), so it is never a silent pass."""
     if _git("rev-parse", "--git-dir") is None:
         return "no git", False
     if _is_shallow():                                       # item 090: one source with open_branches
@@ -885,7 +896,7 @@ def _anchor_env():
     if head[1] == 0:
         return None, False
     if head[1] == 1:
-        return "unborn HEAD", False
+        return "HEAD names no commit: unborn or unresolvable", False
     return f"git rev-parse --verify HEAD failed (exit {head[1]})", True
 
 
@@ -965,7 +976,7 @@ def scratch_dir_problems(text, step, item):
 
 def _unsure(item_dir, step, env, committed):
     """Item 095 (RI-014): True when a gated entry on `step` can't be judged: the clone is shallow
-    (env == SHALLOW_TEXT, equality only; no git, unborn HEAD and a failed verify stay strict) and the
+    (env == SHALLOW_TEXT, equality only; no git, a HEAD naming no commit and a failed verify stay strict) and the
     step file is committed at HEAD (`committed`, from _head_work_files), or HEAD's tree could not be
     read (`committed` None: not checked, exit 1). An uncommitted step file gives False: a full clone
     keeps its entries too ((None, "") from _rule_seen, item 088), so a shallow clone keeps them (C1)."""
@@ -1000,6 +1011,9 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
     the same way (not seen: the pair `LOG BATCH not computable as text only`). Item 091: from ROUND_HEADING_FROM
     on, stray_run_headings of 05 and 06 is one entry per file, gated on that file by _rule_seen(ROUND_HEADING_FROM)
     (not seen: the pair `no round-heading check`); an unreadable file is `<step> round headings not checked`.
+    Item 098: from ROUND_BUILD_FROM on, a ROUND_BUILD_HEADING outside a read section of 05/06 is one entry per
+    file, gated the same way on ROUND_BUILD_FROM (not seen: `no round-build check`; shallow: `unchecked`); an
+    unreadable file adds nothing here (the 091 entry already says not checked).
     Item 097: from SCRATCH_FROM on, each existing 05 and 06 gives scratch_dir_problems' entries, gated on that
     file by _rule_seen(SCRATCH_FROM) (not seen: the pair `no Scratch dir check`); an unreadable file is
     `<step> scratch dir not checked (<why>; item 097)`; an absent file gives none (classify reports it).
@@ -1007,7 +1021,8 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
     and _unsure(item_dir, step, env, committed) is True (a shallow clone, the step file committed at HEAD or
     HEAD's tree unreadable), the entry goes to `unchecked` instead of the return value: the TIMED entry; the
     TESTS entry only when every own I2 line passes I2_BEFORE (else it is exact and stays); only I2 moves out
-    of a format entry, other agents stay; LOG BATCH not computable; Suite; round headings (05 and 06); Scratch
+    of a format entry, other agents stay; LOG BATCH not computable; Suite; round headings and build-round
+    headings (05 and 06, items 091, 098); Scratch
     dir (05 and 06, item 097); the verdict checks. With `unchecked` None (no caller collects it) nothing moves: strict, never dropped."""
     not_seen = [] if not_seen is None else not_seen
 
@@ -1117,6 +1132,21 @@ def incomplete(item_dir, logs=Path("logs"), env=None, not_seen=None, batch_nc=No
                 if seen is False:                           # below ROUND_HEADING_FROM there is no such check
                     not_seen.append((item_dir.name, step, sha7, "ROUND_HEADING_FROM", "091",
                                      "no round-heading check"))
+                elif unsure(step):    # item 095
+                    unchecked.append((item_dir.name, fired))
+                else:
+                    missing += [fired] + ([sha7] if seen is None and sha7 else [])
+    if int(item_dir.name) >= ROUND_BUILD_FROM:              # item 098: build-round headings LOG BATCH can't read
+        for step in ("05", "06"):
+            heads, why = stray_run_headings(item_dir / STEPS[step], RUN_HEADING[step], ROUND_BUILD_HEADING)
+            if heads and not why:                           # unreadable: the 091 block's one entry (C3)
+                named = "', '".join(heads)
+                fired = (f"{step} heading '{named}' is a build-round heading LOG BATCH does not read; put its runs "
+                         f"under '## Test output (round N, pasted)' / '## Tests re-run (round N)' (item 098)")
+                seen, sha7 = _rule_seen(item_dir, step, "ROUND_BUILD_FROM", env)   # item 084 gate
+                if seen is False:                           # below ROUND_BUILD_FROM there is no such check
+                    not_seen.append((item_dir.name, step, sha7, "ROUND_BUILD_FROM", "098",
+                                     "no round-build check"))
                 elif unsure(step):    # item 095
                     unchecked.append((item_dir.name, fired))
                 else:
@@ -1427,8 +1457,9 @@ def _section_flags(rows, heading):
     return flags
 
 
-def stray_run_headings(path, opener):
-    """Item 091 (RI-010): (headings, None): every "out" row of `path` that matches STRAY_RUN_HEADING, is not
+def stray_run_headings(path, opener, pattern=STRAY_RUN_HEADING):
+    """Item 091 (RI-010): (headings, None): every "out" row of `path` that matches `pattern` (.match; default
+    STRAY_RUN_HEADING, item 098 also passes ROUND_BUILD_HEADING), is not
     `opener` (re.match) and is outside every section `opener` starts (_section_flags), so LOG BATCH never
     reads the runs under it. ([], None) when the file is absent; ([], "<file> unreadable") when _read fails."""
     text, why = _read(path, missing_ok=True)
@@ -1438,7 +1469,7 @@ def stray_run_headings(path, opener):
         return [], None
     rows, _ = _md_lines(text)
     return [line for (line, state), inside in zip(rows, _section_flags(rows, opener))
-            if state == "out" and not inside and STRAY_RUN_HEADING.match(line) and not re.match(opener, line)], None
+            if state == "out" and not inside and pattern.match(line) and not re.match(opener, line)], None
 
 
 def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
@@ -2038,7 +2069,8 @@ def real_data_field(cutoff=UNTRACKED_FROM, walked=None):
 
 MAIN = "origin/main"
 # Item 090 (RI-014): the one text for every check that is not run in a shallow clone (_anchor_env's env; main
-# compares by equality, so "no git", "unborn HEAD" or a verify failure never switch those checks off).
+# compares by equality, so "no git", "HEAD names no commit: unborn or unresolvable" or a verify failure never
+# switch those checks off).
 SHALLOW_TEXT = "shallow clone; run git fetch --unshallow"
 # Item 094 (RI-014): the one text for a clone whose origin fetch refspec does not cover every branch; main,
 # open_branches and next_id compare by equality only (RI-012).

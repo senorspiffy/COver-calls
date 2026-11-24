@@ -2949,6 +2949,8 @@ def test_rule_seen_ignores_constant_inside_other_text(tmp_path, monkeypatch, for
 
 
 # Item 088 (RI-002, RI-014): an unknown anchor (uncommitted 05/06, unborn HEAD) keeps the strict rule.
+# Item 098: the label for a HEAD that names no commit (unborn, corrupt ref, dangling symbolic HEAD).
+HEAD_NONE = "HEAD names no commit: unborn or unresolvable"
 INC_150 = (f"INCOMPLETE: 150 (log line for I2 does not match its format (item 045): {NEW_I2_WANT}; "
            f"{NO_SENT_BACK})")
 
@@ -2978,7 +2980,7 @@ def test_rule_anchor_uncommitted_step_is_strict(tmp_path, monkeypatch):
 @NO_GIT
 def test_rule_anchor_unborn_head_is_strict(tmp_path, monkeypatch):
     """(h) no commit at all (unborn HEAD): `rev-parse --verify -q HEAD` exits 1, so _anchor_env gives
-    "unborn HEAD": not checked, no anchor is read and 150 keeps today's strict text (M-b, M-b', M-g).
+    the HEAD_NONE label (item 098): not checked, no anchor is read and 150 keeps today's strict text (M-b, M-b', M-g).
     The exit code is not pinned: it is 1 via UNCOMMITTED STEP."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -2992,12 +2994,12 @@ def test_rule_anchor_unborn_head_is_strict(tmp_path, monkeypatch):
     assert flag.stdout.strip() == "false"
     _, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
     assert _pick(out, "INCOMPLETE:") == INC_150, out
-    assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: not checked (unborn HEAD)", out
+    assert _pick(out, "RULE NOT SEEN:") == f"RULE NOT SEEN: not checked ({HEAD_NONE})", out
     cp = _cp()
     monkeypatch.chdir(repo)
-    assert cp._anchor_env() == ("unborn HEAD", False)
-    assert cp._rule_seen(Path("work/150"), "05", "TESTS_FORMAT_FROM", "unborn HEAD") == (None, "")
-    assert cp._rule_seen(Path("work/150"), "06", "VERDICT_FROM", "unborn HEAD") == (None, "")
+    assert cp._anchor_env() == (HEAD_NONE, False)
+    assert cp._rule_seen(Path("work/150"), "05", "TESTS_FORMAT_FROM", HEAD_NONE) == (None, "")
+    assert cp._rule_seen(Path("work/150"), "06", "VERDICT_FROM", HEAD_NONE) == (None, "")
 
 
 @NO_GIT
@@ -5092,16 +5094,18 @@ def _rh_inc(root):
     return code, _pick(out, "INCOMPLETE:"), out
 
 
-@pytest.mark.parametrize("step, body, heading", [
-    ("05", RH_P1, "### Test output (round 2, pasted)"),
-    ("05", "## Round 2 test output (pasted)\n2 passed in 1.50s\n", "## Round 2 test output (pasted)"),
-    ("06", "## Round 1\n### Tests re-run (output)\n2 passed in 1.50s\n", "### Tests re-run (output)"),
-], ids=["P1", "P2", "P3"])
-def test_stray_round_heading_is_incomplete(tmp_path, step, body, heading):
-    """RH_P1-P3: a run heading outside every read section is one INCOMPLETE entry naming it (no git: strict)."""
-    d = _rh_item(tmp_path, **{f"body{step}": body})
+@pytest.mark.parametrize("step, body, heading, item", [
+    ("05", RH_P1, "### Test output (round 2, pasted)", RH_ID),
+    ("05", "## Round 2 test output (pasted)\n2 passed in 1.50s\n", "## Round 2 test output (pasted)", RH_ID),
+    ("06", "## Round 1\n### Tests re-run (output)\n2 passed in 1.50s\n", "### Tests re-run (output)", RH_ID),
+    ("05", RH_P1, "### Test output (round 2, pasted)", "092"),
+], ids=["P1", "P2", "P3", "P1-at-cutoff-092"])
+def test_stray_round_heading_is_incomplete(tmp_path, step, body, heading, item):
+    """RH_P1-P3: a run heading outside every read section is one INCOMPLETE entry naming it (no git: strict).
+    Item 098: 092 (= ROUND_HEADING_FROM) is flagged; 091 is N3-below-cutoff below."""
+    d = _rh_item(tmp_path, **{f"body{step}": body}, item=item)
     code, inc, out = _rh_inc(tmp_path)
-    assert inc == f"INCOMPLETE: {RH_ID} ({step} heading '{heading}' {RH_USE})", out
+    assert inc == f"INCOMPLETE: {item} ({step} heading '{heading}' {RH_USE})", out
     assert code == 1, out
     if step == "05":                                        # why: LOG BATCH reads no time under it
         cp = _cp()
@@ -5168,6 +5172,134 @@ def test_round_heading_gate_follows_rule_file_of_05_commit(tmp_path, seen):
         assert _pick(out, "RULE NOT SEEN:") == (f"RULE NOT SEEN: {RH_ID} (05 added in {root[:7]} without "
                                                 "ROUND_HEADING_FROM (091): judged by no round-heading check; "
                                                 "item 084)"), out
+
+
+# Item 098 step 6 (RI-010): `## Round N build` headings (076/05's shape) outside a read section, from 099 on.
+RB_USE = ("is a build-round heading LOG BATCH does not read; put its runs under '## Test output (round N, pasted)' "
+          "/ '## Tests re-run (round N)' (item 098)")
+RB_BODY = "## Round 2 build\n```\n2 passed in 1.50s\n```\n"
+
+
+@pytest.mark.parametrize("step, item, flagged", [
+    ("05", "099", True), ("05", "098", False), ("06", RH_ID, True),
+], ids=["099-at-cutoff", "098-below-cutoff", "150-in-06"])
+def test_round_build_heading_is_incomplete(tmp_path, step, item, flagged):
+    """P-b: `## Round 2 build` in 05/06 is one INCOMPLETE entry from ROUND_BUILD_FROM (99) on (no git: strict);
+    098 is below the cutoff and passes."""
+    _rh_item(tmp_path, **{f"body{step}": RB_BODY}, item=item)
+    code, inc, out = _rh_inc(tmp_path)
+    if flagged:
+        assert inc == f"INCOMPLETE: {item} ({step} heading '## Round 2 build' {RB_USE})", out
+        assert code == 1, out
+    else:
+        assert inc == "INCOMPLETE: none" and code == 0, out
+
+
+@pytest.mark.parametrize("body05, flagged", [
+    ("## Round 2 builder notes\n2 passed in 1.50s\n", False),
+    ("```\n## Round 2 build\n```\n", False),
+    ("## Test output (pasted)\n### Round 2 build\n```\n2 passed in 1.50s\n```\n", False),
+    ("We ran ## Round 2 build after the fix.\n", False),
+    ("## round 2 Build\n", True),
+], ids=["N-builder-word", "N-in-fence", "N-inside-read-section", "N-prose-not-at-start", "P-case-fold"])
+def test_round_build_heading_negatives(tmp_path, body05, flagged):
+    """P-c (RI-012): `\\b` after build, fences, a read section and .match (line start) are honoured; re.I folds
+    case."""
+    _rh_item(tmp_path, body05=body05)
+    code, inc, out = _rh_inc(tmp_path)
+    if flagged:
+        assert inc == f"INCOMPLETE: {RH_ID} (05 heading '## round 2 Build' {RB_USE})", out
+    else:
+        assert inc == "INCOMPLETE: none" and code == 0, out
+
+
+@NO_GIT
+@pytest.mark.parametrize("seen", [False, True], ids=["not-seen", "seen"])
+def test_round_build_gate_follows_rule_file_of_05_commit(tmp_path, seen):
+    """P-d: 05 added under a rule file without ROUND_BUILD_FROM: RULE NOT SEEN, no entry (item 084 gate);
+    with it: the entry and RULE NOT SEEN none."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    rules = "TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\nSUITE_FROM = 87\nTIMED_FROM = 90\nROUND_HEADING_FROM = 92\n"
+    _write(repo, "scripts/check_pipeline.py", rules + ("ROUND_BUILD_FROM = 99\n" if seen else ""))
+    _rh_item(repo, body05=RB_BODY)
+    root = _commit(repo, "150 built")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", RH_DAY)
+    if seen:
+        assert _pick(out, "INCOMPLETE:") == f"INCOMPLETE: {RH_ID} (05 heading '## Round 2 build' {RB_USE})", out
+        assert _pick(out, "RULE NOT SEEN:") == "RULE NOT SEEN: none", out
+    else:
+        assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+        assert _pick(out, "RULE NOT SEEN:") == (f"RULE NOT SEEN: {RH_ID} (05 added in {root[:7]} without "
+                                                "ROUND_BUILD_FROM (098): judged by no round-build check; "
+                                                "item 084)"), out
+
+
+@pytest.mark.parametrize("shallow", [True, False], ids=["shallow", "no-git"])
+def test_round_build_shallow_goes_to_unchecked(tmp_path, shallow):
+    """P-e (C1, item 095): in a shallow clone, with 05 committed at HEAD, the entry is not checked (in
+    `unchecked`, not returned); with env "no git" it stays INCOMPLETE (strict)."""
+    cp = _cp()
+    d = _rh_item(tmp_path, body05=RB_BODY)
+    fired = f"05 heading '## Round 2 build' {RB_USE}"
+    u = []
+    got = cp.incomplete(d, logs=tmp_path / "logs", env=cp.SHALLOW_TEXT if shallow else "no git", not_seen=[],
+                        unchecked=u, committed={f"work/{RH_ID}/05-build-report.md"})
+    if shallow:
+        assert (RH_ID, fired) in u and fired not in got, (u, got)
+    else:
+        assert fired in got and (RH_ID, fired) not in u, (u, got)
+
+
+def test_round_build_missing_inputs(tmp_path, monkeypatch):
+    """P-f: an unreadable 05 gives the one 091 `not checked` entry (none from 098); an absent file is
+    ([], None); a failed anchor read keeps the entry and adds its note (strict)."""
+    cp = _cp()
+    d = _rh_item(tmp_path)
+    (d / "05-build-report.md").write_bytes(b"## Round 2 build\n\xff")
+    _, inc, out = _rh_inc(tmp_path)
+    assert inc.count("05 round headings not checked") == 1 and "build-round" not in inc, out
+    assert cp.stray_run_headings(tmp_path / "absent.md", cp.RUN_HEADING["05"], cp.ROUND_BUILD_HEADING) == ([], None)
+    d2 = _rh_item(tmp_path / "b", body05=RB_BODY)
+    note = "05 anchor: git failed (item 084)"
+    real = cp._rule_seen
+    monkeypatch.setattr(cp, "_rule_seen", lambda i, s, c, e: (None, note) if c == "ROUND_BUILD_FROM"
+                        else real(i, s, c, e))
+    got = cp.incomplete(d2, logs=tmp_path / "b" / "logs", env=None, not_seen=[])
+    assert f"05 heading '## Round 2 build' {RB_USE}" in got and note in got, got
+
+
+@NO_GIT
+@pytest.mark.parametrize("how", ["corrupt", "dangling"])
+def test_rule_anchor_corrupt_ref_is_strict(tmp_path, how):
+    """P-g (item 098 step 5): a corrupt branch ref or a dangling symbolic HEAD makes `rev-parse --verify -q
+    HEAD` exit 1 like an unborn HEAD: the same neutral label, and UNCOMMITTED STEP's ls-tree fails (exit 1)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "scripts/check_pipeline.py", NEW_RULES)
+    _defective(repo, "150")
+    _commit(repo, "150")
+    if how == "corrupt":
+        ref = repo / ".git" / "refs" / "heads" / "main"
+        assert ref.is_file()                                # a loose ref (not packed, not reftable)
+        ref.write_text("garbage\n", encoding="utf-8")
+    else:
+        _git(repo, "symbolic-ref", "HEAD", "refs/heads/nope")
+    head = subprocess.run(["git", "rev-parse", "--verify", "-q", "HEAD"], cwd=repo, capture_output=True)
+    assert head.returncode == 1
+    ls = subprocess.run(["git", "ls-tree", "HEAD"], cwd=repo, capture_output=True)
+    assert ls.returncode != 0
+    ver = subprocess.run(["git", "--version"], capture_output=True, text=True).stdout.strip()
+    assert ls.returncode == 128, f"ls-tree exit {ls.returncode} on {ver}; 128 measured on git 2.x (088 audit)"
+    code, out = _run(repo, "check_pipeline.py", "--today", "2026-11-02")
+    assert _pick(out, "RULE NOT SEEN:") == f"RULE NOT SEEN: not checked ({HEAD_NONE})", out
+    assert _pick(out, "UNCOMMITTED STEP:") == "UNCOMMITTED STEP: git ls-tree HEAD failed (item 077)", out
+    assert code == 1, out
+    cp = _cp()
+    for doc in (cp.__doc__, cp._anchor_env.__doc__):
+        assert HEAD_NONE in " ".join(doc.split()) and "not checked (unborn HEAD)" not in doc
 
 
 def test_section_flags_match_run_seconds_rule():

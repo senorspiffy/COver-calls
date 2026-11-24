@@ -60,8 +60,8 @@ def _state(r):
     return _g(r, "rev-parse", "HEAD"), (r / ".git" / "index").read_bytes()
 
 
-def _cli(r, *args):
-    p = subprocess.run([sys.executable, str(REPO / "scripts" / "commit_step.py"), *args], cwd=r,
+def _cli(r, *args, cwd=None):
+    p = subprocess.run([sys.executable, str(REPO / "scripts" / "commit_step.py"), *args], cwd=cwd or r,
                        env={**os.environ, **IDENT}, capture_output=True, text=True, encoding="utf-8")
     return p.returncode, p.stdout, p.stderr
 
@@ -268,3 +268,91 @@ def test_commit_rule_texts():
     assert run.count(COMMIT_RULE) == 1
     for f in ("i2-builder.md", "i3-verifier.md"):
         assert (REPO / ".claude" / "agents" / f).read_text(encoding="utf-8").count(POINTER) == 1, f
+
+
+# Item 098: --trailer, subdir cwd, a named symlink, and the run-item sentence.
+T1, T2 = "Co-Authored-By: A <a@a>", "Claude-Session: https://x/y"
+S150 = f"Item 150: {L150}"
+
+
+def test_trailers_make_one_final_paragraph(repo, tmp_path):
+    """T-a: two --trailer options give `subject\n\n<t1>\n<t2>\n`; git reads both trailers by key; the tree
+    equals a no-trailer run of the same item on a fresh copy of the fixture; the reflog keeps its text."""
+    copy = tmp_path / "copy"
+    shutil.copytree(repo, copy, symlinks=True)
+    code, _, err = _cli(repo, "--trailer", T1, "--trailer", T2, "150", S150, R05)
+    assert code == 0, err
+    assert _g(repo, "log", "-1", "--format=%(trailers:key=Co-Authored-By,valueonly)") == "A <a@a>\n\n"
+    assert _g(repo, "log", "-1", "--format=%(trailers:key=Claude-Session,valueonly)") == "https://x/y\n\n"
+    assert _g(repo, "log", "-1", "--format=%s") == S150 + "\n"
+    assert _g(repo, "log", "-1", "--format=%B") == f"{S150}\n\n{T1}\n{T2}\n\n"
+    assert _g(repo, "reflog", "-1", "--format=%gs") == f"commit_step: {S150}\n"
+    code, _, err = _cli(copy, "150", S150, R05)
+    assert code == 0, err
+    assert _g(repo, "rev-parse", "HEAD^{tree}") == _g(copy, "rev-parse", "HEAD^{tree}")
+
+
+@pytest.mark.parametrize("args, why", [
+    (("--trailer", "Co Authored: x", "150", S150, R05), "key 'Co Authored' is not ASCII letters, digits and '-'"),
+    (("--trailer", "Key:value", "150", S150, R05), "no ': ' after the key"),
+    (("--trailer", "Key:   ", "150", S150, R05), "empty value"),
+    (("--trailer", "Key: a\nb", "150", S150, R05), "holds a CR or LF"),
+    (("--trailer", "Key: a\rb", "150", S150, R05), "holds a CR or LF"),
+    (("--trailer",), "Usage, from the repo top:"),
+], ids=["key-space", "no-colon-space", "empty-value", "lf", "cr", "no-value"])
+def test_trailer_refusals_write_nothing(repo, args, why):
+    """T-b: each trailer refusal exits 2 naming the bad part; HEAD and .git/index are unchanged."""
+    before = _state(repo)
+    code, out, err = _cli(repo, *args)
+    assert code == 2, (out, err)
+    assert why in err, err
+    assert _state(repo) == before
+
+
+def test_no_trailer_message_is_subject_only(repo):
+    """T-c: with no --trailer the message is the subject alone, byte for byte (today's commit-tree call)."""
+    assert _cli(repo, "150", S150, R05)[0] == 0
+    assert _g(repo, "log", "-1", "--format=%B") == S150 + "\n\n"
+    assert _g(repo, "cat-file", "commit", "HEAD").endswith("\n\n" + S150 + "\n")
+
+
+def test_trailer_equals_form_is_a_bad_id(repo):
+    """T-d: `--trailer=K: v` is not an option: it is the ID, refused as not 3 digits."""
+    before = _state(repo)
+    code, out, err = _cli(repo, "--trailer=K: v", "150", S150, R05)
+    assert code == 2, (out, err)
+    assert "ID '--trailer=K: v' is not 3 digits" in err, err
+    assert _state(repo) == before
+
+
+def test_subdir_cwd_is_refused(repo):
+    """T-e (a-nocwd): run from work/150 with a top-relative path: `not the top of a git work tree`."""
+    before = _state(repo)
+    code, out, err = _cli(repo, "150", S150, R05, cwd=repo / "work" / "150")
+    assert code == 2, (out, err)
+    assert "not the top of a git work tree" in err, err
+    assert _state(repo) == before
+
+
+def test_named_symlink_is_committed_as_a_link(repo):
+    """T-f (a-resolvename): a named relative symlink is staged as a link (mode 120000, target text)."""
+    (repo / "work" / "150" / "real.md").write_text("real\n", encoding="utf-8")
+    assert _cli(repo, "150", S150, R05, "work/150/real.md")[0] == 0
+    try:
+        os.symlink("real.md", repo / "work" / "150" / "lnk.md")
+    except OSError as e:
+        pytest.skip(f"os.symlink not allowed here: {e}")
+    code, _, err = _cli(repo, "150", "Item 150: link", "work/150/lnk.md")
+    assert code == 0, err
+    assert _g(repo, "ls-tree", "HEAD", "work/150/lnk.md").split()[0] == "120000"
+    assert _g(repo, "cat-file", "-p", "HEAD:work/150/lnk.md") == "real.md"
+
+
+TRAILER_RULE = ("Attribution trailers go on the same call, as `--trailer \"<Key>: <value>\"` before `<ID>` (one per "
+                "trailer); a step commit is never amended afterwards (item 098).")
+
+
+def test_trailer_rule_text():
+    """T-g: the run-item sentence on --trailer, once."""
+    run = (REPO / ".claude" / "commands" / "run-item.md").read_text(encoding="utf-8")
+    assert run.count(TRAILER_RULE) == 1
