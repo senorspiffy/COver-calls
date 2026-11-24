@@ -115,7 +115,7 @@ Checks for I2 and I3:
 | Missing input: no fetch key, URL present → SINGLE_TEXT | test_fetch_coverage_shapes[S10]; m5 |
 | Missing input: exit 0, no value → SINGLE_TEXT | test_fetch_coverage_fakes[S8] |
 | Missing input: git config exit other than 0/1 → 081 error | test_fetch_coverage_fakes[S12]; test_config_failure_end_to_end |
-| Missing input: `_git` None → "no git", unchanged | C4; existing no-git tests (h1's "without git there is no line") |
+| Missing input: `_git` None → "no git", unchanged | C4; existing no-git paths (h1's "without git there is no line") |
 | Missing input: full refspec never fetched | DROPPED: known gap, not computable offline (would need ls-remote, R2 AGAINST 2); written in the docstrings; the rule files already require `git fetch origin` first |
 | Missing input: other remotes (`upstream/*`) | DROPPED: known gap, origin-only as MAIN is today; written in the docstrings |
 | Implementation map, build order: on top of 092/093/096; 095 after; RULE_PATHS need the person's OK | Files, Build order paragraph; 05 says it |
@@ -153,3 +153,49 @@ Recurring issues checked (item 013), against this file:
   - RI-006: the census total is bumped from the AST count, not hand-totalled (C2).
 
 Log fields: FIT WITH CHANGES | 6 files planned
+
+## Round 2
+Fit verdict: FIT WITH CHANGES (unchanged)
+
+Why: I3 round 1 (work/094/06-verification.md) found P1. 03's Missing inputs row "`remote.origin.fetch` / `remote.origin.url` | git exits other than 0 or 1 | `git config failed (exit n)` (item 081)" covers two reads, but round 1 traced it only to the fetch read (S12, test_config_failure_end_to_end). Nothing tests the url read of 03 step 1(d): fetch exit 1, then `git config --get remote.origin.url` exits other than 0 or 1. Mutation m9 turns that branch into "no origin", and the whole suite stays green (06: 870 passed, 1 skipped, 1 deselected). In a clone with no fetch key, "no origin" takes today's path and can print a false `OPEN BRANCHES: none`. That is the RI-014/081 failure this item exists to prevent. I3's probe shows the built code is already right (`git config failed (exit 128)`), so round 2 adds a test and a named mutation only.
+
+I1 read for round 2: the branch copy of .claude/agents/i1-reviewer.md, logs/recurring-issues.md, work/094/06-verification.md, `fetch_coverage` in scripts/check_pipeline.py (the url read and its last `return f"git config failed (exit {url[1]})"`), and `test_fetch_coverage_fakes` in tests/test_pipeline_check.py (parametrized `answer, want`, ids S8/S11/S12, one `_patched_git` key). No shell (item 072), nothing run.
+
+Extra research (round 2):
+- git-config: exit 1 is "section or key is invalid", exit 3 is "config file is invalid", and 0 is success (https://git-scm.com/docs/git-config). 128 is what git's `die()` gives for a fatal error (for example, an unreadable config or a bad repo). So exit 128 on the url read is a real shape, distinct from 1 (absent), and must not count as "no origin". One fake value (128) is enough to pin the `else` branch. A second id with exit 3 is optional; it shows the code does not special-case 128.
+- `_patched_git` answers only the keys it is given, and falls through to real git for the rest (round 1, Extra research 6). In `tmp_path`, which is not a repo, a real `git config --get remote.origin.url` exits 1. So under m9 the S13 case gives "no origin", not the error. If the url key were left unpatched, the test would not reach the branch at all, which is why the fake must answer both keys.
+
+Changes (binding for I2):
+- R2-C1. tests/test_pipeline_check.py, `test_fetch_coverage_fakes`: change the parameter from one fetch answer to a dict of `_patched_git` answers, so one case can answer both reads. S8, S11 and S12 keep their answers, now as `{FETCH_KEY: answer}`, and their expected results do not change. Add:
+  - S13: `{("config", "--get-all", "remote.origin.fetch"): ("", 1), ("config", "--get", "remote.origin.url"): ("", 128)}` → `"git config failed (exit 128)"` (a literal string, not built from the code).
+  - Optional S14: the same with url `("", 3)` → `"git config failed (exit 3)"`.
+  - Ids become `["S8", "S11", "S12", "S13"]` (plus `"S14"` if added). The docstring adds one clause: "S13: fetch key absent (exit 1), url read fails (exit 128): the 081 error, never 'no origin' (item 094, m9)."
+  - Use exact `==` on the return value (RI-012).
+- R2-C2. Optional end-to-end pin, same fake: `cp.open_branches()` with the S13 answers returns `"git config failed (exit 128)"`, not a list. This shows the url-read error reaches OPEN BRANCHES through the existing `cov.startswith("git config failed")` return. It is cheap, so I2 should add it as one extra assert inside a real full clone, either in `test_config_failure_end_to_end` or as a second case there. If added, `main()` prints `OPEN BRANCHES: git config failed (exit 128) (item 081)` and returns 1.
+- R2-C3. No change to scripts/check_pipeline.py, the census (the url read is already the second of the 2 counted calls), or any other file.
+
+Mutation m9 (named, must fail): in `fetch_coverage`, replace the final `return f"git config failed (exit {url[1]})"` (the url read's "any other exit") with `return "no origin"`. It must fail `test_fetch_coverage_fakes[S13]` (and `[S14]` and the R2-C2 assert, if added). 05 shows the failed/passed counts for m9, and 06 re-runs m1-m10. A variant m9b that returns SINGLE_TEXT for that branch must fail S13 too. It fails closed in effect, but it hides the 081 error, so S13's exact string catches it.
+
+Rule trace (round 2 rows; the round 1 row "git config exit other than 0/1" is split in two):
+| 03 rule (map step or correction section) | Plan line, or DROPPED: <reason> |
+|---|---|
+| Missing input: `remote.origin.fetch` read exits other than 0 or 1 → 081 error | test_fetch_coverage_fakes[S12]; test_config_failure_end_to_end; m10 |
+| Missing input: `remote.origin.url` read (after fetch exit 1) exits other than 0 or 1 → 081 error, never "no origin" (03 step 1(d) "Any other") | Round 2 R2-C1 test_fetch_coverage_fakes[S13] (optional S14); R2-C2 open_branches assert; m9 (and m9b) must fail it |
+
+Guardrail tests (round 2 addition):
+- Missing inputs: url read exit 128 after the fetch key is absent → test_fetch_coverage_fakes[S13]. Its absent-case counterpart (url exit 1 → "no origin") stays test_fetch_coverage_shapes[S9].
+
+Files (round 2): 1. tests/test_pipeline_check.py (`test_fetch_coverage_fakes` parameters and docstring; optionally one assert in `test_config_failure_end_to_end`). work/094/05-build-report.md is the build report, not a planned code file.
+
+Expected result (round 2): the suite is green with S13 added. m9 and m9b each fail `test_fetch_coverage_fakes[S13]`. m1-m8 and m10 still fail their named tests. No change to the checker's output on this repo.
+
+Recurring issues checked (round 2, item 013):
+- RI-001 (ESCALATED): there is no new filter rule. The 4-of-12 and 3-of-3 counts are unchanged, and S13 adds a 13th pinned shape.
+- RI-010 (ESCALATED): no log line typed. Only the `Log fields:` line below.
+- RI-014 (OPEN, this family): the url-read failure is now pinned as an error, never "none" (m9).
+- RI-002 (GUARDED): a failed read is not turned into the "no origin" value (m9) or SINGLE_TEXT (m9b).
+- RI-012 (GUARDED): exact string equality on a literal.
+- RI-006 (GUARDED): the census is unchanged. No new `_git` call, so no total is edited.
+- RI-008 (GUARDED): the py_compile check still applies to tests/test_pipeline_check.py.
+
+Log fields: FIT WITH CHANGES | 1 files planned
