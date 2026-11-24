@@ -4342,11 +4342,12 @@ def test_batch_not_computable_strict_from_090(tmp_path, item, strict):
 
 
 @pytest.mark.parametrize("item, inc", [
-    ("990", "INCOMPLETE: 990 (LOG BATCH not computable: no line before I2 (item 090))"),
+    ("990", "INCOMPLETE: none"),
     ("089", "INCOMPLETE: none")])
 def test_batch_no_line_before_i2_strict_from_090(tmp_path, item, inc):
-    """090 T5 variant: a timed item whose first line is I2 (no line before it): INCOMPLETE from TIMED_FROM,
-    text only below it."""
+    """090 T5 variant: a timed item whose first line is I2 (no line before it). Item 093: the person-dated
+    `Waived: 01 02 03 04` with 01-04 absent is excused, so 990 is not INCOMPLETE either (text only below
+    TIMED_FROM, as before); any other waiver stays strict (the 093 tests below)."""
     impl = [(BATCH_DAY, "10:00", "I2", "1 files changed | tests 1 passed in 0.01s"),
             (BATCH_DAY, "10:05", "I3", "PASS | sent to audit: yes")]
     _batch_item(tmp_path, item, impl=impl, t05="1 passed in 0.01s", t06="1 passed in 0.02s", full=True)
@@ -4358,6 +4359,113 @@ def test_batch_no_line_before_i2_strict_from_090(tmp_path, item, inc):
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
     assert f"not computable: {item}: no line before I2" in _pick(out, "LOG BATCH:"), out
     assert _pick(out, "INCOMPLETE:") == inc, out
+
+
+WAIVE_IMPL = [(BATCH_DAY, "10:00", "I2", "1 files changed | tests 1 passed in 0.01s"),
+              (BATCH_DAY, "10:05", "I3", "PASS | sent to audit: yes")]
+WAIVE_STRICT = "990 (LOG BATCH not computable: no line before I2 (item 090))"
+REQ_FULL_093 = "Scope: FULL\nWaived: 01 02 03 04 (person, 2026-11-20: test)\n"
+
+
+def _waived_item(root, item, req, drop=("01", "02", "03", "04"), research=()):
+    """Item 093: the 090 T5 shape (I2 10:00, I3 10:05, full=True) with the `drop` step files deleted and
+    request.md replaced by `# Work item <ID>`, `Date: 2026-11-20` and `req` (bytes are written as-is)."""
+    _batch_item(root, item, research=research, impl=WAIVE_IMPL, t05="1 passed in 0.01s", t06="1 passed in 0.02s",
+                full=True)
+    d = root / "work" / item
+    for s in drop:
+        (d / STEP_NAMES[s]).unlink()
+    if isinstance(req, bytes):
+        (d / "request.md").write_bytes(req)
+    elif req is None:
+        (d / "request.md").unlink()
+    else:
+        (d / "request.md").write_text(f"# Work item {item}\nDate: 2026-11-20\n{req}", encoding="utf-8")
+    return d
+
+
+@pytest.mark.parametrize("scope", [s for s in _cp().REQUIRED if "05" in _cp().REQUIRED[s]])
+def test_batch_person_waiver_before_i2_excused(tmp_path, scope):
+    """093 F: a person-dated Waived line covering every pre-05 step of the Scope, those files absent: listed
+    as not computable with the 093 reason, not INCOMPLETE; exit code equals the [089] twin's."""
+    cp = _cp()
+    pre = [s for s in cp.REQUIRED[scope] if s < "05"]
+    req = (REQ_FULL_093 if scope == "FULL" else
+           f"Scope: {scope} (person, 2026-11-20)\nWaived: {' '.join(pre)} (person, 2026-11-20: test)\n")
+    _waived_item(tmp_path / "a", "990", req)
+    _waived_item(tmp_path / "b", "089", req)
+    code, out = _run(tmp_path / "a", "check_pipeline.py", "--today", "2026-11-21")
+    twin, out089 = _run(tmp_path / "b", "check_pipeline.py", "--today", "2026-11-21")
+    assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+    assert (f"not computable: 990: no line before I2 ({' '.join(pre)} waived by the person, first I2 round not "
+            f"bounded, item 093)") in _pick(out, "LOG BATCH:"), out
+    assert code == twin, (out, out089)
+
+
+def test_person_dated_anchor():
+    """093: PERSON_DATED.match is anchored at the text after the step numbers (RI-012); case-sensitive (fails safe)."""
+    cp = _cp()
+    for ok in ("(person, 2026-11-20: x)", " (person , 2026-11-20 : x)"):
+        assert cp.PERSON_DATED.match(ok), ok
+    for bad in ("(person: x)", '(I2, 2026-11-20: "(person, 2026-11-19: ok)")',
+                '(person: x "(person, 2026-11-19: ok)")', "(Person, 2026-11-20: x)"):
+        assert cp.PERSON_DATED.match(bad) is None, bad
+
+
+def test_excused_reason_not_strict(tmp_path):
+    """093: the excused reason is not a BATCH_STRICT reason (incomplete() checks by equality) and has no ";"."""
+    cp = _cp()
+    _waived_item(tmp_path, "990", REQ_FULL_093)
+    [(item, reason)] = _bl(tmp_path)["not_computable"]
+    assert item == "990" and reason not in cp.BATCH_STRICT, reason
+    assert reason.startswith("no line before I2 (") and ";" not in reason, reason
+
+
+def test_person_waiver_helper_on_item_024():
+    """093 T-real: the repo's work/024 (2026-10-31, person-dated `Waived: 01 02 03 04`, no 01-04 files) is the
+    one real item with the excused shape."""
+    cp = _cp()
+    d = Path(__file__).resolve().parents[1] / "work" / "024"
+    text = (d / "request.md").read_text(encoding="utf-8")
+    assert cp._person_waived_before_i2(text, d) == ["01", "02", "03", "04"]
+
+
+@pytest.mark.parametrize("waived, skipped, research", [
+    ("Waived: 01 02 03 04 (A1, 2026-11-20: test)", True, ()),                                     # N-a
+    ("Waived: 01 02 03 04 (person: test)", False, ()),                                            # N-b
+    ('Waived: 01 02 03 04 (I2, 2026-11-20: copied "(person, 2026-11-19: ok)")', True, ()),        # N-c
+    ('Waived: 01 02 03 04 (person: x "(person, 2026-11-19: ok)")', False, ()),                    # N-d
+    ("Waived: 01 02 04 (person, 2026-11-20: test)", True, ()),                                    # N-e
+    ("Waived: 01 02 03 04 (person, 2026-11-20: test)", False,
+     ((BATCH_DAY, "10:10", "R1", "brief written | 1"),)),                                         # N-f
+], ids=["N-a", "N-b", "N-c", "N-d", "N-e", "N-f"])
+def test_batch_waiver_not_excused_stays_strict(tmp_path, waived, skipped, research):
+    """093 N-a to N-f: any other waiver shape keeps the strict 090 entry. N-f keeps 01-research.md (its R1 line
+    at 10:10 is after I2 10:00, so there is still no line before I2)."""
+    drop = ("02", "03", "04") if research else ("01", "02", "03", "04")
+    _waived_item(tmp_path, "990", f"Scope: FULL\n{waived}\n", drop=drop, research=research)
+    code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")
+    inc = _pick(out, "INCOMPLETE:")
+    assert WAIVE_STRICT in inc and code == 1, out
+    assert ("990: SKIPPED" in out) == skipped, out
+
+
+@pytest.mark.parametrize("req", [
+    b"\xff",                                                                                     # N-g
+    None,                                                                                        # N-h
+    "Waived: 01 03 (person, 2026-11-20: test)\n",                                                # N-i
+    "Scope: FULL\nWaived: 01 02 03 04 (person: no date)\nWaived: 01 02 03 04 (person, 2026-11-20: x)\n",   # N-j
+], ids=["N-g", "N-h", "N-i", "N-j"])
+def test_batch_waiver_missing_inputs_strict(tmp_path, req):
+    """093 N-g to N-j: unreadable request.md (also on _UNREAD), missing request.md, no Scope line (FULL default,
+    02 and 04 not waived) and a person-dated second Waived line (only the first is read) keep the strict reason."""
+    cp = _cp()
+    cp._UNREAD.clear()
+    _waived_item(tmp_path, "990", req)
+    assert _bl(tmp_path)["not_computable"] == [("990", "no line before I2")]
+    if isinstance(req, bytes):
+        assert (tmp_path / "work" / "990" / "request.md").as_posix() in cp._UNREAD, cp._UNREAD
+    cp._UNREAD.clear()
 
 
 def _round_item(root, rows, t05=None, t06=None, full=False, item="999"):

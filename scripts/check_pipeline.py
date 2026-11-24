@@ -171,8 +171,11 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   send-back and before the in-progress skip. From TIMED_FROM on a not-computable
                   reason in BATCH_STRICT (no time, no line before I2, no valid time) is also an
                   INCOMPLETE entry `LOG BATCH not computable: <reason> (item 090)`, gated on 05 like
-                  the timed I2 field (strict: a person's `Waived: 01 02 03 04` item, 024's shape, has no
-                  line before I2 and is INCOMPLETE too; no waiver excuses it). Known gaps: (w) runs pasted
+                  the timed I2 field. Item 093: a person-dated `Waived:` (first line only) covering
+                  every pre-05 step of the Scope, with those step files absent (024's shape), is
+                  excused: it is listed as `not computable: <ID>: no line before I2 (<steps> waived by
+                  the person, first I2 round not bounded, item 093)` and is not INCOMPLETE. Any other
+                  waiver stays strict. Known gaps: (w) runs pasted
                   outside the two sections are not read
                   (only lowers Σ); (x) the bound catches a round only when its run is longer than the
                   gap allows: with today's 74-93 s runs, same-minute (Δ0) batches; Δ >= 1 batches pass
@@ -476,6 +479,12 @@ RESEARCH_CODE_PATHS = ("ccbot/", "config/", "scripts/", "tests/")
 WORK_CODE = re.compile(r"work/\d{3}/.+\.py")
 WAIVE_BUILD = {"04", "05", "06"}
 WAIVE_BUILD_BY_PERSON = re.compile(r"\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*:")
+# Item 093: request.md's `Waived:` line (group 1 = step numbers, group 2 = the rest; parse_request reads
+# the first one), and the person-with-date prefix written once (from WAIVE_BUILD_BY_PERSON). PERSON_DATED
+# is used only with .match on WAIVED_LINE group 2, so a quoted person form later in the text never counts
+# (RI-012); re.match, not prefixmatch (RI-008).
+WAIVED_LINE = re.compile(r"^Waived:\s*([0-9 ,]+)(.*)$", re.M)
+PERSON_DATED = re.compile(r"\s*" + WAIVE_BUILD_BY_PERSON.pattern)
 STEP_FILE = re.compile(r"^work/(\d{3})/(01-research|02-improvements|03-handoff|04-build-plan|"
                        r"05-build-report|06-verification)\.md$")
 LOG_FORMAT = {  # the fields after `HH:MM | <agent> | <ID> | ` (.claude/agents/*.md)
@@ -548,7 +557,7 @@ def parse_request(text):
     """(scope, date, (waived steps, first Waived: line, who)) from request.md text."""
     scope = re.search(r"^Scope:\s*(FULL|RESEARCH ONLY|FAST)\b", text, re.M)
     date = re.search(r"^Date:\s*(\d{4}-\d{2}-\d{2})", text, re.M)
-    waived = re.search(r"^Waived:\s*([0-9 ,]+)(.*)$", text, re.M)
+    waived = WAIVED_LINE.search(text)
     who = re.match(r"\s*\(\s*([^,:)]+)", waived.group(2)) if waived else None
     return (scope.group(1) if scope else "FULL",
             dt.date.fromisoformat(date.group(1)) if date else None,
@@ -561,6 +570,23 @@ def _build_waived(text):
     with a date: `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)`."""
     _, _, (steps, waived_line, who) = parse_request(text)
     return WAIVE_BUILD <= set(steps) and who == "person" and bool(WAIVE_BUILD_BY_PERSON.search(waived_line))
+
+
+def _person_waived_before_i2(req_text, item_dir):
+    """Item 093: the steps before 05 of the item's Scope, when the person waived all of them with a date
+    and none of their files exists; else None (the strict "no line before I2" reason stays).
+    Reads only the first `Waived:` line (parse_request's rule; a later person-dated line never counts,
+    gap j). Its text after the step numbers must start with `(person, YYYY-MM-DD:` (PERSON_DATED.match,
+    anchored; a person form quoted later in the text never counts). `person` is case-sensitive, so
+    `(Person, ...)` stays strict (fails safe, same as FAST_BY_PERSON and WAIVE_BUILD_BY_PERSON); the date
+    is not validated (2026-13-45 matches, the same known gap as those two patterns). No git."""
+    scope, _, (waived, _, _) = parse_request(req_text)
+    m = WAIVED_LINE.search(req_text)
+    pre = [s for s in REQUIRED[scope] if s < "05"]
+    if (m and PERSON_DATED.match(m.group(2)) and pre and set(pre) <= set(waived)
+            and not any((item_dir / STEPS[s]).exists() for s in pre)):
+        return pre
+    return None
 
 
 # Item 077: a CommonMark 0.31.2 §4.5 code fence opener (.fullmatch): 0-3 spaces, 3+ ` or ~, info string.
@@ -1300,6 +1326,12 @@ def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
     the suite after prev's line and before its own. An I2 line with no prev is not evaluated (the whole-item
     rule's "no line before I2" covers it). It only catches rounds whose run is longer than the gap allows:
     with today's 74-93 s runs, same-minute (Δ0) batches; Δ >= 1 batches pass it.
+    Item 093: with no line before the first I2, request.md is read (_read, missing_ok); if the person waived
+    every pre-05 step of the Scope with a date on the first `Waived:` line and none of those files exists
+    (_person_waived_before_i2), the reason is `no line before I2 (<steps> waived by the person, first I2
+    round not bounded, item 093)`, which is not in BATCH_STRICT. The first I2 round of such an item has no
+    prev, so nothing in LOG BATCH evaluates it (LOG TIME still applies). Only the first Waived line is read
+    (gap j). A missing or unreadable request.md, or any other waiver, keeps "no line before I2".
     Returns {flagged, flagged_ids, excepted, not_computable, checked, in_progress}."""
     excepted = LOG_BATCH_EXCEPT if excepted is None else excepted
     order = lambda r: (r[0], r[3], r[4])                    # stamp, then file and line order
@@ -1354,7 +1386,10 @@ def batch_log_items(work=Path("work"), logs=Path("logs"), excepted=None):
             continue
         before = [r for r in rows if (r[0] <= first[0] if r[2] == "research" else order(r) < order(first))]
         if not before:
-            out["not_computable"].append((item, "no line before I2"))
+            text, why = _read(d / "request.md", missing_ok=True)
+            pre = _person_waived_before_i2(text, d) if why is None and text is not None else None
+            out["not_computable"].append((item, f"no line before I2 ({' '.join(pre)} waived by the person, first "
+                                                f"I2 round not bounded, item 093)" if pre else "no line before I2"))
             continue
         start = max(before, key=order)
         delta = int((end[0] - start[0]).total_seconds()) // 60
