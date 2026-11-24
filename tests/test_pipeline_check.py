@@ -5252,6 +5252,89 @@ def test_round_build_shallow_goes_to_unchecked(tmp_path, shallow):
         assert fired in got and (RH_ID, fired) not in u, (u, got)
 
 
+
+# Item 101 (RI-014): each shallow `elif unsure` branch of `incomplete` from 095 has its own case.
+SE_FIELD = "1 files changed | tests 1 passed"                   # untimed I2 field, bare `|` (item 101)
+
+
+def _se_edit(path, old, new=""):
+    """Replace `old` in a fixture file; fail by name if the text is not there (never a silent no-op)."""
+    text = path.read_text(encoding="utf-8")
+    assert old in text, (path, old)
+    path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+def _se_line(path, prefix):
+    """The one line of `path` that starts with `prefix` (with its newline), asserted present once."""
+    hits = [l for l in path.read_text(encoding="utf-8").splitlines(keepends=True) if l.startswith(prefix)]
+    assert len(hits) == 1, (path, prefix, hits)
+    return hits[0]
+
+
+def _se_timed05(tmp_path, cp):
+    d = _rh_item(tmp_path)
+    _se_edit(tmp_path / "logs" / "implementation" / f"{RH_DAY}.md", "tests 1 passed in 0.01s", "tests 1 passed")
+    _se_edit(d / "05-build-report.md", "Suite: 1 passed in 0.01s", "Suite: 1 passed")
+    return d, None, I2_ENTRY
+
+
+def _se_batch05(tmp_path, cp):
+    return (_rh_item(tmp_path), {RH_ID: cp.BATCH_STRICT[0]},
+            f"LOG BATCH not computable: {cp.BATCH_STRICT[0]} (item 090)")
+
+
+def _se_suite05(tmp_path, cp):
+    d = _rh_item(tmp_path)
+    f = d / "05-build-report.md"
+    _se_edit(f, _se_line(f, "Suite:"))
+    return d, None, "05 has no 'Suite:' line (item 082)"
+
+
+def _se_rh05(tmp_path, cp):
+    return _rh_item(tmp_path, body05=RH_P1), None, f"05 heading '### Test output (round 2, pasted)' {RH_USE}"
+
+
+def _se_rh06(tmp_path, cp):
+    return (_rh_item(tmp_path, body06="## Round 1\n### Tests re-run (output)\n2 passed in 1.50s\n"), None,
+            f"06 heading '### Tests re-run (output)' {RH_USE}")
+
+
+def _se_scratch(step):
+    def setup(tmp_path, cp):
+        d = _rh_item(tmp_path)
+        f = d / cp.STEPS[step]
+        _se_edit(f, _se_line(f, "Scratch dir:"))
+        return d, None, f"{step} has no Scratch dir: line (item 097)"
+    return setup
+
+
+SE_CASES = [("timed05", "05", _se_timed05), ("batch05", "05", _se_batch05), ("suite05", "05", _se_suite05),
+            ("rh05", "05", _se_rh05), ("rh06", "06", _se_rh06), ("scratch05", "05", _se_scratch("05")),
+            ("scratch06", "06", _se_scratch("06"))]
+SE_PARAMS = [pytest.param(case, step, setup, mode, id=f"{case}-{mode}")
+             for case, step, setup in SE_CASES for mode in ("shallow", "nogit")]
+
+
+@pytest.mark.parametrize("case, step, setup, mode", SE_PARAMS)
+def test_shallow_elif_branch_goes_to_unchecked(tmp_path, case, step, setup, mode):
+    """Item 101: unit tests of `incomplete` for the TIMED, LOG BATCH, Suite, round-heading and Scratch dir
+    `elif unsure` branches (095/097). Shallow, with only the gated step file committed: the one entry is in
+    `unchecked`, not returned; env "no git": it is returned (strict) and `unchecked` stays empty.
+    The printed INCOMPLETE NOT CHECKED line and `committed` from `_head_work_files` stay with 095 M5/M11."""
+    cp = _cp()
+    for cutoff in (cp.SUITE_FROM, cp.TIMED_FROM, cp.ROUND_HEADING_FROM, cp.SCRATCH_FROM, cp.ROUND_BUILD_FROM):
+        assert int(RH_ID) >= cutoff, cutoff                 # RI-001: the fixture ID clears every cutoff
+    d, batch_nc, entry = setup(tmp_path, cp)
+    if case == "timed05":                                   # 03 step 2: the TIMED gate, not the TESTS branch
+        assert cp.log_fields_ok("I2", RH_ID, SE_FIELD, timed=False) and not cp.log_fields_ok("I2", RH_ID, SE_FIELD)
+    u = []
+    got = cp.incomplete(d, logs=tmp_path / "logs", env=cp.SHALLOW_TEXT if mode == "shallow" else "no git",
+                        not_seen=[], batch_nc=batch_nc, unchecked=u, committed={f"work/{RH_ID}/{cp.STEPS[step]}"})
+    if mode == "shallow":
+        assert got == [] and u == [(RH_ID, entry)], (u, got)
+    else:
+        assert got == [entry] and u == [], (u, got)
+
 def test_round_build_missing_inputs(tmp_path, monkeypatch):
     """P-f: an unreadable 05 gives the one 091 `not checked` entry (none from 098); an absent file is
     ([], None); a failed anchor read keeps the entry and adds its note (strict)."""
