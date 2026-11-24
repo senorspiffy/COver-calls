@@ -8,3 +8,4 @@ What A1 should look at:
 4. Known gaps, documented in the docstring, not fixed: `a:b: c` false error; `hooks: # c` then a column-0 item rejected; item after indented content of an earlier item rejected; splitlines() characters. Follow-ups F-1 to F-5 in 03 (e.g. `name: x: y`, indented `foo: bar` under a scalar key, an indented-line allow-list) are outside 096's scope: decide which become new items (053).
 5. PyYAML probe in 06 used 6.0.1 (087 used 6.0.3); results are information only and agree with every fixture's expected result.
 6. RI status to copy on main: RI-002 near miss "column-0 line with no key passes the frontmatter test → 096" is closed, not counted. RI-001, RI-010, RI-014 unchanged by this item.
+A1 result: FAIL (2026-11-24, logs/audit/2026-11-24-096.md: column-0 `a #b: c` returns a tool set, PyYAML ScannerError; KEY_RE body allows a comment)
