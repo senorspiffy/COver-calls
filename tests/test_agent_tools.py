@@ -35,13 +35,16 @@ these characters.
 
 Item 096: a column-0 frontmatter line must be blank, a `#` comment, a `key:`
 (followed by a space, a tab or the end of the line; the key does not start
-with a YAML indicator, except `-` followed by a non-space), or a `- ` item
+with a YAML indicator, except `-` followed by a non-space; the key also
+may not hold a `#` right after a space or tab, because YAML starts a comment
+there (`a #b: c` has no key; `a#b: c` is the key `a#b`)), or a `- ` item
 directly after a column-0 empty-valued key or another column-0 item. Blank
 and comment lines (at any indent) are skipped. `tools:` and
 `disallowedTools:` lines are left to `_field`. Anything else is an error.
 This says nothing about what Claude Code does with such a file. Known
 fail-closed false errors: a key with an inner colon not followed by a space
-(`a:b: c`). Also rejected (YAML's reading not checked): a column-0 item after
+(`a:b: c`). Also rejected (YAML's reading not checked): a key with a tab
+before `#` and no value (`a\t#b:`); a column-0 item after
 an empty-valued key that carries a comment (`hooks: # c`); a column-0 item
 after the indented content of an earlier column-0 item; text split by
 `str.splitlines()` at \x0b, \x0c, \x1c, \x1d, \x1e, \x85, U+2028 or U+2029.
@@ -57,7 +60,7 @@ NO_SHELL_ALLOWED = {"Read", "Write", "Glob", "Grep", "WebSearch", "WebFetch"}
 ENTRY_RE = re.compile(r"[A-Za-z]+(\([^()]*\))?")
 VALUE_START_RE = re.compile(r"""[ ]*(?:-[ \t]+)*(?:[^\s"'#&!*\[{?:][^:]*:[ \t]+)?(\S)""")
 DOC_MARKER_RE = re.compile(r"(?:---|\.\.\.)(?:[ \t]|$)")
-KEY_RE = re.compile(r"""(?:[^\s"'#&!*\[\]{},|>%@`?:-]|-(?=\S))[^:]*:(?=[ \t]|$)""")
+KEY_RE = re.compile(r"""(?:[^\s"'#&!*\[\]{},|>%@`?:-]|-(?=\S))(?:[^: \t]|[ \t](?!#))*:(?=[ \t]|$)""")
 FLOW_KEYS = ("tools:", "disallowedTools:")
 AFTER_CLOSE_RE = re.compile(r"( +#.*)? *")
 
@@ -442,6 +445,10 @@ CASES = {
     "nk10_inner_colon_key": (_fm("a:b: c", TOOLS), None, NO_KEY.format(2)),
     "nk11_item_first_line": (_fm("- a", TOOLS), None, NO_KEY.format(2)),
     "nk12_indented_comment_then_item": (_fm("hooks:", "  # c", "- a", TOOLS), {"Read", "Write"}, None),
+    "nk13_space_hash_in_key": (_fm("name: x", "a #b: c", TOOLS), None, NO_KEY.format(3)),
+    "nk14_space_hash_empty_key_then_item": (_fm("a #b:", "- x", TOOLS), None, NO_KEY.format(2)),
+    "nk15_hash_inside_key": (_fm("a#b: c", TOOLS), {"Read", "Write"}, None),
+    "nk16_tab_hash_empty_key_then_item": (_fm("a\t#b:", "- x", TOOLS), None, NO_KEY.format(2)),
 }
 
 
