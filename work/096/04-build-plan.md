@@ -133,3 +133,85 @@ Self-check (I1 additions only; 03 Self-check 1-19 is unchanged otherwise). Total
 Sources: https://docs.rs/crate/rlsp-yaml-parser/latest/source/src/lexer/plain.rs ; https://flutter.googlesource.com/third_party/pyyaml/+/refs/heads/main/tests/data/spec-05-10.error
 
 Log fields: FIT WITH CHANGES | 1 files planned
+
+## Round 2 (2026-11-24, I1, after A1 FAIL round 1)
+Input: work/096/07-audit-task.md (last line `A1 result: FAIL`) and logs/audit/2026-11-24-096.md ("sent back to R1/I1"). I1 re-read the branch copy of .claude/agents/i1-reviewer.md, logs/recurring-issues.md, and tests/test_agent_tools.py as built (c810804): KEY_RE at L60, `_frontmatter_error` L184-L223, VALUE_START_RE L58, CASES nk10-nk12 L442-L444. No shell, so every trace below is by hand; I2 runs them.
+
+Fit verdict (round 2): FIT WITH CHANGES. Same single file, same scope. The change narrows KEY_RE's key body only.
+
+A1 finding (copied): a column-0 line whose key text holds ` #` (e.g. `a #b: c`, or `a #b:` then `- x`) still returns a tool set, because KEY_RE's key body `[^:]*` admits a comment. A1's probe (logs/audit/2026-11-24-096.md L37-L40, PyYAML 6.0.3): `a #b: c` → ScannerError, `a #b:` + `- x` → ParserError, control `a#b: c` → OK `{'a#b': 'c'}`; agent_tools gave {Read, Write} for all three. Real tree: 0 such lines (A1 awk), so a near miss, not a live miss.
+
+Research gap check: no R1/R3 re-run is needed. No new outside fact is required: the behaviour is measured (A1's PyYAML probe above) and the spec rule is public text, cited in R2-research 1 below. 03 makes no claim about a `#` inside a key (A1 grep of 01/03/04 for "comment": only comment-line and `hooks: # c` cases), so no 03 row is wrong and no correction section is needed; the guardrail is a plan-level fix sourced from A1.
+
+### R2 extra research (with sources)
+1. YAML 1.2.2 section 6.6: "Comments must be separated from other tokens by white space characters." and production [33] `s-white ::= s-space | s-tab` (https://yaml.org/spec/1.2.2/). rlsp-yaml-parser's `ns_plain_char_block` (YAML 1.2 [130]) states "`#` is allowed only when NOT preceded by whitespace", and `extract_trailing_comment` "`#` must be preceded by whitespace" (https://docs.rs/crate/rlsp-yaml-parser/0.6.1/source/src/lexer/plain.rs). So a space or tab followed by `#` ends the plain key; `#` after a non-space is key text. That is exactly the body rule below, for both space and tab.
+2. Edge case A1's two shapes leave open: a tab before `#`. A1 named "space/tab", but `a\t#b: c` never reaches the new check: VALUE_START_RE (L58) matches key `a\t#b`, value start `c`, and `"\t" in line[:s]` returns TAB_BEFORE(2) first (L197-L198). The tab shape that does reach KEY_RE is the empty-valued one, `a\t#b:` then `- x`: VALUE_START_RE's key group needs `:[ \t]+`, so `(\S)` is `a` at s = 0, no error, and the new check runs. That fixture (nk16) is what pins the tab half of the rule. PyYAML's verdict on the tab shapes is not measured; 05/06 must not call them YAML-invalid without probe output (same rule as round 1 Extra research 5). Rejecting them is fail-closed either way.
+3. Regex cost: the two body alternatives `[^: \t]` and `[ \t](?!#)` are disjoint single characters, so the match stays linear (no nested quantifier backtracking).
+
+### R2 files to change
+Still 1 file: tests/test_agent_tools.py.
+
+a. KEY_RE (L60): replace the key body `[^:]*` with `(?:[^: \t]|[ \t](?!#))*`, giving
+```
+KEY_RE = re.compile(r"""(?:[^\s"'#&!*\[\]{},|>%@`?:-]|-(?=\S))(?:[^: \t]|[ \t](?!#))*:(?=[ \t]|$)""")
+```
+Every character the old body allowed is still allowed, except a space or tab directly followed by `#`. The first-character class and the lookahead are unchanged. The `prev_open` update (L221) uses the same KEY_RE, so `a #b:` can no longer open a column-0 list. Do not change VALUE_START_RE (its `[^:]*` only locates the value start; A1 found no fault there).
+
+b. Module docstring, "Item 096:" paragraph: after "...except `-` followed by a non-space)" add: "; the key also may not hold a `#` right after a space or tab, because YAML starts a comment there (`a #b: c` has no key; `a#b: c` is the key `a#b`)". Keep every other sentence of the paragraph, including "This says nothing about what Claude Code does with such a file." Add to the "Also rejected (YAML's reading not checked)" list: "a key with a tab before `#` and no value (`a\t#b:`)".
+
+c. CASES, after nk12:
+| id | text | expected |
+|---|---|---|
+| nk13_space_hash_in_key | `_fm("name: x", "a #b: c", TOOLS)` | NO_KEY(3) |
+| nk14_space_hash_empty_key_then_item | `_fm("a #b:", "- x", TOOLS)` | NO_KEY(2) |
+| nk15_hash_inside_key | `_fm("a#b: c", TOOLS)` | {Read, Write} |
+| nk16_tab_hash_empty_key_then_item | `_fm("a\t#b:", "- x", TOOLS)` | NO_KEY(2) |
+
+nk15 is the RI-012 in-text negative: a `#` inside the key text that is not a comment must still be read.
+
+### R2 traces (by hand)
+- nk13: line 3 `a #b: c`. DOC no; no lead tab; VALUE_START_RE key group `a #b`, value start `c`, no tab before it, `c` not special → no error. New check: not blank/space/tab/`#`, not FLOW_KEYS, not an item. KEY_RE: first `a`; body at ` `: `[ \t](?!#)` fails (next is `#`), `[^: \t]` fails; body ends empty; next char is a space, not `:` → no match → NO_KEY(3). Round 1 KEY_RE: body `[^:]*` takes ` #b`, `:` then space → match → tool set (A1's result).
+- nk14: line 2 `a #b:`. VALUE_START_RE key group fails (no `:[ \t]+`), `(\S)` = `a`, s = 0 → no error. KEY_RE fails as in nk13 → NO_KEY(2). Round 1: match with empty value → P = True → `- x` allowed → tool set.
+- nk15: `a#b: c`. KEY_RE: `a`, body `#` and `b` via `[^: \t]`, `:` followed by a space → match → no error → `_field` gives {Read, Write}.
+- nk16: line 2 `a\t#b:`. No lead tab (lead is empty); VALUE_START_RE `(\S)` = `a`, s = 0, no tab in `line[:0]` → no error. KEY_RE: body at `\t`: `[ \t](?!#)` fails, `[^: \t]` fails → no `:` → NO_KEY(2). Round 1: match, P = True, tool set.
+- Existing fixtures: I1 Grep of tests/test_agent_tools.py for a column-0 fixture line with a space or tab before `#` ahead of its first colon: 0 hits (the only fixture `#` hits are q24 `description: [a, "b]"] # c` and q28 `--- # c`, both after the colon or caught by DOC first). So every round 1 id keeps its result. Real tree: 21 of 21 lines are `name:`/`description:`/`tools:` with a letter-only key, so they still match.
+
+### R2 tests and checks
+1. `python3 -m pytest tests/test_agent_tools.py` gives 109 passed (91 + 4 = 95 parser cases, 12 tree cases, plus the 2 named tests).
+2. Base-failure checks: (i) against the round 1 build (c810804, body `[^:]*`, which is M53): exactly nk13, nk14, nk16 fail → 3 failed, 106 passed. (ii) against the pre-096 parser (M42): round 1's 9 ids plus nk13, nk14, nk16 → 12 failed, 97 passed. nk15 passes on every version.
+3. New mutations (I2 runs each on a scratch copy, I3 re-runs; failing ids must equal the list, or 05 states a Deviation with the run output):
+   - M53 (key body back to `[^:]*`, A1's required mutation) → nk13, nk14, nk16
+   - M54 (tab dropped from the rule: body `(?:[^: ]|[ ](?!#))*`) → nk16
+   - M55 (over-strict: body `[^:#]*`, every `#` refused) → nk15
+4. Updated round 1 list: M42 → nk1, nk2, nk3, nk4, nk5, nk8, nk10, nk11, nk13, nk14, nk16, n12. All other M41, M43-M52 lists are unchanged (traced: nk13/nk14/nk16 fail at KEY_RE before any item or P logic, have no DOC or quote/flow content, and their last front line is TOOLS; nk15's key has a space after its colon and a letter first, so M45 and M47 leave it passing).
+5. Real-tree test passes (21 of 21). `python3.11 -m py_compile tests/test_agent_tools.py` where available (RI-008).
+6. 05 round 2 pastes the suite line as printed, the three base/mutation runs (M53, M54, M55) and the re-run of M42.
+
+### R2 rule trace
+| Rule (source) | Plan line, or DROPPED: <reason> |
+|---|---|
+| A1: key body rejects `#` after space/tab | R2 Files a; Tests 1, M53, M54 |
+| A1: NO_KEY fixture `name: x` / `a #b: c` / tools | nk13; M53 |
+| A1: NO_KEY fixture `a #b:` then `- x` | nk14; M53 |
+| A1: positive `a#b: c` still returns a tool set (RI-012 negative) | nk15; M55 |
+| A1: mutation back to `[^:]*` fails the two new NO_KEY fixtures | M53 (also kills nk16) |
+| A1: docstring "Item 096" paragraph states the rule | R2 Files b |
+| I1: tab half of the rule reaches KEY_RE only with no value | nk16; M54 (R2 research 2) |
+| Filter count: allow-list still 21 of 21 real lines, 0 real lines with ` #` in a key (A1 awk 2026-11-24) | R2 Tests 5 (real-tree test) |
+| Optional input: PyYAML verdict on tab shapes | DROPPED: not measured, not claimed (R2 research 2) |
+| Rule text the person follows | none changed (test-only) |
+
+### R2 guardrail tests
+- Comment inside a column-0 key → nk13, nk14 (space), nk16 (tab), pinned by M53 and M54.
+- Over-correction guard → nk15, pinned by M55.
+
+### R2 expected result
+tests/test_agent_tools.py: 109 passed. `a #b: c` and `a #b:` / `- x` (and `a\t#b:` / `- x`) give `no key on frontmatter line <n> (item 096)` instead of a tool set; `a#b: c` still gives {Read, Write}. M53 fails exactly nk13, nk14, nk16; M54 nk16; M55 nk15. Real tree passes.
+
+Self-check (round 2): 91 + 4 = 95; 95 + 12 + 2 = 109. vs c810804: 3 new NO_KEY ids fail → 109 − 3 = 106. vs pre-096: 9 + 3 = 12 fail → 109 − 12 = 97.
+
+Recurring issues checked (round 2): RI-001 (ESCALATED): allow-list count re-stated, 21 of 21, plus A1's dated 0 count for the new shape. RI-010 (ESCALATED): no log line typed; this file ends with the Log fields line. RI-014 (OPEN): not applicable (no git/clone-depth path). GUARDED entries also checked: RI-002 (this is its pattern: an unreadable key now becomes NO_KEY, never a tool set), RI-005/RI-006 (counts re-derived above; I2 takes them from pytest as printed), RI-008 (no 3.11+ syntax; lookahead is plain `re`), RI-012 (nk15 is the in-text negative, M55 pins it).
+
+Sources (round 2): https://yaml.org/spec/1.2.2/ ; https://docs.rs/crate/rlsp-yaml-parser/0.6.1/source/src/lexer/plain.rs
+
+Log fields: FIT WITH CHANGES | 1 files planned
