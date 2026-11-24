@@ -18,3 +18,4 @@ What A1 should look at:
    - The first I2 round of an excused item is not bounded by LOG BATCH (only LOG TIME applies).
 5. RI status to copy on main: RI-010 near miss "waiver gap → 093" is closed, not counted. RI-001: T-real on work/024 is 1 real item, and 0 of the items numbered 090-098 change. RI-014: no git read was added.
 6. Real items are unchanged. The base (66e07b9) and head check_pipeline outputs on this repo are identical (06).
+A1 result: PASS (2026-11-24, logs/audit/2026-11-24-093.md)
