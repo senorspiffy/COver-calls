@@ -9,3 +9,4 @@ What to look at:
 5. Known gaps in 05 (repeat in the audit): (1) check_handoff now depends on check_pipeline.py importing cleanly; (2) an unreadable 01 after R1 gives a `not computed` sources value that `--log R1` refuses, so the item stays INCOMPLETE until R1 is re-run; run-item.md L17 does not say this, and a `.claude/` edit needs the person's OK (A1 may open a request); (3) `--all` never reads the 01 of an item with no 03; (4) open_branches' unreadable request.md is silent in check_handoff; (5) `work.iterdir()`/`is_dir()` may still raise.
 6. `test_unreadable_problem_fullmatch_only` inserts the scripts dir into the test process's sys.path and imports check_handoff there; harmless now (the suite is green), but note it if a later test depends on import order.
 7. RI-014 status: 092 is a near miss in RI-014's family (not counted); copy guardrail status on main only (item 036).
+A1 result: PASS (2026-11-24, logs/audit/2026-11-24-092.md)
