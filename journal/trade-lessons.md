@@ -3,6 +3,11 @@
 Lessons from the paper bot's real trades, newest first. Each line: date, lesson, evidence. UNCONFIRMED = seen once; CONFIRMED = seen 3+ times.
 Paper only, research, not financial advice. Lessons are notes only: no setting is tuned from paper results; any change waits for the Sunday review.
 
+## 2026-11-23
+- **Another missing-data reject: F failed OI_UNKNOWN.** No harm this time (F is held), but it's the same kind of problem as the 11-19 quote gap: one missing field from the broker knocks a ticker out of the screen. Watch for repeats. UNCONFIRMED.
+- **The rebound shows how much equity depends on the stock.** F +$48 on the day moved equity +$111 with the calls almost flat. Repeats the CONFIRMED lesson.
+- **The recap depends on the VPS app being online at 5:30 AM ET.** On 11-24 it was offline, so this recap was late.
+
 ## 2026-11-20
 - **The bug loop worked in one day.** The 11-19 freeze was found by the recap, fixed (PR #34, item 083) and pulled before the next run. Keep the morning recap watching for odd banners and NaN equity.
 - **Week 2 result: -11.2% on two falling stocks, with $50 of premium earned.** VALE is -21% from its basis. Repeats the CONFIRMED lesson; strongest input for the Sunday review (stock choice and how many names to hold matter more than the call rules).
