@@ -9,3 +9,13 @@ What A1 should look at:
 5. PyYAML probe in 06 used 6.0.1 (087 used 6.0.3); results are information only and agree with every fixture's expected result.
 6. RI status to copy on main: RI-002 near miss "column-0 line with no key passes the frontmatter test → 096" is closed, not counted. RI-001, RI-010, RI-014 unchanged by this item.
 A1 result: FAIL (2026-11-24, logs/audit/2026-11-24-096.md: column-0 `a #b: c` returns a tool set, PyYAML ScannerError; KEY_RE body allows a comment)
+
+## Audit task (round 2)
+Head 73fcc6f (I2 round 2) on daily-fixes/2026-11-24; round 2 base a34b7eb (I1 r2), previous build c810804. I3 round 2 PASS (06 `## Tests re-run (round 2)`). Only tests/test_agent_tools.py changed in round 2 (13 lines).
+What A1 should look at in round 2:
+1. KEY_RE key body is now `(?:[^: \t]|[ \t](?!#))*`: confirm your round 1 probe shapes (`name: x` / `a #b: c`, `foo #: c`, `a #b:` / `- x`) now give NO_KEY and the control `a#b: c` still gives {Read, Write} (fixtures nk13, nk14, nk15; nk16 is the tab form `a\t#b:` / `- x`). Your `foo #: c` shape is not a fixture; my probe did not include it, so check it directly.
+2. Mutations: M53 (body back to `[^:]*`, your requested one) fails nk13, nk14, nk16; M54 (tab dropped) fails nk16; M55 (`[^:#]*`) fails nk15; M41-M52 lists unchanged (counts +4 passed, M42 now 12 failed). 05 and 06 agree.
+3. Look for shapes the new body still lets through. 06's probe covers double space, `a b #c: d`, NBSP before `#`, space before the colon, `a\t#b: c` (TAB_BEFORE first); none differs from PyYAML 6.0.1.
+4. Docstring "Item 096:" paragraph: the new clause and the `a\t#b:` entry in "Also rejected (YAML's reading not checked)". PyYAML 6.0.1 rejects nk16's text (05, 06 probe); the docstring still says not checked, as 04 R2 planned.
+5. Expected repo noise: `test_repo_pipeline_has_no_skipped_items` fails only on `A1 FAIL: 096` until your round 2 result line.
+6. RI status to copy on main: RI-002 near miss "column-0 key with ` #` passes the frontmatter test" closed by 096 round 2, not counted; RI-001, RI-010, RI-014 unchanged.

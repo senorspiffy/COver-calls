@@ -1,5 +1,5 @@
 # 06 Verification - 096
-Verdict: PASS (round 1; earlier rounds: none)
+Verdict: PASS (round 2; earlier rounds: round 1 I3 PASS, A1 FAIL)
 Sent back to: none
 
 Base 1b10d90, head af4715b (branch daily-fixes/2026-11-24; 092 and 093 done on it). I3 scratch dir: /tmp/claude-0/-home-claude/17dd566b-e13e-58fe-b556-13d450b5acde/scratchpad/I3-096-r1-7a05n3mv (mkdtemp, item 091). Head tree copied there with `git archive af4715b | tar -x`; mutations run only in that copy. An earlier I3 attempt was cut off by a container restart before writing anything; this is a fresh round 1.
@@ -73,14 +73,104 @@ totals line: 64 rows -> 49 as-is, 12 fixed, 3 removed
 PASS
 ```
 
+## Tests re-run (round 2)
+Round 2 (after A1 FAIL round 1, logs/audit/2026-11-24-096.md). Base of round 2: c810804 (round 1 I3) / a34b7eb (I1 r2); head 73fcc6f (I2 r2) on daily-fixes/2026-11-24. I3 round 2 scratch dir: /tmp/claude-0/-home-claude/17dd566b-e13e-58fe-b556-13d450b5acde/scratchpad/I3-096-r2-03hq1plt (new mkdtemp, item 091); every run below was in my own `git worktree add --detach` of 73fcc6f inside it ($R2/wt), never in the main checkout. No git stash. Rules read first: branch copies of .claude/agents/i3-verifier.md and .claude/commands/run-item.md, logs/recurring-issues.md.
+
+I1 audit (round 2): 04 `## Round 2` takes A1's finding and A1's guardrail list unchanged (R2 rule trace: key body, nk13 = A1's `name: x` / `a #b: c`, nk14 = A1's `a #b:` / `- x`, nk15 = A1's RI-012 positive `a#b: c`, M53 = A1's "mutation back to `[^:]*`", docstring rule). Additions beyond A1: the tab half (nk16 + M54) and the over-strict guard M55, both sourced (YAML 1.2.2 s6.6 "Comments must be separated from other tokens by white space characters", s-white = space | tab; rlsp-yaml-parser plain.rs) and traced. A1's suggested regex was one of two forms ("e.g."); I1's `(?:[^: \t]|[ \t](?!#))*` is equivalent for the shapes A1 named and linear (disjoint single-character alternatives). No R1/R3 re-run needed: 03 makes no claim about a `#` in a key, so no 03 row is wrong (check_handoff below still PASS). No unsourced addition.
+
+I2 audit (round 2): `git diff a34b7eb 73fcc6f -- tests/test_agent_tools.py` is the only code change of round 2 (73fcc6f: tests/test_agent_tools.py, work/096/05, its log line; 8a6cff2 between them is 094's and does not touch this file). Line by line against 04 R2 Files:
+- a. KEY_RE body `[^:]*` → `(?:[^: \t]|[ \t](?!#))*`; the whole KEY_RE line is character-for-character 04 R2 Files a. First-character class and lookahead unchanged; VALUE_START_RE unchanged. Match.
+- b. Docstring "Item 096:" paragraph: the `#`-after-space-or-tab clause added where 04 says, and "a key with a tab before `#` and no value (`a\t#b:`)" added to the "Also rejected (YAML's reading not checked)" list; "This says nothing about what Claude Code does with such a file." kept. Match.
+- c. CASES nk13-nk16 after nk12 with the exact texts and expected results of the 04 R2 table. Match.
+- 05 "Deviations (round 2): none" is true: every count I re-ran equals 04 R2 and 05.
+Connectivity (re-done): the new KEY_RE is read at both existing call sites (column-0 check, `prev_open` update), so `a #b:` no longer opens a column-0 list (nk14, nk16 pin that path); nk13-nk16 are CASES entries run by `test_agent_tools_parser`; NO_KEY goes the round 1 path to `tree_problems` (n12 still pins it). No new function, branch or file; `git diff a34b7eb 73fcc6f -- tests/test_agent_tools.py | grep -c TODO` → 0. 05's missing-data grep reason holds: `git diff --stat a34b7eb 73fcc6f -- ccbot/` is empty.
+
+BUG checks (round 2):
+- Fix and guardrail both in place: the narrowed key body (fix), fixtures nk13/nk14/nk16 + nk15 and mutations M53/M54/M55 (guardrail).
+- Would the guardrail have caught A1's error: yes. M53 is exactly the round 1 build's body (`[^:]*`): with the head fixtures it fails nk13, nk14, nk16 (3 failed, 106 passed), i.e. A1's two shapes and the tab shape that returned a tool set at c810804.
+- RI-002 restore-a-default (scratch worktree only): M53 puts back the removed permissive body → 3 failed; M51 (`prev_open = True`) still fails nk11; restored → 109 passed.
+- RI-012 text-match negative: KEY_RE classifies by text; nk15 (`a#b: c`, `#` inside the key, not a comment) is the in-text negative and passes; M55 (every `#` refused) fails it alone. Present, so no FAIL on this point.
+- Data edges: the new rule is per line; before-first and after-last cases from round 1 (nk11, nk2) still pass and still die alone under M51/M43; nk13 puts the bad line in the middle (line 3), nk14/nk16 as the first front line.
+- RI-001 feasibility: real-tree test passes (in both runs below); my awk over the frontmatter of .claude/agents/*.md for a column-0 line with ` #` → 0 (agrees with A1's dated 0 and 04's 21 of 21 letter-only keys).
+- Rule the person follows (001): none changed (test-only). Simulator/replay (062): not applicable.
+
+My own probe ($R2/probe.py, `python3 -I`, `agent_tools()` of the head file vs `yaml.safe_load`, PyYAML 6.0.1), including shapes outside the fixtures:
+```
+['name: x', 'a #b: c', 'tools: Read, Write'] -> (set(), 'no key on frontmatter line 3 (item 096)') | yaml ERR ScannerError
+['a #b:', '- x', 'tools: Read, Write'] -> (set(), 'no key on frontmatter line 2 (item 096)') | yaml ERR ParserError
+['a#b: c', 'tools: Read, Write'] -> ({'Write', 'Read'}, None) | yaml OK {'a#b': 'c', 'tools': 'Read, Write'}
+['a\t#b:', '- x', 'tools: Read, Write'] -> (set(), 'no key on frontmatter line 2 (item 096)') | yaml ERR ScannerError
+['a\t#b: c', 'tools: Read, Write'] -> (set(), 'tab before the value on frontmatter line 2 (item 087)') | yaml ERR ScannerError
+['a  #b: c', 'tools: Read, Write'] -> (set(), 'no key on frontmatter line 2 (item 096)') | yaml ERR ParserError
+['a #b:', 'tools: Read, Write'] -> (set(), 'no key on frontmatter line 2 (item 096)') | yaml ERR ParserError
+['a b #c: d', 'tools: Read, Write'] -> (set(), 'no key on frontmatter line 2 (item 096)') | yaml ERR ParserError
+['a :', '- x', 'tools: Read, Write'] -> ({'Write', 'Read'}, None) | yaml OK {'a': ['x'], 'tools': 'Read, Write'}
+['a : c', 'tools: Read, Write'] -> ({'Write', 'Read'}, None) | yaml OK {'a': 'c', 'tools': 'Read, Write'}
+['a# b: c', 'tools: Read, Write'] -> ({'Write', 'Read'}, None) | yaml OK {'a# b': 'c', 'tools': 'Read, Write'}
+['a b: c', 'tools: Read, Write'] -> ({'Write', 'Read'}, None) | yaml OK {'a b': 'c', 'tools': 'Read, Write'}
+['a\tb: c', 'tools: Read, Write'] -> (set(), 'tab before the value on frontmatter line 2 (item 087)') | yaml ERR ScannerError
+['#a: c', 'tools: Read, Write'] -> ({'Write', 'Read'}, None) | yaml OK {'tools': 'Read, Write'}
+['a #', 'tools: Read, Write'] -> (set(), 'no key on frontmatter line 2 (item 096)') | yaml ERR ParserError
+['name: x', 'a\xa0#b: c', 'tools: Read, Write'] -> ({'Write', 'Read'}, None) | yaml OK {'name': 'x', 'a\xa0#b': 'c', 'tools': 'Read, Write'}
+PyYAML 6.0.1
+```
+Every shape that returns a tool set loads in PyYAML; every PyYAML error is an error here (no new false negative found; double space, `a b #c:`, NBSP before `#` and a space before the colon all behave as YAML does). Information only, one PyYAML version.
+
+`python3 -m pytest -q -rs -p no:cacheprovider tests/test_safety.py::test_every_py_compiles_on_oldest_python tests/test_agent_tools.py` (worktree of 73fcc6f):
+```
+110 passed in 0.26s
+```
+(109 in test_agent_tools.py = 04 R2's 109, plus the compile test, not skipped: python3.11 is /usr/bin/python3.11 and its `py_compile` of the file exits 0; python3.10 is not on PATH.)
+
+Full suite, `python3 -m pytest -q -p no:cacheprovider` in the worktree of 73fcc6f, last two lines as printed:
+```
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 870 passed, 1 skipped in 131.56s (0:02:11)
+```
+The one failure is expected: its assertion output names only `096: A1 FAIL (FULL; sent back, needs a later A1 PASS line (item 042))` / `A1 FAIL: 096` (this item, until A1 passes round 2); `I3 FAIL: none`, `INCOMPLETE: none`, `SKIPPED: none`, `UNTRACKED CHANGE: none`.
+
+Mutations, my own script ($R2/mut.py: my round 1 script with M45/M47 re-anchored to the new KEY_RE text and M53-M55 added; one at a time on the worktree, file restored after):
+```
+M41: 1 failed, 108 passed in 0.11s | test_agent_tools_parser[q30_marker_prefix_text]
+M42: 12 failed, 97 passed in 0.21s | test_agent_tools_parser[nk10_inner_colon_key], test_agent_tools_parser[nk11_item_first_line], test_agent_tools_parser[nk13_space_hash_in_key], test_agent_tools_parser[nk14_space_hash_empty_key_then_item], test_agent_tools_parser[nk16_tab_hash_empty_key_then_item], test_agent_tools_parser[nk1_plain_word], test_agent_tools_parser[nk2_plain_word_last], test_agent_tools_parser[nk3_item_after_scalar], test_agent_tools_parser[nk4_map_item_after_scalar], test_agent_tools_parser[nk5_indicator_key], test_agent_tools_parser[nk8_item_after_nested_map], test_tree_problems[n12_no_key_line]
+M43: 1 failed, 108 passed in 0.12s | test_agent_tools_parser[nk2_plain_word_last]
+M44: 4 failed, 105 passed in 0.14s | test_agent_tools_parser[nk11_item_first_line], test_agent_tools_parser[nk3_item_after_scalar], test_agent_tools_parser[nk4_map_item_after_scalar], test_agent_tools_parser[nk8_item_after_nested_map]
+M45: 13 failed, 96 passed in 0.23s | test_agent_tools_parser[nk12_indented_comment_then_item], test_agent_tools_parser[nk6_tools_col0_list], test_agent_tools_parser[nk7_item_after_empty_key], test_agent_tools_parser[nk8_item_after_nested_map], test_agent_tools_parser[nk9_tools_blank_then_item], test_agent_tools_parser[p13_doc_hooks_example], test_agent_tools_parser[p14_nested_open_quote], test_agent_tools_parser[q13_flow_next_line], test_agent_tools_parser[q15_item_open_map], test_agent_tools_parser[q18_dash_tab], test_agent_tools_parser[q23_doc_mcp_example], test_agent_tools_parser[q5_item_anchor], test_agent_tools_parser[q6_item_open_quote]
+M46: 5 failed, 104 passed in 0.15s | test_agent_tools_parser[p15_quoted_key], test_agent_tools_parser[q16_explicit_key], test_agent_tools_parser[q17_colon_start], test_agent_tools_parser[q27_doc_end_marker], test_agent_tools_parser[q28_doc_start_marker]
+M47: 1 failed, 108 passed in 0.11s | test_agent_tools_parser[nk5_indicator_key]
+M48: 1 failed, 108 passed in 0.11s | test_agent_tools_parser[nk8_item_after_nested_map]
+M49: 2 failed, 107 passed in 0.14s | test_agent_tools_parser[nk12_indented_comment_then_item], test_agent_tools_parser[nk9_tools_blank_then_item]
+M50: 1 failed, 108 passed in 0.14s | test_agent_tools_parser[s_no_space]
+M51: 1 failed, 108 passed in 0.12s | test_agent_tools_parser[nk11_item_first_line]
+M52: 1 failed, 108 passed in 0.14s | test_agent_tools_parser[nk12_indented_comment_then_item]
+M53: 3 failed, 106 passed in 0.13s | test_agent_tools_parser[nk13_space_hash_in_key], test_agent_tools_parser[nk14_space_hash_empty_key_then_item], test_agent_tools_parser[nk16_tab_hash_empty_key_then_item]
+M54: 1 failed, 108 passed in 0.15s | test_agent_tools_parser[nk16_tab_hash_empty_key_then_item]
+M55: 1 failed, 108 passed in 0.11s | test_agent_tools_parser[nk15_hash_inside_key]
+restored: 109 passed in 0.10s
+```
+($R2 = /tmp/claude-0/-home-claude/17dd566b-e13e-58fe-b556-13d450b5acde/scratchpad/I3-096-r2-03hq1plt.) New forms: M53 body → `[^:]*` (round 1 build); M54 body → `(?:[^: ]|[ ](?!#))*` (tab dropped); M55 body → `[^:#]*`. Every failing-id list and count equals 04 R2 Tests 2-4 and 05 round 2.
+
+check_handoff (03 exists), `python3 scripts/check_handoff.py 096` in the worktree, exit 0:
+```
+sources count (unique URLs in 01-research.md): 2
+fact-check rows: 64
+totals line: 64 rows -> 49 as-is, 12 fixed, 3 removed
+PASS
+```
+Real-data effect (round 2): not required (tests/test_agent_tools.py | 13 ++++++++---); no file in TRIGGER or TRIGGER_DIRS changed in round 2 either, so no head run.
+
+Verdict (round 2): PASS. A1's defect is fixed with the guardrail A1 asked for, and the guardrail fails on the round 1 code.
+
 ## Real-data effect (diff_reports output, pasted)
 not required (tests/test_agent_tools.py | 45 +++++++++++++++++++++++++++++++++++++++++++--). No file in TRIGGER or TRIGGER_DIRS (scripts/check_pipeline.py L458-L461) changed, so no head run is needed for this item.
 
 ## Recurring issues checked (step 0)
-Recurring issues checked: RI-001, RI-010, RI-014 (open or ESCALATED); also RI-002, RI-012 (GUARDED, this item's pattern). RI-001: the allow-list's real-tree count is measured by the passing real-tree test, not assumed; fixtures pin each branch. RI-010: every log line for this step is written with `check_pipeline.py --log` right after this file and committed with `commit_step.py`; my 06 has its own re-run outputs, not copies. RI-014: not applicable, no git or clone-depth path touched. RI-002: unreadable column-0 line now gives NO_KEY, never a tool set; restore-a-default probe M51 fails nk11; near miss "column-0 line with no key passes the frontmatter test → 096" is closed by this item (status for A1 to copy on main: GUARDED, unchanged, near miss not counted). RI-012: in-text negatives q30, nk5, nk10 present and passing.
+Recurring issues checked: RI-001, RI-010, RI-014 (open or ESCALATED); also RI-002, RI-012 (GUARDED, this item's pattern). RI-001: the allow-list's real-tree count is measured by the passing real-tree test, not assumed; fixtures pin each branch. RI-010: every log line for this step is written with `check_pipeline.py --log` right after this file and committed with `commit_step.py`; my 06 has its own re-run outputs, not copies. RI-014: not applicable, no git or clone-depth path touched. RI-002: unreadable column-0 line now gives NO_KEY, never a tool set; restore-a-default probe M51 fails nk11; near miss "column-0 line with no key passes the frontmatter test → 096" is closed by this item (status for A1 to copy on main: GUARDED, unchanged, near miss not counted). RI-012: in-text negatives q30, nk5, nk10 present and passing. Round 2 (same entries re-checked, RI-001, RI-010, RI-014 open or ESCALATED; RI-002, RI-012 GUARDED): RI-001: real-tree count re-measured (passing real-tree test; my awk, 0 column-0 lines with ` #`). RI-010: round 2 log line written with `--log I3 096` right after this file, committed with `commit_step.py`; all round 2 outputs above are my own runs. RI-014: not applicable. RI-002: A1's near miss (column-0 key with ` #` gives a tool set) is closed: nk13, nk14, nk16 give NO_KEY and M53 (round 1 body) fails them; status for A1 to copy on main: GUARDED, unchanged, near miss not counted. RI-012: nk15 is the in-text negative, M55 fails it alone.
 
 ## Pipeline line (step 2)
 check_pipeline line: `096: awaiting A1 (FULL)` (run after this file and the I3 `--log` line were written; exit 0)
+Round 2: check_pipeline line: `096: A1 FAIL (FULL; sent back, needs a later A1 PASS line (item 042))` (run 2026-11-24 after this file and the round 2 I3 `--log` line `19:24 | I3 | 096 | PASS | sent to audit: yes` were written; exit 1 only for `A1 FAIL: 096`, which stays until A1's round 2 result line; I3 FAIL, INCOMPLETE, SKIPPED, UNTRACKED CHANGE, LOG TIME and LOG BATCH do not name 096).
 
 ## Sent back / sent to Audit
 Sent to Audit: yes. Audit task in work/096/07-audit-task.md.
+Round 2: sent to Audit: yes; round 2 task under `## Audit task (round 2)` in work/096/07-audit-task.md.
