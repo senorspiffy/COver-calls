@@ -1221,6 +1221,10 @@ def _cp():
     ("Waived: 02 (A1, 2026-10-31: x)\nWaived: 04 05 06 (person, 2026-11-13: ok)", False),
     # I3 round 1: the person's bracket copied into another who's text (RI-012)
     ('Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")', False),
+    ('Waived: 04 05 06 (person: x "(person, 2026-11-19: ok)")', False),  # item 100 (RI-012)
+    ("Waived: 04 05 06 (person) x (person, 2026-11-13: ok)", False),  # item 100 (RI-012)
+    ("", False),  # item 100 (absent)
+    ("Waived: 04 05 06", False),  # item 100 (absent)
 ])
 def test_build_waiver_needs_person_date_and_all_three(waived, counts):
     assert _cp()._build_waived(RES_160 + waived + "\n") is counts
@@ -4584,20 +4588,23 @@ def test_batch_waiver_not_excused_stays_strict(tmp_path, waived, skipped, resear
 
 
 @pytest.mark.parametrize("req", [
-    b"\xff",                                                                                     # N-g
+    REQ_FULL_093.encode("utf-8") + b"\xff",                                                      # N-g
     None,                                                                                        # N-h
     "Waived: 01 03 (person, 2026-11-20: test)\n",                                                # N-i
     "Scope: FULL\nWaived: 01 02 03 04 (person: no date)\nWaived: 01 02 03 04 (person, 2026-11-20: x)\n",   # N-j
 ], ids=["N-g", "N-h", "N-i", "N-j"])
 def test_batch_waiver_missing_inputs_strict(tmp_path, req):
     """093 N-g to N-j: unreadable request.md (also on _UNREAD), missing request.md, no Scope line (FULL default,
-    02 and 04 not waived) and a person-dated second Waived line (only the first is read) keep the strict reason."""
+    02 and 04 not waived) and a person-dated second Waived line (only the first is read) keep the strict reason.
+    N-g is a valid person waiver plus one bad byte (item 100, F2), so a replace-decoding reader would excuse it."""
     cp = _cp()
     cp._UNREAD.clear()
     _waived_item(tmp_path, "990", req)
     assert _bl(tmp_path)["not_computable"] == [("990", "no line before I2")]
     if isinstance(req, bytes):
-        assert (tmp_path / "work" / "990" / "request.md").as_posix() in cp._UNREAD, cp._UNREAD
+        path = (tmp_path / "work" / "990" / "request.md").as_posix()
+        assert path in cp._UNREAD, cp._UNREAD
+        assert cp._UNREAD[path] == "not UTF-8 at byte 59", cp._UNREAD
     cp._UNREAD.clear()
 
 
