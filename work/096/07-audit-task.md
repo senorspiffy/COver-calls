@@ -19,3 +19,4 @@ What A1 should look at in round 2:
 4. Docstring "Item 096:" paragraph: the new clause and the `a\t#b:` entry in "Also rejected (YAML's reading not checked)". PyYAML 6.0.1 rejects nk16's text (05, 06 probe); the docstring still says not checked, as 04 R2 planned.
 5. Expected repo noise: `test_repo_pipeline_has_no_skipped_items` fails only on `A1 FAIL: 096` until your round 2 result line.
 6. RI status to copy on main: RI-002 near miss "column-0 key with ` #` passes the frontmatter test" closed by 096 round 2, not counted; RI-001, RI-010, RI-014 unchanged.
+A1 result: PASS (2026-11-24, logs/audit/2026-11-24-096.md `## Round 2`: 109 passed, M53/M54/M55 fail nk13,14,16/nk16/nk15, probe incl. `foo #: c` agrees with PyYAML)
