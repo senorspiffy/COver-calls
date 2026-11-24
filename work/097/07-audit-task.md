@@ -9,3 +9,4 @@ What A1 should look at:
 5. Option (i) reading of "the orchestrator never names a scratch path" (R1-R3/I1 still get a mkdtemp-printed path from the orchestrator), and RULE_PATHS touched: both need the person's OK at PR review.
 6. 098 is built after 097 and has an ID >= SCRATCH_FROM: its 05/06 must carry `Scratch dir:` lines (05 "Next item").
 7. RI status to copy on main: RI-009 near miss "orchestrator scratch paths outside 091's rule; `git stash` in a scratch worktree" closed by 097 (not counted), guardrail built; RI-010 extended, stays ESCALATED; RI-001, RI-014 unchanged.
+A1 result: PASS (2026-11-24, logs/audit/2026-11-24-097.md)
