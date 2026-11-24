@@ -27,3 +27,4 @@ What A1 should look at:
    - RI-014: 095 built. M11 still fails T18. It stays OPEN until merged and the probes fail on main.
    - RI-001 and RI-010: unchanged (ESCALATED).
    - RI-002, RI-012 and RI-009: unchanged (GUARDED).
+A1 result: PASS (2026-11-24, logs/audit/2026-11-24-095.md: 881 passed, 1 skipped; M1-M8, M11, RI002 each fail named tests; real depth-1 clone 58 lines -> 2 and 083 to NOT CHECKED, full-clone diff empty)
