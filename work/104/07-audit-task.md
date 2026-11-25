@@ -8,3 +8,4 @@ What A1 should look at:
 4. The real tree passes (21 of 21 frontmatter lines, 0 grep hits in 7 agent files). Confirm this on the merged branch.
 5. The suite at 425094f gives 1 failed, 989 passed, 1 skipped. The only failure is this item's own round 1 `I3 FAIL: 104` (item 071). After this 06 PASS, `test_repo_pipeline_has_no_skipped_items` should go green unless another item is open.
 6. RI status to copy on main. RI-002 GUARDED, holds: this item closes 096's F-1 to F-5 near miss, and the round 1 fail-open shapes v23 and v26 were caught by I3 before merge (near miss, not counted). RI-012 GUARDED, holds: I3 found the missing in-text negatives in r1 and they were fixed in r2. RI-001 and RI-010 ESCALATED and RI-014 OPEN, unchanged.
+A1 result: PASS (2026-11-25, logs/audit/2026-11-25-104.md)
