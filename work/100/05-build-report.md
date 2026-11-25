@@ -1,7 +1,9 @@
 # 05 Build report - 100
-Scratch dir: /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-100-r1b-twin92si
+Scratch dir: /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-100-r2-jfe6j8r5
 
-Built by I2 on branch `daily-fixes/2026-11-24-b`, base c771a21 (plan commit 6a288f5). A first I2 attempt was cut off by a container restart; its uncommitted edits were discarded and this build started fresh from HEAD, in a new scratch dir made with `python3 -c 'import tempfile; print(tempfile.mkdtemp(prefix="i2-100-r1b-", dir="/tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad"))'`. Mutations ran in `<scratch dir>/wt` (`git worktree add --detach` at c771a21, with the two changed files copied in); each probe was restored with `cp` from a copy of the fixed files kept in the scratch dir. The worktree was removed before handback (`git worktree list | grep -c i2-100` → 0). No `git stash`. While I built, the branch moved to 2de8e1b (101 A1, work/ and logs/ only; `git diff --stat c771a21 HEAD -- scripts tests` prints nothing).
+Round 2 (I3 FAIL r1, cbcc301): the round 1 dir's prefix was `i2-100-r1b-`, not the item 097 form `i2-<ID>-r<round>-`, so it is not listed on a `Scratch dir:` line. Every run in round 1 that this 05 relies on was redone in round 2 in the dir above (made with `python3 -c 'import tempfile; print(tempfile.mkdtemp(prefix="i2-100-r2-", dir="/tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad"))'`); see `## Test output (round 2, pasted)`. No code or test change in round 2 (06 item 2: the change matches the plan). The round 1 text below is kept as history.
+
+Built by I2 on branch `daily-fixes/2026-11-24-b`, base c771a21 (plan commit 6a288f5). A first I2 attempt was cut off by a container restart; its uncommitted edits were discarded and this build started fresh from HEAD, in a round 1 scratch dir (not the 097 form, see above) made with `python3 -c 'import tempfile; print(tempfile.mkdtemp(prefix="i2-100-r1b-", dir="/tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad"))'`. Mutations ran in `<scratch dir>/wt` (`git worktree add --detach` at c771a21, with the two changed files copied in); each probe was restored with `cp` from a copy of the fixed files kept in the scratch dir. The worktree was removed before handback (`git worktree list | grep -c i2-100` → 0). No `git stash`. While I built, the branch moved to 2de8e1b (101 A1, work/ and logs/ only; `git diff --stat c771a21 HEAD -- scripts tests` prints nothing).
 
 ## Changes made (file: what changed)
 - `scripts/check_pipeline.py`
@@ -59,7 +61,10 @@ Full suite, `python3 -m pytest -q` from the repo root (base was 959 passed, 1 sk
 963 passed, 1 skipped in 131.83s (0:02:11)
 ```
 
+Round 1 suite line (before 06 existed; superseded by round 2):
+```
 Suite: 963 passed, 1 skipped in 131.83s (0:02:11)
+```
 
 Mutations (scratch worktree, one at a time, restored by `cp` after each; `python3 -m pytest -q tests/test_pipeline_check.py`, FAILED lines and tail line):
 ```
@@ -127,6 +132,104 @@ FAILED tests/test_pipeline_check.py::test_scratch_dir_unreadable_05_not_checked
 4 passed, 499 deselected in 3.73s
 ```
 F2 evidence: under M-F2 the old `b"\xff"` N-g passes (a replace-decoded `�` is no waiver), the new N-g fails. With the old fixture but the new byte-59 assert kept, N-g fails on `assert 'not UTF-8 at byte 0' == 'not UTF-8 at byte 59'` (also recorded). The `isinstance(err.object, bytes)` assert never fired.
+
+## Test output (round 2, pasted)
+Round 2 fixes 06 r1 item 1 only: the `Scratch dir:` line now names the round 2 mkdtemp dir (`i2-100-r2-jfe6j8r5`), the round 1 `Suite:` line is inside a fence, and every run is redone. No code or test file changed in round 2:
+```
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'
+0
+$ git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'
+0
+$ git diff --stat cc91abb HEAD -- scripts/check_pipeline.py tests/test_pipeline_check.py
+(empty)
+```
+Since cc91abb the branch changed only `tests/test_agent_tools.py` (item 104 I2) outside work/ and logs/, so the count is now base 981 + 4 = 985 passed (104 adds 22).
+
+`python3 scripts/check_pipeline.py` in the main checkout with this 05 (uncommitted), lines for 100:
+```
+100: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))
+I3 FAIL: 100
+INCOMPLETE: 100 (05 has no 'Suite:' line (item 082))
+```
+That run was before the round 2 `Suite:` line was added. The Scratch dir entry is gone.
+
+Full suite at a scratch-only probe commit (2e3f1e0, detached in `<scratch dir>/wt` on top of fcf3cff, never on the branch). It holds this 05 plus a column-0 copy of the round 1 `Suite:` line, so the item 082 check still matches the last committed I2 log line. Run with `python3 -m pytest -q -p no:cacheprovider`:
+```
+E             100: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))
+E             I3 FAIL: 100
+E             INCOMPLETE: none
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 985 passed, 1 skipped in 134.42s (0:02:14)
+```
+The only failure is `test_repo_pipeline_has_no_skipped_items`, and its only non-none entry is `I3 FAIL: 100`, the item sent back (06 r1 committed). This is expected under item 071 and is not a defect of this build. `INCOMPLETE: none`.
+
+Full suite from the repo root, `python3 -m pytest -q` (main checkout, HEAD 5eacd19; the HEAD worktree the repo test reads still has the round 1 05):
+```
+E             100: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))
+E             I3 FAIL: 100, 104
+E             INCOMPLETE: 100 (05 Scratch dir '/tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-100-r1b-twin92si' is not the mkdtemp form (item 097))
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 985 passed, 1 skipped in 130.31s (0:02:10)
+```
+Here the same single test fails on `I3 FAIL: 100, 104` (both sent back, item 071) and on the round 1 05 Scratch dir entry that this commit removes.
+
+Suite: 1 failed, 985 passed, 1 skipped in 130.31s (0:02:10)
+
+Mutations redone in `<scratch dir>/wt` (detached at fcf3cff). One at a time, `python3 -m pytest -q -p no:cacheprovider tests/test_pipeline_check.py`, each restored with `git checkout HEAD -- scripts/check_pipeline.py` in `wt`. Every run also fails `test_repo_pipeline_has_no_skipped_items` (I3 FAIL 100 / round 1 05 at HEAD, present with no mutation):
+```
+== M-a
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person: x "(person, 2026-11-19: ok)")-False]
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person) x (person, 2026-11-13: ok)-False]
+3 failed, 500 passed in 70.95s (0:01:10)
+== M-a2
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")-False]
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person: x "(person, 2026-11-19: ok)")-False]
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person) x (person, 2026-11-13: ok)-False]
+4 failed, 499 passed in 66.50s (0:01:06)
+== M-b
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")-False]
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person: x "(person, 2026-11-19: ok)")-False]
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person) x (person, 2026-11-13: ok)-False]
+4 failed, 499 passed in 68.73s (0:01:08)
+== M-c
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person: ok)-False]
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person: x "(person, 2026-11-19: ok)")-False]
+FAILED tests/test_pipeline_check.py::test_person_dated_anchor - AssertionErro...
+FAILED tests/test_pipeline_check.py::test_batch_waiver_not_excused_stays_strict[N-b]
+FAILED tests/test_pipeline_check.py::test_batch_waiver_not_excused_stays_strict[N-d]
+FAILED tests/test_pipeline_check.py::test_batch_waiver_missing_inputs_strict[N-j]
+7 failed, 496 passed in 67.38s (0:01:07)
+== M-d
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 (person, 2026-11-13: x)-False]
+2 failed, 501 passed in 66.78s (0:01:06)
+== M-F2 (decode branch returns err.object replace-decoded after asserting bytes), -k test_batch_waiver_missing_inputs_strict
+E       AssertionError: assert [('990', 'no ..., item 093)')] == [('990', 'no line before I2')]
+FAILED tests/test_pipeline_check.py::test_batch_waiver_missing_inputs_strict[N-g]
+1 failed, 3 passed, 499 deselected in 2.31s
+```
+The same named tests kill each mutation as in round 1 and in 06 r1. `git status --porcelain` in `wt` was empty after the last restore.
+
+Real-data effect: not required (no TRIGGER file). Pipeline output in `wt` at fcf3cff, first with the base script (`git show c771a21:scripts/check_pipeline.py`, restored after) and then with the head script, `diff cp-base.txt cp-head.txt && echo IDENTICAL`:
+```
+IDENTICAL
+```
+Both exit 1 (I3 FAIL and the round 1 05 entry). 023 and 057 read `complete (RESEARCH ONLY ...)` in both.
+
+Missing-data grep (round 2): `grep -rnE "fillna|...|\.get\([^)]*, 0\)" ccbot/ | wc -l` → `38`, the same count as round 1, with no ccbot/ change.
+
+Recurring issues re-checked (round 2):
+RI-010: ESCALATED, occurrence in round 1 (non-097 scratch name `r1b`), caught by the item 097 check before merge; fixed in round 2 (mkdtemp prefix `i2-100-r2-`, the round 1 path not on a `Scratch dir:` line).
+RI-001: ESCALATED, no new occurrence (IDENTICAL pipeline output, 11-case test).
+RI-014: OPEN, no new occurrence (no code change in round 2).
+RI-009: GUARDED, holds (probes and the probe commit only in my own scratch worktree, no `git stash`).
+RI-012, RI-002: GUARDED, hold (mutations killed, absent rows False).
 
 ## Real-data effect (diff_reports output, pasted)
 not required (`git diff --stat`: scripts/check_pipeline.py, tests/test_pipeline_check.py; neither is in TRIGGER / TRIGGER_DIRS). Pipeline output on the real repo, `python3 scripts/check_pipeline.py` at base (before any edit, exit 0) and with the fix (exit 0), `diff <scratch>/out-base.txt <scratch>/out-fix.txt && echo IDENTICAL`:
