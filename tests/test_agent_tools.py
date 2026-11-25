@@ -560,6 +560,10 @@ CASES = {
                                     "unparsed tools: line '- Read' (item 075)"),
     "v22_tools_entry_colon": (_fm("tools: Read, Bash: x"), None,
                               "unparsed tools: entry 'Bash: x' (item 075)"),
+    "v23_hash_in_word_colon": (_fm("name: a#b: c", TOOLS), None, VALUE.format(2)),
+    "v24_gt_inside_value": (_fm("description: a > b", TOOLS), {"Read", "Write"}, None),
+    "v25_bar_inside_value": (_fm("description: a | b", TOOLS), {"Read", "Write"}, None),
+    "v26_dash_key_continuation": (_fm("-a: b", " c: d", TOOLS), None, VALUE.format(3)),
 }
 
 

@@ -1,6 +1,7 @@
 # 05 Build report - 104
 Base commit: 519cbc2 (branch daily-fixes/2026-11-24-b, I1 FIT). Build tree = 519cbc2 + tests/test_agent_tools.py; cbcc301 (item 100 I3, work/100 + log only) landed on the branch during the build.
 Scratch dir: /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-104-r1-re6j7rnt
+Scratch dir: /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-104-r2-ctfr77dv
 
 ## Changes made (file: what changed)
 - tests/test_agent_tools.py (the only code file, as planned):
@@ -120,7 +121,10 @@ Full suite, `python3 -m pytest -q` from the repo root, last lines as printed:
 FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
 1 failed, 985 passed, 1 skipped in 131.10s (0:02:11)
 ```
+Round 1 `Suite:` line (superseded by round 2 below):
+```
 Suite: 1 failed, 985 passed, 1 skipped in 131.10s (0:02:11)
+```
 
 Expected, not a defect of this build (item 071): the one failure is `test_repo_pipeline_has_no_skipped_items`, caused by item 100's I3 FAIL r1 committed in cbcc301 during this build (100's 05 Scratch dir name broke the 097 rule; orchestrator's note). `python3 scripts/check_pipeline.py` -> exit 1; its non-`none` failure lines are only `I3 FAIL: 100` and `INCOMPLETE: 100 (05 Scratch dir '.../i2-100-r1b-twin92si' is not the mkdtemp form (item 097))`; 104 shows `in progress (FULL: next 05)`. Base suite at cc91abb (I2 100): `963 passed, 1 skipped`; 963 + 23 new = 986 = 985 passed + 1 failed.
 
@@ -143,3 +147,99 @@ RI-009: GUARDED, unchanged. Mutations and probe only in my own mkdtemp scratch w
 RI-010: ESCALATED, unchanged. The I2 log line is written by `check_pipeline.py --log` right after this file; commit via `scripts/commit_step.py`.
 RI-012: GUARDED, unchanged. In-text negatives v4, v5, v7, v8, v9, v10, v14, v17 pass; M57, M60 and M68 fail them.
 RI-014: OPEN, unchanged. Not applicable (no git or clone-depth path touched).
+
+## Changes made (round 2)
+Input: 06 FAIL round 1 (0f0b6e5, sent back to I1 I2) and 04 `## Round 2` (I1 FIT, 5eacd19). Build tree = 6764567 + tests/test_agent_tools.py (6764567 is item 100's I2 commit, work/100 + log only).
+- tests/test_agent_tools.py: 4 CASES entries added after v22, exactly as the 04 R2 table: `v23_hash_in_word_colon` (`name: a#b: c` -> VALUE(2)), `v24_gt_inside_value` (`description: a > b` -> {Read, Write}), `v25_bar_inside_value` (`description: a | b`, plain `|` -> {Read, Write}), `v26_dash_key_continuation` (`-a: b` / ` c: d`, one space -> VALUE(3)). No parser, error text or docstring line changed.
+
+File counts (commands, item 012):
+- `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^??'` -> 0 new
+- `git status --porcelain -uall -- . ':!work' ':!logs' | grep -c '^ M'` -> 1 changed
+- `git diff --stat -- tests/`: ` tests/test_agent_tools.py | 4 ++++` / ` 1 file changed, 4 insertions(+)`
+
+Connectivity (round 2): the 4 fixtures are read by `test_agent_tools_parser` (parametrized over CASES); each is killed by its named mutant below (X2 -> v23, X3 -> v24/v25, X4 -> v26). No new function, input, branch, file or TODO. Missing-data grep over ccbot/ -> 38 hits, all pre-existing (`git diff --stat -- ccbot/` empty); no dataclass field, no new `>`/`<` test.
+Feasibility (04 R2 research 4), re-measured 2026-11-25: `grep -cE '^(name|description|tools):.*([^ \t]#|[|>])|^-[^ -]' .claude/agents/*.md` -> 0 in each of 7 files; the real-tree test still passes 21 of 21 (in the 136 passed below).
+
+## Test output (round 2, pasted)
+`python3 -m pytest tests/test_agent_tools.py -q` (repo, build tree):
+```
+........................................................................ [ 52%]
+................................................................         [100%]
+136 passed in 0.12s
+```
+`python3.11 -m py_compile tests/test_agent_tools.py` -> no output, rc=0 (RI-008).
+
+Base check, M41-M68 and the new X2-X4, one at a time on my scratch worktree `/tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-104-r2-ctfr77dv/wt` (`git worktree add --detach`, at 6764567, test file replaced by the round 2 build file; `mut.py` = round 1 script copied, X2/X3/X4 added; file restored after, `cmp` -> restored). `python3 mut.py /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-104-r2-ctfr77dv`:
+```
+BASE: 15 failed, 121 passed in 0.13s | failed: test_agent_tools_parser[v11_block_header_text], test_agent_tools_parser[v12_block_ends], test_agent_tools_parser[v13_key_1025], test_agent_tools_parser[v15_key_1025_after_key], test_agent_tools_parser[v16_key_1025_indented], test_agent_tools_parser[v18_comment_key_then_item], test_agent_tools_parser[v19_spec_two_comments], test_agent_tools_parser[v1_value_colon], test_agent_tools_parser[v21_tools_comment_then_item], test_agent_tools_parser[v23_hash_in_word_colon], test_agent_tools_parser[v26_dash_key_continuation], test_agent_tools_parser[v2_value_colon_end], test_agent_tools_parser[v3_nested_value_colon], test_agent_tools_parser[v6_continuation_colon], test_tree_problems[n13_value_colon]
+M41: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[q30_marker_prefix_text]
+M42: 12 failed, 124 passed in 0.13s | failed: test_agent_tools_parser[nk10_inner_colon_key], test_agent_tools_parser[nk11_item_first_line], test_agent_tools_parser[nk13_space_hash_in_key], test_agent_tools_parser[nk14_space_hash_empty_key_then_item], test_agent_tools_parser[nk16_tab_hash_empty_key_then_item], test_agent_tools_parser[nk1_plain_word], test_agent_tools_parser[nk2_plain_word_last], test_agent_tools_parser[nk3_item_after_scalar], test_agent_tools_parser[nk4_map_item_after_scalar], test_agent_tools_parser[nk5_indicator_key], test_agent_tools_parser[nk8_item_after_nested_map], test_tree_problems[n12_no_key_line]
+M43: 1 failed, 135 passed in 0.13s | failed: test_agent_tools_parser[nk2_plain_word_last]
+M44: 4 failed, 132 passed in 0.12s | failed: test_agent_tools_parser[nk11_item_first_line], test_agent_tools_parser[nk3_item_after_scalar], test_agent_tools_parser[nk4_map_item_after_scalar], test_agent_tools_parser[nk8_item_after_nested_map]
+M45: 18 failed, 118 passed in 0.12s | failed: test_agent_tools_parser[nk12_indented_comment_then_item], test_agent_tools_parser[nk6_tools_col0_list], test_agent_tools_parser[nk7_item_after_empty_key], test_agent_tools_parser[nk8_item_after_nested_map], test_agent_tools_parser[nk9_tools_blank_then_item], test_agent_tools_parser[p13_doc_hooks_example], test_agent_tools_parser[p14_nested_open_quote], test_agent_tools_parser[q13_flow_next_line], test_agent_tools_parser[q15_item_open_map], test_agent_tools_parser[q18_dash_tab], test_agent_tools_parser[q23_doc_mcp_example], test_agent_tools_parser[q5_item_anchor], test_agent_tools_parser[q6_item_open_quote], test_agent_tools_parser[v16_key_1025_indented], test_agent_tools_parser[v17_key_1024_indented], test_agent_tools_parser[v19_spec_two_comments], test_agent_tools_parser[v3_nested_value_colon], test_agent_tools_parser[v8_open_parent_plain]
+M46: 5 failed, 131 passed in 0.12s | failed: test_agent_tools_parser[p15_quoted_key], test_agent_tools_parser[q16_explicit_key], test_agent_tools_parser[q17_colon_start], test_agent_tools_parser[q27_doc_end_marker], test_agent_tools_parser[q28_doc_start_marker]
+M47: 1 failed, 135 passed in 0.13s | failed: test_agent_tools_parser[nk5_indicator_key]
+M48: 1 failed, 135 passed in 0.12s | failed: test_agent_tools_parser[nk8_item_after_nested_map]
+M49: 2 failed, 134 passed in 0.12s | failed: test_agent_tools_parser[nk12_indented_comment_then_item], test_agent_tools_parser[nk9_tools_blank_then_item]
+M50: 1 failed, 135 passed in 0.12s | failed: test_agent_tools_parser[s_no_space]
+M51: 1 failed, 135 passed in 0.12s | failed: test_agent_tools_parser[nk11_item_first_line]
+M52: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[nk12_indented_comment_then_item]
+M53: 3 failed, 133 passed in 0.12s | failed: test_agent_tools_parser[nk13_space_hash_in_key], test_agent_tools_parser[nk14_space_hash_empty_key_then_item], test_agent_tools_parser[nk16_tab_hash_empty_key_then_item]
+M54: 1 failed, 135 passed in 0.13s | failed: test_agent_tools_parser[nk16_tab_hash_empty_key_then_item]
+M55: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[nk15_hash_inside_key]
+M56: 8 failed, 128 passed in 0.11s | failed: test_agent_tools_parser[v12_block_ends], test_agent_tools_parser[v1_value_colon], test_agent_tools_parser[v23_hash_in_word_colon], test_agent_tools_parser[v26_dash_key_continuation], test_agent_tools_parser[v2_value_colon_end], test_agent_tools_parser[v3_nested_value_colon], test_agent_tools_parser[v6_continuation_colon], test_tree_problems[n13_value_colon]
+M57: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[v4_colon_in_comment]
+M58: 2 failed, 134 passed in 0.13s | failed: test_agent_tools_parser[v26_dash_key_continuation], test_agent_tools_parser[v6_continuation_colon]
+M59: 3 failed, 133 passed in 0.11s | failed: test_agent_tools_parser[v13_key_1025], test_agent_tools_parser[v15_key_1025_after_key], test_agent_tools_parser[v16_key_1025_indented]
+M60: 2 failed, 134 passed in 0.11s | failed: test_agent_tools_parser[v14_key_1024], test_agent_tools_parser[v17_key_1024_indented]
+M61: 4 failed, 132 passed in 0.11s | failed: test_agent_tools_parser[v18_comment_key_then_item], test_agent_tools_parser[v19_spec_two_comments], test_agent_tools_parser[v20_comment_key_then_map], test_agent_tools_parser[v21_tools_comment_then_item]
+M62: 3 failed, 133 passed in 0.12s | failed: test_agent_tools_parser[v10_block_folded_indicators], test_agent_tools_parser[v12_block_ends], test_agent_tools_parser[v9_block_literal]
+M63: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[v22_tools_entry_colon]
+M64: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[p13_doc_hooks_example]
+M65: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[v12_block_ends]
+M66: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[v11_block_header_text]
+M67: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[v10_block_folded_indicators]
+M68: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[v17_key_1024_indented]
+X2: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[v23_hash_in_word_colon]
+X3: 2 failed, 134 passed in 0.11s | failed: test_agent_tools_parser[v24_gt_inside_value], test_agent_tools_parser[v25_bar_inside_value]
+X4: 1 failed, 135 passed in 0.11s | failed: test_agent_tools_parser[v26_dash_key_continuation]
+```
+Every list equals 04 R2 Tests 2-4: BASE 15 failed, 121 passed (round 1's 13 plus v23, v26; v24, v25 pass on the old parser); X2 -> v23 only; X3 -> v24, v25; X4 -> v26 only; M56 8 failed (6 + v23, v26); M58 v6, v26; M57, M59-M68 unchanged from round 1 (counts +4 passed). M41-M55 fail exactly their round 1 ids (none of v23-v26). Mutant forms: X2 `COMMENT_CUT_RE = re.compile(r"#")`; X3 `if t[0] in "|>":` -> `if "|" in t or ">" in t:`; X4 `ITEMS_RE = re.compile(r"(?:-[ \t]*)*")`; others as round 1.
+
+PyYAML probe (information only, D6), new venv `/tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-104-r2-ctfr77dv/venv` (`pip install pyyaml`), `venv/bin/python -I probe.py /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i2-104-r2-ctfr77dv`, rows v23-v26 of the output:
+```
+PyYAML 6.0.4 libyaml True
+| case | test result | SafeLoader | CSafeLoader |
+|---|---|---|---|
+| v23_hash_in_word_colon | colon in unquoted value on frontmatter line 2 (item 104; quote the value) | error: mapping values are not allowed here (line 1) | error: mapping values are not allowed in this context (line 1) |
+| v24_gt_inside_value | tools Read,Write | loads {'description': 'a > b', 'tools': 'Read, Write'} | loads {'description': 'a > b', 'tools': 'Read, Write'} |
+| v25_bar_inside_value | tools Read,Write | loads {'description': 'a | b', 'tools': 'Read, Write'} | loads {'description': 'a | b', 'tools': 'Read, Write'} |
+| v26_dash_key_continuation | colon in unquoted value on frontmatter line 3 (item 104; quote the value) | error: mapping values are not allowed here (line 2) | error: mapping values are not allowed in this context (line 2) |
+```
+v26 (R2 research 2, not measured by I1): both loaders raise "mapping values are not allowed" on line 2 of the frontmatter, so VALUE(3) agrees with PyYAML. v23-v25 agree with 06 i3a-i3c.
+
+Full suite, `python3 -m pytest -q` from the repo root, last lines as printed:
+```
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 989 passed, 1 skipped in 117.16s (0:01:57)
+```
+Suite: 1 failed, 989 passed, 1 skipped in 117.16s (0:01:57)
+
+Expected, not a defect of this build (item 071): round 1 had 985 passed + 1 failed; +4 fixtures -> 989 passed. `python3 scripts/check_pipeline.py` -> rc=1; its failure lines are `I3 FAIL: 104` (this item's own round 1 FAIL in 0f0b6e5, sent back) and otherwise `A1 FAIL: none`, `INCOMPLETE: none`, `SKIPPED: none`, `STASH: none`; 100 shows `awaiting A1 (FULL)`.
+
+## Deviations from plan (round 2)
+None. 136 passed; BASE 15 failed / 121 passed; X2, X3, X4, M56, M58 and all other lists as 04 R2.
+
+## Recurring issues checked (round 2)
+logs/recurring-issues.md read first. Open or ESCALATED: RI-001, RI-010, RI-014; GUARDED also checked: RI-002, RI-004, RI-005, RI-006, RI-007, RI-008, RI-009, RI-012.
+RI-001: ESCALATED, unchanged. The round 2 shapes have a measured real count (0 hits in 7 files, 2026-11-25); real tree 21 of 21.
+RI-002: GUARDED, unchanged. The fail-open X2 and X4 shapes are now pinned (v23, v26); BASE fails both.
+RI-004: GUARDED, unchanged. Counts re-run, not copied (136, 15/121, M56 8).
+RI-005: GUARDED, unchanged. Same as RI-004.
+RI-006: GUARDED, unchanged. pytest lines pasted as printed; the round 2 `Suite:` line is the I2 log field.
+RI-007: GUARDED, unchanged. FULL; code changed only at I2, round goes back to I3.
+RI-008: GUARDED, unchanged. python3.11 py_compile rc=0; fixtures only.
+RI-009: GUARDED, unchanged. Mutants and probe only in my new mkdtemp dir (r2) worktree; no `git stash`; item 100's files untouched.
+RI-010: ESCALATED, unchanged. Log line by `check_pipeline.py --log` right after this file; commit by `scripts/commit_step.py`.
+RI-012: GUARDED, unchanged. This round's finding closed: in-text negatives v23 (comment cut), v24/v25 (block header) each killed by a named mutant (X2, X3).
+RI-014: OPEN, unchanged. Not applicable.
