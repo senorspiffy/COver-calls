@@ -8,3 +8,4 @@ What A1 should look at:
 4. Re-run M-a and M-b (05 forms) to confirm the 092 kills still hold; I3 re-ran only M-f and A1-1.
 5. Step 7: `check_handoff.py --all` base vs head script, same cwd, byte-identical (105 lines); confirm on the merged branch.
 6. RI status to copy on main: RI-012 GUARDED, holds (closes the 2026-11-24 "check_handoff tests check presence only" near miss). RI-014 OPEN, unchanged (no git read added). RI-001 / RI-010 ESCALATED, unchanged.
+A1 result: PASS (2026-11-25, logs/audit/2026-11-25-099.md)
