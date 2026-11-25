@@ -1,7 +1,8 @@
 # 06 Verification - 100
-Verdict: FAIL (round 1)
-Sent back to: I2
+Verdict: PASS (round 2; earlier rounds: FAIL r1)
+Sent back to: none
 Scratch dir: /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i3-100-r1-_392q1d_
+Scratch dir: /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i3-100-r2-hu4ex9k_
 
 Made with `python3 -c 'import tempfile; print(tempfile.mkdtemp(prefix="i3-100-r1-", dir="/tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad"))'`. Two detached worktrees of cc91abb inside it: `wt` (full suite, untouched) and `mut` (mutations and pipeline runs; each probe restored with `git checkout HEAD -- <file>` in `mut`). No `git stash`. Both worktrees removed at the end.
 
@@ -111,3 +112,65 @@ Sent back to I2 (round 2):
 1. 05's `Scratch dir:` line names `i2-100-r1b-twin92si`, which is not the item 097 mkdtemp form (`i2-<ID>-r<round>-<8 chars>`). check_pipeline reports `INCOMPLETE: 100` (exit 1), and `test_repo_pipeline_has_no_skipped_items` fails at cc91abb (full suite `1 failed, 962 passed, 1 skipped`). Make the round 2 scratch dir with the run-item.md command (prefix `i2-100-r2-`) and re-run the suite there. Record it under `## Test output (round 2, pasted)` with a `Scratch dir:` line for every dir used. A dir whose name does not match must not be listed as a path: use `none (<reason>)` or redo the work. Then confirm that `python3 scripts/check_pipeline.py` shows no INCOMPLETE for 100 and that the full suite is green at the committed head.
 2. The code and test change itself matches the plan and needs no change.
 Not sent to Audit (no 07).
+
+## Tests re-run (round 2)
+Round 2 verifies I2 r2 commit 6764567 in my own new dir `i3-100-r2-hu4ex9k_` (mkdtemp, prefix `i3-100-r2-`). Two detached worktrees of 6764567 inside it: `wt` (full suite, pipeline) and `mut` (one mutation, restored with `git checkout HEAD -- scripts/check_pipeline.py`, `git status --porcelain` empty after). Not the main checkout (item 104 I2 r2 edits tests/test_agent_tools.py there). No `git stash`. Both worktrees removed at the end.
+
+I2 audit, round 2: `git diff --stat cc91abb 6764567` shows no change to scripts/check_pipeline.py or tests/test_pipeline_check.py (the build audited in round 1 is unchanged and still matches 04). Outside work/ and logs/ only tests/test_agent_tools.py changed (item 104). 05 now has one column-0 `Scratch dir:` line, `.../i2-100-r2-jfe6j8r5`, which fullmatches SCRATCH_NAME and exists on disk; the `r1b` path appears only in prose. Round 1 problem 1 is fixed.
+
+`python3 scripts/check_pipeline.py` in `wt` at 6764567 (exit 1):
+```
+100: I3 FAIL (FULL; sent back to I2, needs a later PASS round in 06 (item 071))
+I3 FAIL: 100, 104
+INCOMPLETE: none
+SKIPPED: none
+```
+The 05 INCOMPLETE from round 1 is gone. The only non-none entries are the two sent-back items (100 cleared by this 06; 104 is its own I3 FAIL r1).
+
+Full suite, `python3 -m pytest -q -p no:cacheprovider` in `wt` at 6764567:
+```
+E           assert 1 == 0
+
+tests/test_pipeline_check.py:199: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_pipeline_check.py::test_repo_pipeline_has_no_skipped_items
+1 failed, 985 passed, 1 skipped in 126.85s (0:02:06)
+```
+This matches 05's round 2 `Suite: 1 failed, 985 passed, 1 skipped`. The one failure is `I3 FAIL: 100, 104` (item 071), not a defect of this build; 985 = 05's base 981 + 4.
+
+Oldest Python: `tests/test_safety.py -k oldest` → `1 passed, 8 deselected` (python3.11 on PATH, no python3.10); not skipped.
+
+Guardrail re-probe in `mut`: line 634 `PERSON_DATED.match` → `.search` (M-b form), `-k build_waiver`:
+```
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")-False]
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person: x "(person, 2026-11-19: ok)")-False]
+FAILED tests/test_pipeline_check.py::test_build_waiver_needs_person_date_and_all_three[Waived: 04 05 06 (person) x (person, 2026-11-13: ok)-False]
+3 failed, 8 passed, 492 deselected in 0.98s
+```
+Same kills as round 1 and 05. The RI-012 in-text negatives are present.
+
+`python3 scripts/check_handoff.py 100` in `wt` (exit 0):
+```
+sources count (unique URLs in 01-research.md): 2
+fact-check rows: 43
+totals line: 43 rows -> 40 as-is, 3 fixed, 0 removed
+PASS
+```
+
+Real-data effect, round 2: not required (no code change since cc91abb; scripts/check_pipeline.py and tests/test_pipeline_check.py are not in TRIGGER / TRIGGER_DIRS).
+
+Recurring issues checked (round 2): RI-001, RI-010, RI-014 (open/ESCALATED); also RI-002, RI-012, RI-009.
+- RI-001: no new occurrence (no code change; 11-case test green).
+- RI-010: the round 1 near miss (`r1b` scratch name) is fixed; 05 r2 and this 06 use the mkdtemp form, INCOMPLETE none.
+- RI-014: no new occurrence (no git read added).
+- RI-012: holds (`.search` probe killed by the in-text rows).
+- RI-002: holds (absent rows still False).
+- RI-009: holds (verified in my own worktrees, no `git stash`, main checkout untouched except this file and 07).
+
+## Pipeline line (round 2)
+check_pipeline line: `100: awaiting A1 (FULL)`
+
+Run in the main checkout after this 06, 07 and the I3 `--log` line were written (exit 1 only from `I3 FAIL: 104`, item 104's own round; `INCOMPLETE: none`, `SKIPPED: none`, `LOG TIME: none`).
+
+## Sent back / sent to Audit (round 2)
+PASS. Sent to Audit: yes, `work/100/07-audit-task.md`.
