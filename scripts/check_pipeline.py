@@ -191,9 +191,9 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   every pre-05 step of the Scope, with those step files absent (024's shape), is
                   excused: it is listed as `not computable: <ID>: no line before I2 (<steps> waived by
                   the person, first I2 round not bounded, item 093)` and is not INCOMPLETE. Any other
-                  waiver stays strict. Known gaps: (w) runs pasted
-                  outside the two sections are not read
-                  (only lowers Σ); (x) the bound catches a round only when its run is longer than the
+                  waiver stays strict. Known gaps: (w) runs pasted outside the two sections are not
+                  read (can lower Σ, or raise it when 06 copies such a run, which the copy filter then
+                  keeps; item 110); (x) the bound catches a round only when its run is longer than the
                   gap allows: with today's 74-93 s runs, same-minute (Δ0) batches; Δ >= 1 batches pass
                   it, and below TIMED_FROM untimed suites can't be flagged (D and the round rule cover
                   order); (y) I3's run is untimed, so an I3 batch is caught only by the round rule (b)
@@ -220,6 +220,12 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   work/076-098, 30 of 152 summary lines sit outside, 14 of them correctly quoted
                   (mutants, base-failure, audit evidence), 0 at 092-098; a `#{1,2} round N` wrapper
                   variant also flags 6 quoted of 9. See work/103/03-handoff.md before proposing it.
+                  Item 110 (gap w, RI-010): 103's two residuals were measured at 4404a28 and are documented
+                  no-gos (see work/110/03-handoff.md): (a) a summary line directly under a `#{1,2} round N`
+                  wrapper with no sub-heading: 4 in 58 files of work/076-104, all correctly quoted (084/05
+                  mutants), 0 at 092 and later; (b) `N deselected` runs: 34 files would gain values, 0 per-file
+                  maxes and 0 LOG BATCH results change over 59 checked items. If (b) is ever built, add
+                  deselected to SUMMARY_LINE only, never to _STATS (the I2 field refuses it).
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
@@ -462,7 +468,8 @@ ROUND_BUILD_FROM = 99
 SCRATCH_NAME = re.compile(r"(i2|i3)-(\d{3})-r\d+-[a-z0-9_]{8}")
 SCRATCH_AGENT = {"05": "i2", "06": "i3"}
 # Item 076: the parts of pytest's summary line, in KNOWN_TYPES order (pytest main/9.0.x terminal.py),
-# each at most once. "deselected" left out on purpose: a full-suite run has none.
+# each at most once. "deselected" left out on purpose: the I2 field is a full-suite run, which has none;
+# for SUMMARY_LINE (LOG BATCH) counting deselected runs (-k/-m/--deselect) was measured to change nothing (item 110).
 _N = r"[1-9]\d*"
 _END = r"(?:, (?=[1-9])|(?=$| in | \())"          # a part is followed by ", <next part>" or the end of the stats
 _STATS_PARTS = (rf"{_N} failed", rf"{_N} passed", rf"{_N} skipped", rf"{_N} xfailed", rf"{_N} xpassed",

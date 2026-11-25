@@ -5878,6 +5878,20 @@ def test_check_pipeline_docstring_records_103_no_go():
     assert "See work/103/03-handoff.md" in doc and (REPO / "work/103/03-handoff.md").is_file()
 
 
+def test_check_pipeline_docstring_records_110_no_go():
+    """Item 110: the docstring records 103's residuals (a)/(b) as measured no-gos, gap (w) no longer says
+    "only lowers", and the _STATS_PARTS comment says why deselected is left out."""
+    doc = " ".join(_cp().__doc__.split())
+    assert "Item 110 (gap w, RI-010)" in doc
+    assert "0 per-file maxes" in doc
+    assert "work/110/03-handoff.md" in doc and (REPO / "work/110/03-handoff.md").is_file()
+    assert "or raise it when 06 copies such a run" in doc          # change 2: (ii) pinned positively
+    assert "only lowers Σ" not in doc
+    src = (REPO / "scripts/check_pipeline.py").read_text(encoding="utf-8")
+    assert "measured to change nothing (item 110)" in src
+    assert '"deselected" left out on purpose: a full-suite run has none.' not in src
+
+
 # Item 102 (RI-001, RI-010): each ID cutoff that no behavior test pinned on both sides gets one row at FROM and
 # one at FROM-1, with literal IDs, so a shift of the constant by +1 or -1 fails a named row. No value asserts
 # here (test_from_values holds them), so a shift is killed by behavior, not by `== N`. Pinned against shifts
