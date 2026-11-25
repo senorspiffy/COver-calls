@@ -3966,6 +3966,10 @@ def test_unreadable_log_exits_1_alone(tmp_path):
 
 # Item 092 (RI-014): check_handoff.py reads 01 and 03 through check_pipeline's _read; an unreadable file is a
 # FAIL line and exit 1, never a traceback, a count from "" or LEGACY.
+# Item 099: every run is pinned whole (_exact3: all stdout lines in order, exit code, empty stderr). Kill map:
+# A1-3 (no `return _report` after an unreadable 03) -> (b), (d), single 151 in (c), single 003 in (e);
+# A1-2 (`.search` for `.fullmatch` in check_all) -> test_check_all_unreadable_problem_call_site n1/n2 only;
+# the --all pins of (c), (e) kill neither.
 def _run3h(root, *args):
     """(exit code, stdout decoded with replace, stderr bytes) of check_handoff.py in `root` (item 092)."""
     r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_handoff.py"), *args], cwd=root,
@@ -3981,11 +3985,30 @@ def _h03(d, body=b""):
     (d / "03-handoff.md").write_bytes(body + clean.encode("utf-8"))
 
 
-def _ok3(code, out, err, want_code, lines):
+def _unread(path, detail):
+    """The problem text check_pipeline gives for an unreadable file (item 099): `<path> unreadable (<detail>)`."""
+    return f"{path} unreadable ({detail})"
+
+
+U8 = "not UTF-8 at byte 0"
+SRC1 = "sources count (unique URLs in 01-research.md): 1"
+NO03 = "no work/150/03-handoff.md; nothing else to check"
+TABLE_OK = ["fact-check rows: 1", "totals line: 1 rows -> 1 as-is, 0 fixed, 0 removed", "PASS"]
+NO_CLAIM = r"no \S+; nothing else to check"
+
+
+def _exact3(code, out, err, want_code, lines):
+    """Whole-output pin (item 099): stdout lines equal `lines` in order, exit code, stderr exactly empty
+    (measured b"" on all 15 runs, 099/05 step 1)."""
     assert b"Traceback" not in err, err
-    for line in lines:
-        assert line in out.splitlines(), out
+    assert out.splitlines() == lines, out
     assert code == want_code, out
+    assert err == b"", err
+
+
+def _no_claim(out):
+    """A1-3 (item 099): an unreadable 03 must not also print the false `no <03>; nothing else to check`."""
+    assert not any(re.fullmatch(NO_CLAIM, l) for l in out.splitlines()), f"A1-3: false absent-03 claim\n{out}"
 
 
 def test_handoff_bad_01_no_03(tmp_path):
@@ -3994,18 +4017,18 @@ def test_handoff_bad_01_no_03(tmp_path):
     (bad / "work" / "150").mkdir(parents=True)
     (bad / "work" / "150" / "01-research.md").write_bytes(BAD + b"see https://x.example/a\n")
     code, out, err = _run3h(bad, "150")
-    _ok3(code, out, err, 1, [
+    _exact3(code, out, err, 1, [
         "sources count (unique URLs in 01-research.md): not computed "
         "(work/150/01-research.md unreadable (not UTF-8 at byte 0))",
-        "FAIL: work/150/01-research.md unreadable (not UTF-8 at byte 0)",
-        "no work/150/03-handoff.md; nothing else to check"])
+        NO03,
+        "FAIL: " + _unread("work/150/01-research.md", U8),
+        "1 problem(s)"])
     assert not any(re.fullmatch(r"sources count \(unique URLs in 01-research.md\): \d+", l)
                    for l in out.splitlines()), out
     (clean / "work" / "150").mkdir(parents=True)
     (clean / "work" / "150" / "01-research.md").write_bytes(b"see https://x.example/a\n")
     code, out, err = _run3h(clean, "150")
-    _ok3(code, out, err, 0, ["sources count (unique URLs in 01-research.md): 1",
-                             "no work/150/03-handoff.md; nothing else to check"])
+    _exact3(code, out, err, 0, [SRC1, NO03])
     assert not any(l.startswith("FAIL:") for l in out.splitlines()), out
 
 
@@ -4017,10 +4040,11 @@ def test_handoff_bad_03(tmp_path):
         _h03(d, body)
         (d / "01-research.md").write_bytes(b"see https://x.example/a\n")
     code, out, err = _run3h(bad, "150")
-    _ok3(code, out, err, 1, ["FAIL: work/150/03-handoff.md unreadable (not UTF-8 at byte 0)", "1 problem(s)"])
+    _exact3(code, out, err, 1, [SRC1, "FAIL: " + _unread("work/150/03-handoff.md", U8), "1 problem(s)"])
+    _no_claim(out)
     assert not any(l.startswith("fact-check rows:") for l in out.splitlines()), out
     code, out, err = _run3h(clean, "150")
-    _ok3(code, out, err, 0, ["sources count (unique URLs in 01-research.md): 1", "PASS"])
+    _exact3(code, out, err, 0, [SRC1, *TABLE_OK])
 
 
 def test_handoff_all_one_bad_03(tmp_path):
@@ -4031,12 +4055,15 @@ def test_handoff_all_one_bad_03(tmp_path):
         for item in ("150", "151", "152"):
             _h03(root / "work" / item, BAD if root is bad and item == "151" else b"")
     code, out, err = _run3h(bad, "--all")
-    _ok3(code, out, err, 1, ["150: PASS", "151: FAIL: work/151/03-handoff.md unreadable (not UTF-8 at byte 0)",
-                             "152: PASS", "FAIL on 151"])
+    _exact3(code, out, err, 1, ["150: PASS", "151: FAIL: " + _unread("work/151/03-handoff.md", U8),
+                                "152: PASS", "FAIL on 151"])
+    code, out, err = _run3h(bad, "151")                      # item 099: single run, kills A1-3
+    _exact3(code, out, err, 1, ["FAIL: " + _unread("work/151/03-handoff.md", U8), "1 problem(s)"])
+    _no_claim(out)
     code, out, err = _run3h(clean, "--all")
-    _ok3(code, out, err, 0, ["150: PASS", "151: PASS", "152: PASS", "no new failures"])
+    _exact3(code, out, err, 0, ["150: PASS", "151: PASS", "152: PASS", "no new failures"])
     code, out, err = _run3h(clean, "150")
-    _ok3(code, out, err, 0, ["PASS"])
+    _exact3(code, out, err, 0, TABLE_OK)
     assert not any(l.startswith("sources count") for l in out.splitlines()), out
 
 
@@ -4045,10 +4072,11 @@ def test_handoff_03_is_directory(tmp_path):
     bad, clean = tmp_path / "bad", tmp_path / "clean"
     (bad / "work" / "150" / "03-handoff.md").mkdir(parents=True)
     code, out, err = _run3h(bad, "150")
-    _ok3(code, out, err, 1, ["FAIL: work/150/03-handoff.md unreadable (IsADirectoryError)", "1 problem(s)"])
+    _exact3(code, out, err, 1, ["FAIL: " + _unread("work/150/03-handoff.md", "IsADirectoryError"), "1 problem(s)"])
+    _no_claim(out)
     _h03(clean / "work" / "150")
     code, out, err = _run3h(clean, "150")
-    _ok3(code, out, err, 0, ["PASS"])
+    _exact3(code, out, err, 0, TABLE_OK)
 
 
 def test_handoff_legacy_bad_03_is_fail(tmp_path):
@@ -4056,12 +4084,16 @@ def test_handoff_legacy_bad_03_is_fail(tmp_path):
     bad, clean = tmp_path / "bad", tmp_path / "clean"
     _h03(bad / "work" / "003", BAD)
     code, out, err = _run3h(bad, "--all")
-    _ok3(code, out, err, 1, ["003: FAIL: work/003/03-handoff.md unreadable (not UTF-8 at byte 0)", "FAIL on 003"])
+    _exact3(code, out, err, 1, ["003: FAIL: " + _unread("work/003/03-handoff.md", U8), "FAIL on 003"])
+    code, out, err = _run3h(bad, "003")                      # item 099: single run, kills A1-3; no LEGACY in main
+    _exact3(code, out, err, 1, ["FAIL: " + _unread("work/003/03-handoff.md", U8), "1 problem(s)"])
+    _no_claim(out)
     d = clean / "work" / "003"
     d.mkdir(parents=True)
     (d / "03-handoff.md").write_text("# 03\n## Fact check\n| a | b |\n|---|---|\n| x | y |\n", encoding="utf-8")
     code, out, err = _run3h(clean, "--all")
-    _ok3(code, out, err, 0, ["no new failures"])
+    _exact3(code, out, err, 0, ["003: LEGACY (written 2026-10-30, before the Totals/Self-check template "
+                                "(commit 77273f0); 2 known problem(s))", "no new failures"])
     assert any(l.startswith("003: LEGACY (") for l in out.splitlines()), out
 
 
@@ -4073,9 +4105,9 @@ def test_handoff_all_bad_01_good_03(tmp_path):
         _h03(d)
         (d / "01-research.md").write_bytes(body + b"see https://x.example/a\n")
     code, out, err = _run3h(bad, "--all")
-    _ok3(code, out, err, 1, ["151: FAIL: work/151/01-research.md unreadable (not UTF-8 at byte 0)", "FAIL on 151"])
+    _exact3(code, out, err, 1, ["151: FAIL: " + _unread("work/151/01-research.md", U8), "FAIL on 151"])
     code, out, err = _run3h(clean, "--all")
-    _ok3(code, out, err, 0, ["151: PASS", "no new failures"])
+    _exact3(code, out, err, 0, ["151: PASS", "no new failures"])
 
 
 def test_unreadable_problem_fullmatch_only():
@@ -4087,6 +4119,42 @@ def test_unreadable_problem_fullmatch_only():
     assert rx.fullmatch("work/003/03-handoff.md unreadable (IsADirectoryError)")
     assert rx.fullmatch("no Totals line ('<n> rows checked -> ...')") is None
     assert rx.fullmatch("x unreadable (not UTF-8 at byte 0); y") is None
+
+
+_LEGACY003 = ("003: LEGACY (written 2026-10-30, before the Totals/Self-check template (commit 77273f0); "
+              "1 known problem(s))")
+
+
+@pytest.mark.parametrize("problem, want_code, want_lines", [
+    ("x unreadable (not UTF-8 at byte 0); y", 0, [_LEGACY003, "no new failures"]),
+    ("see work/003/03-handoff.md unreadable (IsADirectoryError)", 0, [_LEGACY003, "no new failures"]),
+    ("work/003/03-handoff.md unreadable (not UTF-8 at byte 0)", 1,
+     ["003: FAIL: work/003/03-handoff.md unreadable (not UTF-8 at byte 0)", "FAIL on 003"]),
+], ids=["n1", "n2", "p"])
+def test_check_all_unreadable_problem_call_site(tmp_path, monkeypatch, capsys, problem, want_code, want_lines):
+    """099 (RI-012 call-site negative): check_all's `code = main(d.name)`, the `l[6:]` problem list and
+    `UNREADABLE_PROBLEM.fullmatch(p)` together keep LEGACY for a problem that only contains the unreadable
+    form (n1, n2) and give FAIL for the whole form (p). A fake main prints one `FAIL: <problem>` line; a
+    03 file in work/003 skips the git lookup. A fake never reached fails the count and the p case."""
+    if str(REPO / "scripts") not in sys.path:
+        sys.path.insert(0, str(REPO / "scripts"))
+    import check_handoff
+    calls = []
+
+    def fake(item):
+        calls.append(item)
+        print(f"FAIL: {problem}")
+        return 1
+
+    monkeypatch.setattr(check_handoff, "main", fake)
+    (tmp_path / "work" / "003").mkdir(parents=True)
+    (tmp_path / "work" / "003" / "03-handoff.md").write_bytes(b"x")
+    code = check_handoff.check_all(tmp_path / "work")
+    out = capsys.readouterr().out
+    assert calls == ["003"], calls
+    assert len(calls) == 1
+    assert out.splitlines() == want_lines, out
+    assert code == want_code, out
 
 
 def test_handoff_read_census():
