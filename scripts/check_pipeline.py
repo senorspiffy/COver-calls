@@ -215,6 +215,11 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   INCOMPLETE entry `<05|06> heading '<heading>' is a build-round heading LOG BATCH does
                   not read; put its runs under '## Test output (round N, pasted)' / '## Tests re-run
                   (round N)' (item 098)`, gated on that file like ROUND_HEADING_FROM.
+                  Item 103 (gap w, RI-010): a broad rule (any SUMMARY_LINE outside a read section
+                  of 05/06 is INCOMPLETE) was measured and is a documented no-go (item 103): in
+                  work/076-098, 30 of 152 summary lines sit outside, 14 of them correctly quoted
+                  (mutants, base-failure, audit evidence), 0 at 092-098; a `#{1,2} round N` wrapper
+                  variant also flags 6 quoted of 9. See work/103/03-handoff.md before proposing it.
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
@@ -537,8 +542,9 @@ WAIVE_BUILD = {"04", "05", "06"}
 WAIVE_BUILD_BY_PERSON = re.compile(r"\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*:")
 # Item 093: request.md's `Waived:` line (group 1 = step numbers, group 2 = the rest; parse_request reads
 # the first one), and the person-with-date prefix written once (from WAIVE_BUILD_BY_PERSON). PERSON_DATED
-# is used only with .match on WAIVED_LINE group 2, so a quoted person form later in the text never counts
-# (RI-012); re.match, not prefixmatch (RI-008).
+# is used only with .match on WAIVED_LINE group 2 (by _person_waived_before_i2 and, from item 100,
+# _build_waived), so a quoted person form later in the text never counts (RI-012); re.match, not
+# prefixmatch (RI-008).
 WAIVED_LINE = re.compile(r"^Waived:\s*([0-9 ,]+)(.*)$", re.M)
 PERSON_DATED = re.compile(r"\s*" + WAIVE_BUILD_BY_PERSON.pattern)
 STEP_FILE = re.compile(r"^work/(\d{3})/(01-research|02-improvements|03-handoff|04-build-plan|"
@@ -622,10 +628,15 @@ def parse_request(text):
 
 
 def _build_waived(text):
-    """Item 062: the item's first `Waived:` line excuses 04 05 06 and was written by the person
-    with a date: `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)`."""
-    _, _, (steps, waived_line, who) = parse_request(text)
-    return WAIVE_BUILD <= set(steps) and who == "person" and bool(WAIVE_BUILD_BY_PERSON.search(waived_line))
+    """Item 062 and item 100: the item's first `Waived:` line excuses 04 05 06 only when its text after the
+    step numbers starts with `(person, YYYY-MM-DD:` (PERSON_DATED.match, anchored; RI-012), i.e.
+    `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)`. A person form quoted later in the text never counts.
+    This is a format check on the documented form, not proof of who wrote it. The anchor implies
+    who == "person". Known gaps, unchanged: `person` is case-sensitive (fails safe), the date is not
+    validated, and only the first Waived line is read."""
+    _, _, (steps, _, _) = parse_request(text)
+    m = WAIVED_LINE.search(text)
+    return WAIVE_BUILD <= set(steps) and bool(m and PERSON_DATED.match(m.group(2)))
 
 
 def _person_waived_before_i2(req_text, item_dir):

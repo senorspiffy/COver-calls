@@ -44,10 +44,26 @@ and comment lines (at any indent) are skipped. `tools:` and
 This says nothing about what Claude Code does with such a file. Known
 fail-closed false errors: a key with an inner colon not followed by a space
 (`a:b: c`). Also rejected (YAML's reading not checked): a key with a tab
-before `#` and no value (`a\t#b:`); a column-0 item after
-an empty-valued key that carries a comment (`hooks: # c`); a column-0 item
+before `#` and no value (`a\t#b:`); a column-0 item
 after the indented content of an earlier column-0 item; text split by
 `str.splitlines()` at \x0b, \x0c, \x1c, \x1d, \x1e, \x85, U+2028 or U+2029.
+
+Item 104: a plain value (after a key or `- `, not quoted, not `[`/`{`, not a
+block header) may not hold `:` followed by a space, a tab or its end,
+outside a ` #` comment. An indented line indented past a scalar-valued
+parent's node column is a continuation of that value and gets the same
+check. A key (any indent) may not be longer than 1024 characters from its
+first character to its colon. A value starting with `|` or `>` must be a
+block header (style, optional chomping `-`/`+` and indent digit 1-9 in
+either order, optional ` #` comment); the lines indented past the header
+line's node column (and blank lines) are content, skipped by these checks
+only. A key whose value is only a comment counts as empty-valued.
+`tools:`/`disallowedTools:` lines are left to `_field`. This says nothing
+about what Claude Code does with such a file. Known fail-closed false
+errors: `tools: # c` followed by a column-0 item (`_field`). Not checked
+(YAML's reading not checked): sibling indentation levels; text after a
+closed quote or flow value on a continuation line; a continuation that
+starts with `- `; plain values starting with `@`, `%` or the grave accent.
 """
 import re
 
@@ -61,6 +77,11 @@ ENTRY_RE = re.compile(r"[A-Za-z]+(\([^()]*\))?")
 VALUE_START_RE = re.compile(r"""[ ]*(?:-[ \t]+)*(?:[^\s"'#&!*\[{?:][^:]*:[ \t]+)?(\S)""")
 DOC_MARKER_RE = re.compile(r"(?:---|\.\.\.)(?:[ \t]|$)")
 KEY_RE = re.compile(r"""(?:[^\s"'#&!*\[\]{},|>%@`?:-]|-(?=\S))(?:[^: \t]|[ \t](?!#))*:(?=[ \t]|$)""")
+BLOCK_RE = re.compile(r"[|>](?:[1-9][-+]?|[-+][1-9]?)?(?:[ \t]+#.*)?[ \t]*")
+ITEMS_RE = re.compile(r"(?:-(?:[ \t]+|$))*")
+COMMENT_CUT_RE = re.compile(r"[ \t]#")
+COLON_RE = re.compile(r":(?:[ \t]|$)")
+KEY_MAX = 1024
 FLOW_KEYS = ("tools:", "disallowedTools:")
 AFTER_CLOSE_RE = re.compile(r"( +#.*)? *")
 
@@ -184,9 +205,53 @@ def _flow_end(line, start):
     return None
 
 
+def _is_open(rest):
+    """True if the text after a key or `- ` is empty or only a comment (item 104)."""
+    t = rest.strip(" \t")
+    return not t or t.startswith("#")
+
+
+def _plain_colon(text):
+    """True if a plain value holds `:` before a space, a tab or its end, outside ` #` (item 104)."""
+    m = COMMENT_CUT_RE.search(text)
+    if m:
+        text = text[:m.start()]
+    return bool(COLON_RE.search(text.rstrip(" \t")))
+
+
+def _node(line, n, check):
+    """Return (error, node column, is open, starts a block) for a structure line (item 104)."""
+    t = line.lstrip(" ")
+    pos = len(line) - len(t)
+    e = ITEMS_RE.match(t).end()
+    col = pos + e
+    t = t[e:]
+    if _is_open(t):
+        return None, col, True, False
+    k = KEY_RE.match(t)
+    if k:
+        if check and k.end() - 1 > KEY_MAX:
+            return KEY_LONG.format(n), col, False, False
+        rest = t[k.end():]
+        if _is_open(rest):
+            return None, col, True, False
+        t = rest.lstrip(" \t")
+    if not check or t[0] in "\"'[{":
+        return None, col, False, False
+    if t[0] in "|>":
+        if not BLOCK_RE.fullmatch(t):
+            return BLOCK.format(n), col, False, False
+        return None, col, False, True
+    if _plain_colon(t):
+        return VALUE.format(n), col, False, False
+    return None, col, False, False
+
+
 def _frontmatter_error(front):
-    """Return the first frontmatter line the test cannot read on its own (items 080, 087, 096)."""
+    """Return the first frontmatter line the test cannot read on its own (items 080, 087, 096, 104)."""
     prev_open = False
+    prev = None
+    block = None
     for i, line in enumerate(front):
         n = i + 2
         if DOC_MARKER_RE.match(line):
@@ -220,9 +285,24 @@ def _frontmatter_error(front):
             elif not KEY_RE.match(line):
                 return NO_KEY.format(n)
         t = line.strip()
+        if block is not None:
+            if not t or len(line) - len(line.lstrip(" ")) > block:
+                continue
+            block = None
         if t and not t.startswith("#"):
+            ind = len(line) - len(line.lstrip(" "))
+            if prev and not prev[1] and ind > prev[0]:
+                if _plain_colon(t):
+                    return VALUE.format(n)
+            else:
+                error, col, op, sb = _node(line, n, not line.startswith(FLOW_KEYS))
+                if error:
+                    return error
+                prev = (col, op)
+                if sb:
+                    block = col
             k = KEY_RE.match(line)
-            prev_open = line[0] != " " and (_is_item(line) or bool(k and not line[k.end():].strip()))
+            prev_open = line[0] != " " and (_is_item(line) or bool(k and _is_open(line[k.end():])))
     return None
 
 
@@ -296,6 +376,9 @@ FLOW_AFTER = "text after closing bracket on frontmatter line {} (item 087)"
 TAB_BEFORE = "tab before the value on frontmatter line {} (item 087)"
 DOC = "document marker on frontmatter line {} (item 087)"
 NO_KEY = "no key on frontmatter line {} (item 096)"
+VALUE = "colon in unquoted value on frontmatter line {} (item 104; quote the value)"
+KEY_LONG = "key longer than 1024 characters on frontmatter line {} (item 104)"
+BLOCK = "unreadable block scalar header on frontmatter line {} (item 104)"
 TOOLS = "tools: Read, Write"
 
 CASES = {
@@ -449,6 +532,38 @@ CASES = {
     "nk14_space_hash_empty_key_then_item": (_fm("a #b:", "- x", TOOLS), None, NO_KEY.format(2)),
     "nk15_hash_inside_key": (_fm("a#b: c", TOOLS), {"Read", "Write"}, None),
     "nk16_tab_hash_empty_key_then_item": (_fm("a\t#b:", "- x", TOOLS), None, NO_KEY.format(2)),
+    "v1_value_colon": (_fm("name: x: y", TOOLS), None, VALUE.format(2)),
+    "v2_value_colon_end": (_fm("name: x:", TOOLS), None, VALUE.format(2)),
+    "v3_nested_value_colon": (_fm("hooks:", "  a: b: c", TOOLS), None, VALUE.format(3)),
+    "v4_colon_in_comment": (_fm("description: a # see: b", TOOLS), {"Read", "Write"}, None),
+    "v5_url_colon": (_fm("description: see https://x", TOOLS), {"Read", "Write"}, None),
+    "v6_continuation_colon": (_fm("name: x", "  foo: bar", TOOLS), None, VALUE.format(3)),
+    "v7_continuation_plain": (_fm("description: x", "  more text", TOOLS), {"Read", "Write"}, None),
+    "v8_open_parent_plain": (_fm("description:", "  plain text", TOOLS), {"Read", "Write"}, None),
+    "v9_block_literal": (_fm("description: |", "  a: b", TOOLS), {"Read", "Write"}, None),
+    "v10_block_folded_indicators": (_fm("description: >-2 # c", "  x: y", TOOLS),
+                                    {"Read", "Write"}, None),
+    "v11_block_header_text": (_fm("description: > foo", TOOLS), None, BLOCK.format(2)),
+    "v12_block_ends": (_fm("description: |", "  a: b", "name: x: y", TOOLS), None, VALUE.format(4)),
+    "v13_key_1025": (_fm("k" * 1025 + ": v", TOOLS), None, KEY_LONG.format(2)),
+    "v14_key_1024": (_fm("k" * 1024 + ": v", TOOLS), {"Read", "Write"}, None),
+    "v15_key_1025_after_key": (_fm("name: x", "k" * 1025 + ": v", TOOLS), None, KEY_LONG.format(3)),
+    "v16_key_1025_indented": (_fm("hooks:", "  " + "k" * 1025 + ": v", TOOLS),
+                              None, KEY_LONG.format(3)),
+    "v17_key_1024_indented": (_fm("hooks:", "  " + "k" * 1024 + ": v", TOOLS), {"Read", "Write"}, None),
+    "v18_comment_key_then_item": (_fm("hooks: # c", "- a", TOOLS), {"Read", "Write"}, None),
+    "v19_spec_two_comments": (_fm("hr: # 1998 hr ranking", "- Mark McGwire", "- Sammy Sosa",
+                                  "# 1998 rbi ranking", "rbi:", "- Sammy Sosa", "- Ken Griffey",
+                                  TOOLS), {"Read", "Write"}, None),
+    "v20_comment_key_then_map": (_fm("hooks: # c", "  a: b", TOOLS), {"Read", "Write"}, None),
+    "v21_tools_comment_then_item": (_fm("tools: # c", "- Read"), None,
+                                    "unparsed tools: line '- Read' (item 075)"),
+    "v22_tools_entry_colon": (_fm("tools: Read, Bash: x"), None,
+                              "unparsed tools: entry 'Bash: x' (item 075)"),
+    "v23_hash_in_word_colon": (_fm("name: a#b: c", TOOLS), None, VALUE.format(2)),
+    "v24_gt_inside_value": (_fm("description: a > b", TOOLS), {"Read", "Write"}, None),
+    "v25_bar_inside_value": (_fm("description: a | b", TOOLS), {"Read", "Write"}, None),
+    "v26_dash_key_continuation": (_fm("-a: b", " c: d", TOOLS), None, VALUE.format(3)),
 }
 
 
@@ -503,6 +618,8 @@ TREE = {
                       None, [f"{R1}: {FLOW_OPEN.format(2)}"], NO_SHELL - {"r1-researcher"}),
     "n12_no_key_line": ({"r1-researcher": f"---\nfoo\ntools: {SIX}\n---\n"}, None,
                         [f"{R1}: {NO_KEY.format(2)}"], NO_SHELL - {"r1-researcher"}),
+    "n13_value_colon": ({"r1-researcher": f"---\nname: x: y\ntools: {SIX}\n---\n"}, None,
+                        [f"{R1}: {VALUE.format(2)}"], NO_SHELL - {"r1-researcher"}),
 }
 
 

@@ -1221,6 +1221,10 @@ def _cp():
     ("Waived: 02 (A1, 2026-10-31: x)\nWaived: 04 05 06 (person, 2026-11-13: ok)", False),
     # I3 round 1: the person's bracket copied into another who's text (RI-012)
     ('Waived: 04 05 06 (I2, 2026-11-13: copied "(person, 2026-11-12: ok)")', False),
+    ('Waived: 04 05 06 (person: x "(person, 2026-11-19: ok)")', False),  # item 100 (RI-012)
+    ("Waived: 04 05 06 (person) x (person, 2026-11-13: ok)", False),  # item 100 (RI-012)
+    ("", False),  # item 100 (absent)
+    ("Waived: 04 05 06", False),  # item 100 (absent)
 ])
 def test_build_waiver_needs_person_date_and_all_three(waived, counts):
     assert _cp()._build_waived(RES_160 + waived + "\n") is counts
@@ -3962,6 +3966,10 @@ def test_unreadable_log_exits_1_alone(tmp_path):
 
 # Item 092 (RI-014): check_handoff.py reads 01 and 03 through check_pipeline's _read; an unreadable file is a
 # FAIL line and exit 1, never a traceback, a count from "" or LEGACY.
+# Item 099: every run is pinned whole (_exact3: all stdout lines in order, exit code, empty stderr). Kill map:
+# A1-3 (no `return _report` after an unreadable 03) -> (b), (d), single 151 in (c), single 003 in (e);
+# A1-2 (`.search` for `.fullmatch` in check_all) -> test_check_all_unreadable_problem_call_site n1/n2 only;
+# the --all pins of (c), (e) kill neither.
 def _run3h(root, *args):
     """(exit code, stdout decoded with replace, stderr bytes) of check_handoff.py in `root` (item 092)."""
     r = subprocess.run([sys.executable, str(REPO / "scripts" / "check_handoff.py"), *args], cwd=root,
@@ -3977,11 +3985,30 @@ def _h03(d, body=b""):
     (d / "03-handoff.md").write_bytes(body + clean.encode("utf-8"))
 
 
-def _ok3(code, out, err, want_code, lines):
+def _unread(path, detail):
+    """The problem text check_pipeline gives for an unreadable file (item 099): `<path> unreadable (<detail>)`."""
+    return f"{path} unreadable ({detail})"
+
+
+U8 = "not UTF-8 at byte 0"
+SRC1 = "sources count (unique URLs in 01-research.md): 1"
+NO03 = "no work/150/03-handoff.md; nothing else to check"
+TABLE_OK = ["fact-check rows: 1", "totals line: 1 rows -> 1 as-is, 0 fixed, 0 removed", "PASS"]
+NO_CLAIM = r"no \S+; nothing else to check"
+
+
+def _exact3(code, out, err, want_code, lines):
+    """Whole-output pin (item 099): stdout lines equal `lines` in order, exit code, stderr exactly empty
+    (measured b"" on all 15 runs, 099/05 step 1)."""
     assert b"Traceback" not in err, err
-    for line in lines:
-        assert line in out.splitlines(), out
+    assert out.splitlines() == lines, out
     assert code == want_code, out
+    assert err == b"", err
+
+
+def _no_claim(out):
+    """A1-3 (item 099): an unreadable 03 must not also print the false `no <03>; nothing else to check`."""
+    assert not any(re.fullmatch(NO_CLAIM, l) for l in out.splitlines()), f"A1-3: false absent-03 claim\n{out}"
 
 
 def test_handoff_bad_01_no_03(tmp_path):
@@ -3990,18 +4017,18 @@ def test_handoff_bad_01_no_03(tmp_path):
     (bad / "work" / "150").mkdir(parents=True)
     (bad / "work" / "150" / "01-research.md").write_bytes(BAD + b"see https://x.example/a\n")
     code, out, err = _run3h(bad, "150")
-    _ok3(code, out, err, 1, [
+    _exact3(code, out, err, 1, [
         "sources count (unique URLs in 01-research.md): not computed "
         "(work/150/01-research.md unreadable (not UTF-8 at byte 0))",
-        "FAIL: work/150/01-research.md unreadable (not UTF-8 at byte 0)",
-        "no work/150/03-handoff.md; nothing else to check"])
+        NO03,
+        "FAIL: " + _unread("work/150/01-research.md", U8),
+        "1 problem(s)"])
     assert not any(re.fullmatch(r"sources count \(unique URLs in 01-research.md\): \d+", l)
                    for l in out.splitlines()), out
     (clean / "work" / "150").mkdir(parents=True)
     (clean / "work" / "150" / "01-research.md").write_bytes(b"see https://x.example/a\n")
     code, out, err = _run3h(clean, "150")
-    _ok3(code, out, err, 0, ["sources count (unique URLs in 01-research.md): 1",
-                             "no work/150/03-handoff.md; nothing else to check"])
+    _exact3(code, out, err, 0, [SRC1, NO03])
     assert not any(l.startswith("FAIL:") for l in out.splitlines()), out
 
 
@@ -4013,10 +4040,11 @@ def test_handoff_bad_03(tmp_path):
         _h03(d, body)
         (d / "01-research.md").write_bytes(b"see https://x.example/a\n")
     code, out, err = _run3h(bad, "150")
-    _ok3(code, out, err, 1, ["FAIL: work/150/03-handoff.md unreadable (not UTF-8 at byte 0)", "1 problem(s)"])
+    _exact3(code, out, err, 1, [SRC1, "FAIL: " + _unread("work/150/03-handoff.md", U8), "1 problem(s)"])
+    _no_claim(out)
     assert not any(l.startswith("fact-check rows:") for l in out.splitlines()), out
     code, out, err = _run3h(clean, "150")
-    _ok3(code, out, err, 0, ["sources count (unique URLs in 01-research.md): 1", "PASS"])
+    _exact3(code, out, err, 0, [SRC1, *TABLE_OK])
 
 
 def test_handoff_all_one_bad_03(tmp_path):
@@ -4027,12 +4055,15 @@ def test_handoff_all_one_bad_03(tmp_path):
         for item in ("150", "151", "152"):
             _h03(root / "work" / item, BAD if root is bad and item == "151" else b"")
     code, out, err = _run3h(bad, "--all")
-    _ok3(code, out, err, 1, ["150: PASS", "151: FAIL: work/151/03-handoff.md unreadable (not UTF-8 at byte 0)",
-                             "152: PASS", "FAIL on 151"])
+    _exact3(code, out, err, 1, ["150: PASS", "151: FAIL: " + _unread("work/151/03-handoff.md", U8),
+                                "152: PASS", "FAIL on 151"])
+    code, out, err = _run3h(bad, "151")                      # item 099: single run, kills A1-3
+    _exact3(code, out, err, 1, ["FAIL: " + _unread("work/151/03-handoff.md", U8), "1 problem(s)"])
+    _no_claim(out)
     code, out, err = _run3h(clean, "--all")
-    _ok3(code, out, err, 0, ["150: PASS", "151: PASS", "152: PASS", "no new failures"])
+    _exact3(code, out, err, 0, ["150: PASS", "151: PASS", "152: PASS", "no new failures"])
     code, out, err = _run3h(clean, "150")
-    _ok3(code, out, err, 0, ["PASS"])
+    _exact3(code, out, err, 0, TABLE_OK)
     assert not any(l.startswith("sources count") for l in out.splitlines()), out
 
 
@@ -4041,10 +4072,11 @@ def test_handoff_03_is_directory(tmp_path):
     bad, clean = tmp_path / "bad", tmp_path / "clean"
     (bad / "work" / "150" / "03-handoff.md").mkdir(parents=True)
     code, out, err = _run3h(bad, "150")
-    _ok3(code, out, err, 1, ["FAIL: work/150/03-handoff.md unreadable (IsADirectoryError)", "1 problem(s)"])
+    _exact3(code, out, err, 1, ["FAIL: " + _unread("work/150/03-handoff.md", "IsADirectoryError"), "1 problem(s)"])
+    _no_claim(out)
     _h03(clean / "work" / "150")
     code, out, err = _run3h(clean, "150")
-    _ok3(code, out, err, 0, ["PASS"])
+    _exact3(code, out, err, 0, TABLE_OK)
 
 
 def test_handoff_legacy_bad_03_is_fail(tmp_path):
@@ -4052,12 +4084,16 @@ def test_handoff_legacy_bad_03_is_fail(tmp_path):
     bad, clean = tmp_path / "bad", tmp_path / "clean"
     _h03(bad / "work" / "003", BAD)
     code, out, err = _run3h(bad, "--all")
-    _ok3(code, out, err, 1, ["003: FAIL: work/003/03-handoff.md unreadable (not UTF-8 at byte 0)", "FAIL on 003"])
+    _exact3(code, out, err, 1, ["003: FAIL: " + _unread("work/003/03-handoff.md", U8), "FAIL on 003"])
+    code, out, err = _run3h(bad, "003")                      # item 099: single run, kills A1-3; no LEGACY in main
+    _exact3(code, out, err, 1, ["FAIL: " + _unread("work/003/03-handoff.md", U8), "1 problem(s)"])
+    _no_claim(out)
     d = clean / "work" / "003"
     d.mkdir(parents=True)
     (d / "03-handoff.md").write_text("# 03\n## Fact check\n| a | b |\n|---|---|\n| x | y |\n", encoding="utf-8")
     code, out, err = _run3h(clean, "--all")
-    _ok3(code, out, err, 0, ["no new failures"])
+    _exact3(code, out, err, 0, ["003: LEGACY (written 2026-10-30, before the Totals/Self-check template "
+                                "(commit 77273f0); 2 known problem(s))", "no new failures"])
     assert any(l.startswith("003: LEGACY (") for l in out.splitlines()), out
 
 
@@ -4069,9 +4105,9 @@ def test_handoff_all_bad_01_good_03(tmp_path):
         _h03(d)
         (d / "01-research.md").write_bytes(body + b"see https://x.example/a\n")
     code, out, err = _run3h(bad, "--all")
-    _ok3(code, out, err, 1, ["151: FAIL: work/151/01-research.md unreadable (not UTF-8 at byte 0)", "FAIL on 151"])
+    _exact3(code, out, err, 1, ["151: FAIL: " + _unread("work/151/01-research.md", U8), "FAIL on 151"])
     code, out, err = _run3h(clean, "--all")
-    _ok3(code, out, err, 0, ["151: PASS", "no new failures"])
+    _exact3(code, out, err, 0, ["151: PASS", "no new failures"])
 
 
 def test_unreadable_problem_fullmatch_only():
@@ -4083,6 +4119,42 @@ def test_unreadable_problem_fullmatch_only():
     assert rx.fullmatch("work/003/03-handoff.md unreadable (IsADirectoryError)")
     assert rx.fullmatch("no Totals line ('<n> rows checked -> ...')") is None
     assert rx.fullmatch("x unreadable (not UTF-8 at byte 0); y") is None
+
+
+_LEGACY003 = ("003: LEGACY (written 2026-10-30, before the Totals/Self-check template (commit 77273f0); "
+              "1 known problem(s))")
+
+
+@pytest.mark.parametrize("problem, want_code, want_lines", [
+    ("x unreadable (not UTF-8 at byte 0); y", 0, [_LEGACY003, "no new failures"]),
+    ("see work/003/03-handoff.md unreadable (IsADirectoryError)", 0, [_LEGACY003, "no new failures"]),
+    ("work/003/03-handoff.md unreadable (not UTF-8 at byte 0)", 1,
+     ["003: FAIL: work/003/03-handoff.md unreadable (not UTF-8 at byte 0)", "FAIL on 003"]),
+], ids=["n1", "n2", "p"])
+def test_check_all_unreadable_problem_call_site(tmp_path, monkeypatch, capsys, problem, want_code, want_lines):
+    """099 (RI-012 call-site negative): check_all's `code = main(d.name)`, the `l[6:]` problem list and
+    `UNREADABLE_PROBLEM.fullmatch(p)` together keep LEGACY for a problem that only contains the unreadable
+    form (n1, n2) and give FAIL for the whole form (p). A fake main prints one `FAIL: <problem>` line; a
+    03 file in work/003 skips the git lookup. A fake never reached fails the count and the p case."""
+    if str(REPO / "scripts") not in sys.path:
+        sys.path.insert(0, str(REPO / "scripts"))
+    import check_handoff
+    calls = []
+
+    def fake(item):
+        calls.append(item)
+        print(f"FAIL: {problem}")
+        return 1
+
+    monkeypatch.setattr(check_handoff, "main", fake)
+    (tmp_path / "work" / "003").mkdir(parents=True)
+    (tmp_path / "work" / "003" / "03-handoff.md").write_bytes(b"x")
+    code = check_handoff.check_all(tmp_path / "work")
+    out = capsys.readouterr().out
+    assert calls == ["003"], calls
+    assert len(calls) == 1
+    assert out.splitlines() == want_lines, out
+    assert code == want_code, out
 
 
 def test_handoff_read_census():
@@ -4584,20 +4656,23 @@ def test_batch_waiver_not_excused_stays_strict(tmp_path, waived, skipped, resear
 
 
 @pytest.mark.parametrize("req", [
-    b"\xff",                                                                                     # N-g
+    REQ_FULL_093.encode("utf-8") + b"\xff",                                                      # N-g
     None,                                                                                        # N-h
     "Waived: 01 03 (person, 2026-11-20: test)\n",                                                # N-i
     "Scope: FULL\nWaived: 01 02 03 04 (person: no date)\nWaived: 01 02 03 04 (person, 2026-11-20: x)\n",   # N-j
 ], ids=["N-g", "N-h", "N-i", "N-j"])
 def test_batch_waiver_missing_inputs_strict(tmp_path, req):
     """093 N-g to N-j: unreadable request.md (also on _UNREAD), missing request.md, no Scope line (FULL default,
-    02 and 04 not waived) and a person-dated second Waived line (only the first is read) keep the strict reason."""
+    02 and 04 not waived) and a person-dated second Waived line (only the first is read) keep the strict reason.
+    N-g is a valid person waiver plus one bad byte (item 100, F2), so a replace-decoding reader would excuse it."""
     cp = _cp()
     cp._UNREAD.clear()
     _waived_item(tmp_path, "990", req)
     assert _bl(tmp_path)["not_computable"] == [("990", "no line before I2")]
     if isinstance(req, bytes):
-        assert (tmp_path / "work" / "990" / "request.md").as_posix() in cp._UNREAD, cp._UNREAD
+        path = (tmp_path / "work" / "990" / "request.md").as_posix()
+        assert path in cp._UNREAD, cp._UNREAD
+        assert cp._UNREAD[path] == "not UTF-8 at byte 59", cp._UNREAD
     cp._UNREAD.clear()
 
 
@@ -5252,6 +5327,89 @@ def test_round_build_shallow_goes_to_unchecked(tmp_path, shallow):
         assert fired in got and (RH_ID, fired) not in u, (u, got)
 
 
+
+# Item 101 (RI-014): each shallow `elif unsure` branch of `incomplete` from 095 has its own case.
+SE_FIELD = "1 files changed | tests 1 passed"                   # untimed I2 field, bare `|` (item 101)
+
+
+def _se_edit(path, old, new=""):
+    """Replace `old` in a fixture file; fail by name if the text is not there (never a silent no-op)."""
+    text = path.read_text(encoding="utf-8")
+    assert old in text, (path, old)
+    path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+def _se_line(path, prefix):
+    """The one line of `path` that starts with `prefix` (with its newline), asserted present once."""
+    hits = [l for l in path.read_text(encoding="utf-8").splitlines(keepends=True) if l.startswith(prefix)]
+    assert len(hits) == 1, (path, prefix, hits)
+    return hits[0]
+
+
+def _se_timed05(tmp_path, cp):
+    d = _rh_item(tmp_path)
+    _se_edit(tmp_path / "logs" / "implementation" / f"{RH_DAY}.md", "tests 1 passed in 0.01s", "tests 1 passed")
+    _se_edit(d / "05-build-report.md", "Suite: 1 passed in 0.01s", "Suite: 1 passed")
+    return d, None, I2_ENTRY
+
+
+def _se_batch05(tmp_path, cp):
+    return (_rh_item(tmp_path), {RH_ID: cp.BATCH_STRICT[0]},
+            f"LOG BATCH not computable: {cp.BATCH_STRICT[0]} (item 090)")
+
+
+def _se_suite05(tmp_path, cp):
+    d = _rh_item(tmp_path)
+    f = d / "05-build-report.md"
+    _se_edit(f, _se_line(f, "Suite:"))
+    return d, None, "05 has no 'Suite:' line (item 082)"
+
+
+def _se_rh05(tmp_path, cp):
+    return _rh_item(tmp_path, body05=RH_P1), None, f"05 heading '### Test output (round 2, pasted)' {RH_USE}"
+
+
+def _se_rh06(tmp_path, cp):
+    return (_rh_item(tmp_path, body06="## Round 1\n### Tests re-run (output)\n2 passed in 1.50s\n"), None,
+            f"06 heading '### Tests re-run (output)' {RH_USE}")
+
+
+def _se_scratch(step):
+    def setup(tmp_path, cp):
+        d = _rh_item(tmp_path)
+        f = d / cp.STEPS[step]
+        _se_edit(f, _se_line(f, "Scratch dir:"))
+        return d, None, f"{step} has no Scratch dir: line (item 097)"
+    return setup
+
+
+SE_CASES = [("timed05", "05", _se_timed05), ("batch05", "05", _se_batch05), ("suite05", "05", _se_suite05),
+            ("rh05", "05", _se_rh05), ("rh06", "06", _se_rh06), ("scratch05", "05", _se_scratch("05")),
+            ("scratch06", "06", _se_scratch("06"))]
+SE_PARAMS = [pytest.param(case, step, setup, mode, id=f"{case}-{mode}")
+             for case, step, setup in SE_CASES for mode in ("shallow", "nogit")]
+
+
+@pytest.mark.parametrize("case, step, setup, mode", SE_PARAMS)
+def test_shallow_elif_branch_goes_to_unchecked(tmp_path, case, step, setup, mode):
+    """Item 101: unit tests of `incomplete` for the TIMED, LOG BATCH, Suite, round-heading and Scratch dir
+    `elif unsure` branches (095/097). Shallow, with only the gated step file committed: the one entry is in
+    `unchecked`, not returned; env "no git": it is returned (strict) and `unchecked` stays empty.
+    The printed INCOMPLETE NOT CHECKED line and `committed` from `_head_work_files` stay with 095 M5/M11."""
+    cp = _cp()
+    for cutoff in (cp.SUITE_FROM, cp.TIMED_FROM, cp.ROUND_HEADING_FROM, cp.SCRATCH_FROM, cp.ROUND_BUILD_FROM):
+        assert int(RH_ID) >= cutoff, cutoff                 # RI-001: the fixture ID clears every cutoff
+    d, batch_nc, entry = setup(tmp_path, cp)
+    if case == "timed05":                                   # 03 step 2: the TIMED gate, not the TESTS branch
+        assert cp.log_fields_ok("I2", RH_ID, SE_FIELD, timed=False) and not cp.log_fields_ok("I2", RH_ID, SE_FIELD)
+    u = []
+    got = cp.incomplete(d, logs=tmp_path / "logs", env=cp.SHALLOW_TEXT if mode == "shallow" else "no git",
+                        not_seen=[], batch_nc=batch_nc, unchecked=u, committed={f"work/{RH_ID}/{cp.STEPS[step]}"})
+    if mode == "shallow":
+        assert got == [] and u == [(RH_ID, entry)], (u, got)
+    else:
+        assert got == [entry] and u == [], (u, got)
+
 def test_round_build_missing_inputs(tmp_path, monkeypatch):
     """P-f: an unreadable 05 gives the one 091 `not checked` entry (none from 098); an absent file is
     ([], None); a failed anchor read keeps the entry and adds its note (strict)."""
@@ -5690,3 +5848,75 @@ def test_check_pipeline_docstring_names_094():
     cp = _cp()
     for doc in (cp.__doc__, cp.fetch_coverage.__doc__, cp.open_branches.__doc__, cp.next_id.__doc__):
         assert "(item 094)" in doc
+
+
+def test_check_pipeline_docstring_records_103_no_go():
+    """Item 103: the module docstring records the broad SUMMARY_LINE rule as a measured no-go and points to its 03."""
+    doc = " ".join(_cp().__doc__.split())
+    assert "documented no-go (item 103)" in doc
+    assert "30 of 152 summary lines" in doc and "14 of them correctly quoted" in doc
+    assert "See work/103/03-handoff.md" in doc and (REPO / "work/103/03-handoff.md").is_file()
+
+
+# Item 102 (RI-001, RI-010): each ID cutoff that no behavior test pinned on both sides gets one row at FROM and
+# one at FROM-1, with literal IDs, so a shift of the constant by +1 or -1 fails a named row. No value asserts
+# here (test_from_values holds them), so a shift is killed by behavior, not by `== N`. Pinned against shifts
+# only, not against per-site operator mutants (03 Residual a).
+FROM_ROWS = [
+    ("CHECKLIST", "041", "041 (no log line for R1 R2 R3 I1 I2 I3)"),
+    ("CHECKLIST", "040", None),
+    ("LOG_CHECK", "045", "045 (log line for I2 does not match its format (item 045)"),
+    ("LOG_CHECK", "044", None),
+    ("SUITE", "087", f"INCOMPLETE: 087 ({NO_SUITE})"),
+    ("SUITE", "086", None),
+    ("VERDICT", "071", "071 (06 has no readable 'Verdict: PASS' or 'Verdict: FAIL' line (item 071))"),
+    ("VERDICT", "070", None),
+    ("TIMED", "090", True),
+    ("TIMED", "089", None),
+]
+FROM_IDS = [f"{n}-FROM" if i % 2 == 0 else f"{n}-FROM-1" for i, (n, _, _) in enumerate(FROM_ROWS)]
+
+
+@pytest.mark.parametrize("name, item, expect", FROM_ROWS, ids=FROM_IDS)
+def test_from_cutoff_boundary(tmp_path, name, item, expect):
+    """Item 102: FROM rows expect the check's entry (or the TIMED refusal); FROM-1 rows expect none."""
+    root = tmp_path
+    if name == "TIMED":
+        _request(root, item)
+        code, err = _log(root, "I2", item, "1 file changed | tests 5 passed")
+        if expect:
+            assert code == 2 and f'"{TIMED_HINT}"' in err, err
+        else:
+            assert code == 0, err
+        return
+    if name == "CHECKLIST":
+        _item(root, item, ALL, logged=False)
+        (root / "logs" / "implementation").mkdir(parents=True)       # 04 C4: an empty logs dir
+        code, out = _run(root, "check_pipeline.py", "--today", "2026-11-04")
+        inc = _pick(out, "INCOMPLETE:")
+    elif name == "LOG_CHECK":
+        _item(root, item, ALL)
+        with (root / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+            fh.write(f"12:00 | I2 | {item} | see 05 | tests 1/1\n")
+        code, out = _run(root, "check_pipeline.py", "--today", "2026-11-05")
+        inc = _pick(out, "INCOMPLETE:")
+    elif name == "SUITE":
+        _suite_item(root, "x\n", item=item)
+        code, inc = _inc(root)
+    else:
+        _item(root, item, ALL, verdict=None)
+        code, out = _run(root, "check_pipeline.py", "--today", "2026-11-18")
+        inc = _pick(out, "INCOMPLETE:")
+    if expect is None:
+        assert inc == "INCOMPLETE: none" and code == 0, inc
+    elif name == "SUITE":
+        assert inc == expect and code == 1
+    else:
+        assert expect in inc and code == 1, inc
+
+
+def test_from_values():
+    """Item 102 (step 4): the 7 ID cutoffs by value, kept apart from the behavior rows above."""
+    cp = _cp()
+    assert (cp.CHECKLIST_FROM, cp.LOG_CHECK_FROM, cp.TESTS_FORMAT_FROM, cp.SUITE_FROM, cp.TIMED_FROM,
+            cp.WHOLE_DIFF_FROM, cp.VERDICT_FROM) == (41, 45, 76, 87, 90, 70, 71)
