@@ -74,3 +74,79 @@ Fit check:
 Recurring issues checked (logs/recurring-issues.md, read first): RI-001 ESCALATED: every new filter has a dated count (21/21 real lines, 0 Grep hits, re-run 2026-11-24) and a pinning test. RI-010 ESCALATED: I write no log line; the orchestrator copies the last line via `--log`. RI-014 OPEN: does not apply (no git or clone path). GUARDED entries: RI-002 (this item's root cause; every unreadable shape is a named error, Missing inputs listed), RI-004/005 (re-traced the self-check, found the M64 line-number slip), RI-006 (no hand totals beyond the 03 counts; pytest line pasted as printed), RI-007 (Scope FULL, I1-I3 run, no code before 04), RI-008 (3.10 syntax, py_compile), RI-009 (mutations on a scratch copy only), RI-012 (in-text negatives v4, v5, v7, v8, v9, v10, v14, v17 kept). RI-003, RI-011 and RI-013 do not apply.
 
 Log fields: FIT | 1 files planned
+
+## Round 2 (2026-11-25, I1, after 06 FAIL round 1)
+Input: work/104/06-verification.md (Verdict: FAIL (round 1), Sent back to: I1 I2; head fcf3cff). I1 re-read logs/recurring-issues.md and tests/test_agent_tools.py as built: COMMENT_CUT_RE L82, ITEMS_RE L81, `_is_open` L208, `_plain_colon` L214-L219, `_node` L222-L247 (`t[0] in "|>"` L241), `_frontmatter_error` L250-L306, CASES v1-v22 L535-L562. No shell, so every trace below is by hand; I2 runs them. Scratch dir (given by the orchestrator): /tmp/claude-0/-home-claude/8c722f74-340b-5bb8-a4ab-b7e171dc99a9/scratchpad/i1-104-r2-zms85tlk (not used; no files written there).
+
+Fit verdict (round 2): FIT. Same single file, same scope. Round 2 adds 4 fixtures only. The parser code, the error texts and the docstring do not change: the "Item 104:" paragraph already states each rule these fixtures pin ("outside a ` #` comment", "A value starting with `|` or `>`", "indented past a scalar-valued parent's node column").
+
+I3 findings (copied, 06 "Sent back" 1): RI-012 / item 059. Three text classifiers have no test with their pattern inside other text. X2 (`COMMENT_CUT_RE = r"#"`) and X3 (`if "|" in t or ">" in t:`) each leave all 132 tests green. X2 is fail-open: `name: a#b: c` would pass, but PyYAML raises on it (06 probe i3a). X4 (`ITEMS_RE = r"(?:-[ \t]*)*"`) also leaves all 132 green. I3 found no shape where X4 changes the verdict and left the pin to I1.
+
+Research gap check: no R1/R3 re-run is needed. 03's rules are unchanged and no 03 row is wrong. The fixtures pin rules 03 already states, and the PyYAML verdicts for (a) and (b) are measured in 06 (PyYAML 6.0.4, both loaders).
+
+### R2 extra research (with sources)
+1. YAML plain scalar rules (rlsp-yaml-parser `lexer/plain.rs`, YAML 1.2 productions, fetched 2026-11-25): `ns_plain_char_block` is "Any `ns-plain-safe(c)` that is not `:` or `#`", with "`#` is allowed only when NOT preceded by whitespace" and "`:` is allowed only when followed by a safe plain char". So in `a#b: c` the `#` is text, not a comment, and the `: ` after it ends the scalar. That is the X2 shape (a). The same file's `ns_plain_first` says `?`, `:` and `-` may start a plain scalar "if ... the next character is a safe plain char". `|` and `>` are rejected only as a first character (`is_c_indicator`). The file has no rule against them later in the scalar. I read that from the code; the source does not say it in words. 06 probes i3b/i3c measure it: both loaders load `a > b` and `a | b`. So a header is recognised only from the value's first character, and that is the X3 shape (b). Source: https://docs.rs/crate/rlsp-yaml-parser/0.6.1/source/src/lexer/plain.rs. I could not reach the plain-style section of https://yaml.org/spec/1.2.2/ (the reader stopped at 6.6, "Comments must be separated from other tokens by white space characters.").
+2. Edge case I3 missed: X4 does change a verdict. A column-0 key that starts with `-` and no space (`-a`) is a valid plain key per item 1. With the round 1 ITEMS_RE, `-a: b` has node column 0. Under X4 the `-` is eaten as an item prefix, so the node column becomes 1. A continuation at indent 1 (` c: d`) is then read as a new structure line (`ind 1 > 1` is False). `_node` sees key `c` with value `d` and no error. That is fail-open, the same shape as v6 (`name: x` / `  foo: bar` → VALUE(3)) one column over. Indent 2 does not show it (2 > 1 still makes it a continuation), so the fixture must use exactly one space. PyYAML's verdict on this shape is not measured. I expect "mapping values are not allowed here", as for v6, but I2 probes it and 05 must not claim it without the probe output. VALUE(3) is fail-closed either way, and it follows 03 D1.
+3. Not pinned, by decision: a tab before `#` (`description: a\t# see: b`, 06 i3d). The pure-Python loader raises and libyaml loads it, so there is no single YAML answer to pin. The test passes the line. A mutant `COMMENT_CUT_RE = r"[ ]#"` would turn that pass into VALUE(2), which is fail-closed. This is the tab-before-`#` family the 096 docstring already lists. No fixture and no docstring change.
+4. Real-tree count for the round 2 shapes (I1 Grep, 2026-11-25, over .claude/agents, 7 files): the pattern `^(name|description|tools):.*([^ \t]#|[|>])|^-[^ -]` (a `#` after a non-space or a `|`/`>` in a real value, or a column-0 `-` key other than `---`) → 0 hits. The first try without `-` in the last class counted the 14 `---` marker lines (2 per file), so the class excludes them.
+
+### R2 files to change
+Still 1 file: tests/test_agent_tools.py. Add these 4 entries to CASES after v22, with ids as given. No other line changes.
+
+| id | text | expected |
+|---|---|---|
+| v23_hash_in_word_colon | `_fm("name: a#b: c", TOOLS)` | `None, VALUE.format(2)` |
+| v24_gt_inside_value | `_fm("description: a > b", TOOLS)` | `{"Read", "Write"}, None` |
+| v25_bar_inside_value | `_fm("description: a \| b", TOOLS)` (plain `|` in code; the `\|` is a table escape, see Extra research 4) | `{"Read", "Write"}, None` |
+| v26_dash_key_continuation | `_fm("-a: b", " c: d", TOOLS)` (exactly one space before `c`) | `None, VALUE.format(3)` |
+
+### R2 traces (by hand, round 1 code at fcf3cff)
+- v23, line 2 `name: a#b: c`. DOC no, no lead tab. VALUE_START_RE: key `name`, c = `a` (not special). Column 0: KEY_RE matches `name:` → no NO_KEY. prev None → `_node`: ITEMS end 0, not open, KEY `name:`, rest ` a#b: c` not open, t = `a#b: c`, `t[0]` = `a`. `_plain_colon`: COMMENT_CUT_RE `[ \t]#` finds nothing (the `#` follows `a`), COLON_RE finds `: ` → VALUE(2). Under X2, the cut at index 1 leaves `a`, there is no colon, `_field` → {Read, Write}, so the test fails. Under M57 (no cut) the result is still VALUE(2), so M57 is unchanged.
+- v24 `description: a > b` / v25 `description: a | b`. `_node`: t = `a > b` / `a | b`, `t[0]` = `a`, which is not in `"|>"`. `_plain_colon` finds no colon → no error → {Read, Write}. Under X3, `">" in t` / `"|" in t` is true and BLOCK_RE.fullmatch fails → BLOCK(2), so the test fails.
+- v26, line 2 `-a: b`. VALUE_START_RE: `(?:-[ \t]+)*` takes nothing (no space after `-`). Key group first char `-` is allowed → key `-a`, c = `b`. Column 0: `_is_item` False (not `-` or `- `), KEY_RE matches (first `-(?=\S)`, body `a`, `:` then a space) → no NO_KEY. `_node`: ITEMS_RE (round 1) end 0, col 0, KEY `-a:`, t = `b`, no colon → prev = (0, False). `prev_open` False. Line 3 ` c: d`: lead is one space. VALUE_START_RE c = `d`. The column-0 check is skipped (starts with a space). block None. prev (0, False) is closed and ind 1 > 0 → continuation → `_plain_colon("c: d")` → VALUE(3). Under X4, line 2 has ITEMS end 1, so col = 1 and prev = (1, False). Line 3: ind 1 > 1 is False → `_node(" c: d")` → key `c`, t = `d` → no error. TOOLS → {Read, Write}, so the test fails.
+- Existing fixtures: no change to code, so all 132 round 1 results stand (06 ran them: 132 passed).
+
+### R2 tests and checks
+1. `python3 -m pytest tests/test_agent_tools.py -q` → 136 passed (132 + 4).
+2. Base check (pre-104 `_frontmatter_error`, scratch copy) → 15 failed, 121 passed: the round 1 13, plus v23 (old parser has no value check → tool set) and v26 (no continuation check → tool set). v24 and v25 pass on the old parser.
+3. New mutants, each alone on a scratch worktree (RI-009; no stash). The failing ids must equal the list, or 05 states a Deviation with the run output:
+   - X2 `COMMENT_CUT_RE = re.compile(r"#")` → v23
+   - X3 `if t[0] in "|>":` → `if "|" in t or ">" in t:` → v24, v25
+   - X4 `ITEMS_RE = re.compile(r"(?:-[ \t]*)*")` → v26
+4. Updated round 1 lists (traced; all others unchanged):
+   - M56 (`_plain_colon` → False) → its 6 plus v23, v26 = 8 failed.
+   - M58 (no continuation branch) → v6, v26 (line 3 goes to `_node`: key `c`, value `d` → pass).
+   - M57, M59-M68: unchanged. v23-v26 have no ` #` comment, so M57 is unchanged. Their keys are at most 11 characters (M59/M60/M68), there is no `# c` value (M61) and no block header (M62/M65/M66/M67). M63 is unchanged because their TOOLS line is the plain `tools: Read, Write`. M64 is unchanged because v26's node column is 0 either way: line indent 0 equals ITEMS end 0. Since M64 leaves v26 alone while X4 kills it, the two mutants stay distinguishable.
+   - M41-M55 (096): re-run; any v23-v26 ids they also fail are recorded and are not a Deviation.
+5. PyYAML probe (information only, D6), added to the 05 table: v23-v26 on SafeLoader and CSafeLoader with the version printed. 06 already has v23-v25 as i3a-i3c. v26 is new (R2 research 2).
+6. Real tree passes (21 of 21). `python3.11 -m py_compile tests/test_agent_tools.py` where available (RI-008). Full suite `python3 -m pytest -q`: round 1 result plus 4 passed; paste the line as printed (RI-006).
+
+### R2 rule trace
+| Rule (source) | Plan line, or DROPPED: <reason> |
+|---|---|
+| 06 send-back 1(a): `name: a#b: c` → VALUE(2), killed by `COMMENT_CUT_RE = r"#"` | v23; X2 |
+| 06 send-back 1(b): `description: a > b` / `a \| b` → {Read, Write}, killed by "header test anywhere" | v24, v25; X3 |
+| 06 send-back 1, X4 decision (pin or docstring line) | Pinned: v26; X4 (R2 research 2). No docstring line needed |
+| 06 send-back 2 (I2): counts 132 + new, BASE change | R2 Tests 1-2: 136 passed; BASE 15 failed, 121 passed |
+| Filter count: real frontmatter lines with the round 2 shapes (I1 Grep 2026-11-25, pattern in R2 research 4) | 0 hits in 7 files; the real-tree test still pins 21 of 21 |
+| Fixture count per pinned rule (non-zero, dated 2026-11-25 by hand trace) | comment cut: 1 positive (v4) + 1 in-text negative (v23); header first char: 3 headers (v9, v10, v11) + 2 in-text negatives (v24, v25); item prefix: 1 (v26) |
+| Optional input: PyYAML verdict on v26 | Probed by I2 as information; not claimed (R2 research 2) |
+| Tab before `#` (06 i3d) | DROPPED: loaders disagree; already in the docstring's not-checked list (R2 research 3) |
+| Rule text the person follows | none changed (test-only) |
+
+### R2 guardrail tests
+- In-text negative, comment cut: `#` inside a word is value text → v23, pinned by X2. The positive v4 is still pinned by M57.
+- In-text negative, block header: `>`/`|` after the first character is plain text → v24, v25, pinned by X3. Headers are still pinned by M62/M66/M67.
+- Item prefix needs a space: a `-a` key keeps node column 0 → v26, pinned by X4. M64 is distinct from X4.
+- Missing inputs: no new optional input. v26's line 2 is the first line (prev None) and is read as a structure line, not as a continuation, as in v1/v13.
+
+### R2 expected result
+tests/test_agent_tools.py: 136 passed. Base 15 failed, 121 passed. X2 fails v23 only, X3 fails v24 and v25, X4 fails v26. M56 fails 8, M58 fails v6 and v26, and the other M57-M68 lists are as in round 1. The real tree passes. No parser or docstring line changes.
+
+Self-check (round 2): 132 + 4 = 136. Base 13 + 2 = 15, and 136 − 15 = 121. M56 6 + 2 = 8. Each of X2, X3 and X4 kills a non-empty set that is distinct from every M56-M68 list ({v23}, {v24, v25}, {v26}).
+
+Recurring issues checked (round 2, logs/recurring-issues.md read first): RI-001 (ESCALATED): the new shapes have a dated real count (0 hits, Grep 2026-11-25) and a pinning test each; the 21 of 21 real-tree count is unchanged. RI-010 (ESCALATED): I typed no log line; this file ends with the Log fields line. RI-014 (OPEN): not applicable (no git or clone-depth path). GUARDED entries checked: RI-002 (X2 and X4 were fail-open; v23 and v26 now pin them), RI-004/005 (counts re-derived in the Self-check), RI-006 (I2 pastes pytest lines as printed), RI-007 (FULL, round goes back through I2/I3), RI-008 (no new syntax; fixtures only), RI-009 (mutants on a scratch worktree, no stash), RI-012 (this round's finding: in-text negatives v23, v24, v25 added, each with a named mutant). RI-003, RI-011 and RI-013 do not apply.
+
+Sources (round 2): https://docs.rs/crate/rlsp-yaml-parser/0.6.1/source/src/lexer/plain.rs ; https://yaml.org/spec/1.2.2/
+
+Log fields: FIT | 1 files planned
