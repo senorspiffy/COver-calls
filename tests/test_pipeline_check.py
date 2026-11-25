@@ -5327,9 +5327,14 @@ def test_round_build_shallow_goes_to_unchecked(tmp_path, shallow):
         assert fired in got and (RH_ID, fired) not in u, (u, got)
 
 
-
 # Item 101 (RI-014): each shallow `elif unsure` branch of `incomplete` from 095 has its own case.
-SE_FIELD = "1 files changed | tests 1 passed"                   # untimed I2 field, bare `|` (item 101)
+def _se_fields():
+    """Item 108: (timed, untimed) from the fixture's own I2 field; untimed = timed minus its ` in <s>s` time."""
+    timed = _field("I2", RH_ID)
+    assert " | tests " in timed, timed
+    untimed = re.sub(r" in \d+\.\d+(?:s| seconds)", "", timed, count=1)
+    assert untimed != timed, timed
+    return timed, untimed
 
 
 def _se_edit(path, old, new=""):
@@ -5347,9 +5352,11 @@ def _se_line(path, prefix):
 
 
 def _se_timed05(tmp_path, cp):
+    timed, untimed = _se_fields()
     d = _rh_item(tmp_path)
-    _se_edit(tmp_path / "logs" / "implementation" / f"{RH_DAY}.md", "tests 1 passed in 0.01s", "tests 1 passed")
-    _se_edit(d / "05-build-report.md", "Suite: 1 passed in 0.01s", "Suite: 1 passed")
+    _se_edit(tmp_path / "logs" / "implementation" / f"{RH_DAY}.md", timed, untimed)
+    _se_edit(d / "05-build-report.md", "Suite: " + timed.split(" | tests ", 1)[1],
+             "Suite: " + untimed.split(" | tests ", 1)[1])
     return d, None, I2_ENTRY
 
 
@@ -5385,23 +5392,35 @@ def _se_scratch(step):
 
 SE_CASES = [("timed05", "05", _se_timed05), ("batch05", "05", _se_batch05), ("suite05", "05", _se_suite05),
             ("rh05", "05", _se_rh05), ("rh06", "06", _se_rh06), ("scratch05", "05", _se_scratch("05")),
-            ("scratch06", "06", _se_scratch("06"))]
+            ("scratch06", "06", _se_scratch("06")), ("timed05alt", "05", _se_timed05)]
+SE_ALT_I2 = "2 files changed | tests 3 passed in 0.02s"  # item 108: a second I2 field, patched per test
 SE_PARAMS = [pytest.param(case, step, setup, mode, id=f"{case}-{mode}")
              for case, step, setup in SE_CASES for mode in ("shallow", "nogit")]
 
 
 @pytest.mark.parametrize("case, step, setup, mode", SE_PARAMS)
-def test_shallow_elif_branch_goes_to_unchecked(tmp_path, case, step, setup, mode):
+def test_shallow_elif_branch_goes_to_unchecked(tmp_path, monkeypatch, case, step, setup, mode):
     """Item 101: unit tests of `incomplete` for the TIMED, LOG BATCH, Suite, round-heading and Scratch dir
     `elif unsure` branches (095/097). Shallow, with only the gated step file committed: the one entry is in
     `unchecked`, not returned; env "no git": it is returned (strict) and `unchecked` stays empty.
-    The printed INCOMPLETE NOT CHECKED line and `committed` from `_head_work_files` stay with 095 M5/M11."""
+    The printed INCOMPLETE NOT CHECKED line and `committed` from `_head_work_files` stay with 095 M5/M11.
+    Item 108: the timed05 cases read the I2 field back from the fixture log and derive their edits from FIELDS;
+    timed05alt patches FIELDS['I2']."""
     cp = _cp()
     for cutoff in (cp.SUITE_FROM, cp.TIMED_FROM, cp.ROUND_HEADING_FROM, cp.SCRATCH_FROM, cp.ROUND_BUILD_FROM):
         assert int(RH_ID) >= cutoff, cutoff                 # RI-001: the fixture ID clears every cutoff
+    if case == "timed05alt":
+        monkeypatch.setitem(FIELDS, "I2", SE_ALT_I2)
     d, batch_nc, entry = setup(tmp_path, cp)
-    if case == "timed05":                                   # 03 step 2: the TIMED gate, not the TESTS branch
-        assert cp.log_fields_ok("I2", RH_ID, SE_FIELD, timed=False) and not cp.log_fields_ok("I2", RH_ID, SE_FIELD)
+    if case.startswith("timed05"):                          # 03 step 2: the TIMED gate, not the TESTS branch
+        _, untimed = _se_fields()
+        text, whys = cp._log_text(tmp_path / "logs")
+        assert whys == [], whys
+        own_i2 = [m for m in (cp.LOG_LINE.match(l) for l in text.splitlines()) if m and m[3] == "I2" and m[4] == RH_ID]
+        assert len(own_i2) == 1, own_i2
+        f = own_i2[0][5]
+        assert f == untimed, (f, untimed)
+        assert cp.log_fields_ok("I2", RH_ID, f, timed=False) and not cp.log_fields_ok("I2", RH_ID, f), f
     u = []
     got = cp.incomplete(d, logs=tmp_path / "logs", env=cp.SHALLOW_TEXT if mode == "shallow" else "no git",
                         not_seen=[], batch_nc=batch_nc, unchecked=u, committed={f"work/{RH_ID}/{cp.STEPS[step]}"})
@@ -5409,6 +5428,7 @@ def test_shallow_elif_branch_goes_to_unchecked(tmp_path, case, step, setup, mode
         assert got == [] and u == [(RH_ID, entry)], (u, got)
     else:
         assert got == [entry] and u == [], (u, got)
+
 
 def test_round_build_missing_inputs(tmp_path, monkeypatch):
     """P-f: an unreadable 05 gives the one 091 `not checked` entry (none from 098); an absent file is
