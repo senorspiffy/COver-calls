@@ -5,3 +5,4 @@ Audit should look at:
 3. Residual (a): per-site operator mutants (14 sites) are not pinned; the cutoffs are pinned against shifts only. Candidate follow-up item.
 4. Residual (b) / Part 3: the i1-reviewer sentence (RULE_PATHS) still waits for the person's OK.
 5. RI-010 near miss "commit_step trailer-refusal order untested -> 102" can be noted as built in recurring-issues.md (A1, on main).
+A1 result: PASS (2026-11-25, logs/audit/2026-11-25-102.md)
