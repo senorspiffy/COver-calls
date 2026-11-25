@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -292,21 +293,63 @@ def test_trailers_make_one_final_paragraph(repo, tmp_path):
     assert _g(repo, "rev-parse", "HEAD^{tree}") == _g(copy, "rev-parse", "HEAD^{tree}")
 
 
-@pytest.mark.parametrize("args, why", [
+TB_ROWS = [
     (("--trailer", "Co Authored: x", "150", S150, R05), "key 'Co Authored' is not ASCII letters, digits and '-'"),
     (("--trailer", "Key:value", "150", S150, R05), "no ': ' after the key"),
     (("--trailer", "Key:   ", "150", S150, R05), "empty value"),
     (("--trailer", "Key: a\nb", "150", S150, R05), "holds a CR or LF"),
     (("--trailer", "Key: a\rb", "150", S150, R05), "holds a CR or LF"),
     (("--trailer",), "Usage, from the repo top:"),
-], ids=["key-space", "no-colon-space", "empty-value", "lf", "cr", "no-value"])
+]
+TB_IDS = ["key-space", "no-colon-space", "empty-value", "lf", "cr", "no-value"]
+
+
+def _objects(r):
+    """Relative paths of every file under .git/objects; a walk error raises (item 102 C2)."""
+    top = r / ".git" / "objects"
+
+    def _raise(e):
+        raise e
+    return {os.path.relpath(os.path.join(d, f), top)
+            for d, _, fs in os.walk(top, onerror=_raise) for f in fs}
+
+
+@pytest.mark.parametrize("args, why", TB_ROWS, ids=TB_IDS)
 def test_trailer_refusals_write_nothing(repo, args, why):
-    """T-b: each trailer refusal exits 2 naming the bad part; HEAD and .git/index are unchanged."""
+    """T-b: each trailer refusal exits 2 naming the bad part; HEAD, .git/index and the set of files under
+    .git/objects are unchanged (item 102: a refusal after hash-object/write-tree leaves new loose objects)."""
     before = _state(repo)
+    objs = _objects(repo)
+    assert objs                                          # the root commit has >= 4 objects; empty = unreadable
     code, out, err = _cli(repo, *args)
     assert code == 2, (out, err)
     assert why in err, err
     assert _state(repo) == before
+    assert _objects(repo) == objs
+
+
+@pytest.mark.parametrize("args, why", TB_ROWS, ids=TB_IDS)
+def test_trailer_refusals_make_no_git_call(repo, monkeypatch, capsys, args, why):
+    """Item 102 (RI-010): each trailer refusal is made before any git call. commit_step's `subprocess` is
+    replaced by a recorder that raises GitCalled (not an OSError, so `run` cannot turn it into "no git").
+    The 5 `_trailer_ok` rows are the kill rows for a loop moved after the first git call; `no-value` is a
+    guard row: it is refused in `main` (usage) before `commit` runs, so no order inside `commit` reaches it."""
+    class GitCalled(Exception):
+        pass
+
+    calls = []
+
+    def rec(cmd, **kw):
+        calls.append(list(cmd))
+        raise GitCalled(cmd)
+    monkeypatch.setattr(cs, "subprocess", types.SimpleNamespace(run=rec))
+    try:
+        code = cs.main(list(args))
+    except GitCalled as e:
+        pytest.fail(f"git called before trailer refusal: {e.args[0]}")
+    assert code == 2
+    assert why in capsys.readouterr().err
+    assert calls == []
 
 
 def test_no_trailer_message_is_subject_only(repo):

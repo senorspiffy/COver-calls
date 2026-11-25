@@ -5856,3 +5856,67 @@ def test_check_pipeline_docstring_records_103_no_go():
     assert "documented no-go (item 103)" in doc
     assert "30 of 152 summary lines" in doc and "14 of them correctly quoted" in doc
     assert "See work/103/03-handoff.md" in doc and (REPO / "work/103/03-handoff.md").is_file()
+
+
+# Item 102 (RI-001, RI-010): each ID cutoff that no behavior test pinned on both sides gets one row at FROM and
+# one at FROM-1, with literal IDs, so a shift of the constant by +1 or -1 fails a named row. No value asserts
+# here (test_from_values holds them), so a shift is killed by behavior, not by `== N`. Pinned against shifts
+# only, not against per-site operator mutants (03 Residual a).
+FROM_ROWS = [
+    ("CHECKLIST", "041", "041 (no log line for R1 R2 R3 I1 I2 I3)"),
+    ("CHECKLIST", "040", None),
+    ("LOG_CHECK", "045", "045 (log line for I2 does not match its format (item 045)"),
+    ("LOG_CHECK", "044", None),
+    ("SUITE", "087", f"INCOMPLETE: 087 ({NO_SUITE})"),
+    ("SUITE", "086", None),
+    ("VERDICT", "071", "071 (06 has no readable 'Verdict: PASS' or 'Verdict: FAIL' line (item 071))"),
+    ("VERDICT", "070", None),
+    ("TIMED", "090", True),
+    ("TIMED", "089", None),
+]
+FROM_IDS = [f"{n}-FROM" if i % 2 == 0 else f"{n}-FROM-1" for i, (n, _, _) in enumerate(FROM_ROWS)]
+
+
+@pytest.mark.parametrize("name, item, expect", FROM_ROWS, ids=FROM_IDS)
+def test_from_cutoff_boundary(tmp_path, name, item, expect):
+    """Item 102: FROM rows expect the check's entry (or the TIMED refusal); FROM-1 rows expect none."""
+    root = tmp_path
+    if name == "TIMED":
+        _request(root, item)
+        code, err = _log(root, "I2", item, "1 file changed | tests 5 passed")
+        if expect:
+            assert code == 2 and f'"{TIMED_HINT}"' in err, err
+        else:
+            assert code == 0, err
+        return
+    if name == "CHECKLIST":
+        _item(root, item, ALL, logged=False)
+        (root / "logs" / "implementation").mkdir(parents=True)       # 04 C4: an empty logs dir
+        code, out = _run(root, "check_pipeline.py", "--today", "2026-11-04")
+        inc = _pick(out, "INCOMPLETE:")
+    elif name == "LOG_CHECK":
+        _item(root, item, ALL)
+        with (root / "logs" / "implementation" / "2026-10-31.md").open("a", encoding="utf-8") as fh:
+            fh.write(f"12:00 | I2 | {item} | see 05 | tests 1/1\n")
+        code, out = _run(root, "check_pipeline.py", "--today", "2026-11-05")
+        inc = _pick(out, "INCOMPLETE:")
+    elif name == "SUITE":
+        _suite_item(root, "x\n", item=item)
+        code, inc = _inc(root)
+    else:
+        _item(root, item, ALL, verdict=None)
+        code, out = _run(root, "check_pipeline.py", "--today", "2026-11-18")
+        inc = _pick(out, "INCOMPLETE:")
+    if expect is None:
+        assert inc == "INCOMPLETE: none" and code == 0, inc
+    elif name == "SUITE":
+        assert inc == expect and code == 1
+    else:
+        assert expect in inc and code == 1, inc
+
+
+def test_from_values():
+    """Item 102 (step 4): the 7 ID cutoffs by value, kept apart from the behavior rows above."""
+    cp = _cp()
+    assert (cp.CHECKLIST_FROM, cp.LOG_CHECK_FROM, cp.TESTS_FORMAT_FROM, cp.SUITE_FROM, cp.TIMED_FROM,
+            cp.WHOLE_DIFF_FROM, cp.VERDICT_FROM) == (41, 45, 76, 87, 90, 70, 71)
