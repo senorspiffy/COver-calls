@@ -18,4 +18,4 @@ Status: READY | BLOCKED (<reason>)
 Re-derive every numeric threshold in the map from that step's "How we check it" formula, and run every worked example against the trigger of the rule it shows. Show the arithmetic.
 | Rule | Check formula | Arithmetic | Result |
 |---|---|---|---|
-`python3 scripts/check_handoff.py <ID>` output (pasted, must say PASS):
+`check_handoff output (run by the orchestrator <YYYY-MM-DD> <HH:MM> UTC, exit <n>; must say PASS):`

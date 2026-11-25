@@ -1,0 +1,12 @@
+# 07 Audit task - 087
+Build commits: fd73de1 (I2 round 1: VALUE_START_RE, DOC_MARKER_RE, FLOW_KEYS, `_flow_end`, START/FLOW_OPEN/FLOW_AFTER/TAB_BEFORE/DOC texts, q1-q28, n10/n11, p11 flip) and 7389962 (I2 round 2: q29-q31 mid-text negatives). File: tests/test_agent_tools.py only. I3 result: PASS round 2 (06; round 1 FAIL, finding F1).
+
+What Audit should look at:
+1. The original bug (request.md, A1 shapes): on the merged tree, put each A1 shape (anchor/tag before a quoted or flow value, open flow, document marker) on line 3 of a scratch copy of .claude/agents/r1-researcher.md; the real-tree test must fail with the named 087 error, and pass again once restored (I3 round 1 probes table).
+2. RI-012 (item 059): re-run M39 (`DOC_MARKER_RE.match` → `.search`, must fail q29), M40 (flow start searched anywhere, `s` = that match's start, must fail q31), M41 (DOC terminator `(?:[ \t]|$)` dropped, must fail q30). I3 and I2 both got `1 failed, 91 passed` for each. Also M26 (START searched anywhere) for q21/q22.
+3. N1 (06 round 2): q30 `_fm("name: x", "...x", "---x", TOOLS)` is not valid YAML (PyYAML 6.0.3 ScannerError), although 04 calls it valid. It still kills M41. Decide whether to swap it for the YAML-valid `_fm("name: x", "...x: y", "---x: z", TOOLS)` (also kills M41) in a follow-up. The wider gap: a column-0 line with no `key:` (e.g. `foo`) passes the checker on base and head while YAML fails the whole frontmatter, so `tools:` is lost. This is outside 087's request; open a new item if it matters (053: never a note in 087).
+4. Base check: base 0ad4d62 parser + head fixtures → `25 failed, 67 passed` (I2, I3); 92 tests in the file, base file 59 → +33.
+5. Re-run round 1's mutation table (M25-M38, I3-c) on the merged tree; all should fail at least their named fixtures (06 round 1).
+6. Whole suite: I3 `1 failed, 761 passed, 1 skipped in 85.95s (0:01:25)` at 7389962; the failure is test_repo_pipeline_has_no_skipped_items from `I3 FAIL: 087` only, which this PASS round clears. Skip = exchange_calendars not installed. python3.11 compile ok, python3.10 absent.
+7. Guardrail status for recurring-issues.md on main (item 036): RI-012 GUARDED (087 round 2: DOC and flow classifiers have mid-text negatives q29-q31; M39-M41 each fail one). RI-002 GUARDED, the 087 near miss (anchor/tag before open quote, open flow list) fixed by this item.
+A1 result: PASS (2026-11-22, logs/audit/2026-11-22-087.md)

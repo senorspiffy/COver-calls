@@ -1,0 +1,12 @@
+# 07 Audit task - 094
+Item: 094 (FULL). check_pipeline.py reads origin's fetch refspec (`fetch_coverage`): a single-branch clone gives `OPEN BRANCHES: not checked (SINGLE_TEXT)` with IN PR, RULES BRANCH and ID CLASH not checked and `--next-id` refusing; a failed `git config` read is the 081 error (exit 1), never "none". Builds: round 1 8a6cff2 (6 files), round 2 537ac82 (tests only) on daily-fixes/2026-11-24. I3 round 1 FAIL (m9 survived), round 2 PASS (06 `## Tests re-run (round 2)`).
+
+What A1 should look at:
+1. `fetch_coverage()` in scripts/check_pipeline.py: each of its five return values and the 03 step 1 row it comes from. Exit 1 on the fetch read is taken as "key absent" because the key is a constant (C5 docstring note); confirm no caller builds the key from input.
+2. Callers: `open_branches` returns SINGLE_TEXT or the error string after a successful `git branch` read; `next_id` returns `(None, cov)`; `main` prints `OPEN BRANCHES: not checked (...)` with exit unchanged for SINGLE_TEXT, and exit 1 for the error string (`branches != SINGLE_TEXT` in the exit expression).
+3. Re-run mutations m1-m10 and m9b (06 round 2 lists each with its failing tests; 05 and 06 agree on m8, m9, m9b, m10). m9 (url read failure -> "no origin") survived round 1; it now fails test_fetch_coverage_fakes[S13], [S14] and test_config_failure_end_to_end.
+4. The step 7 sentence added to .claude/agents/a1-auditor.md, .claude/commands/daily-audit.md and .claude/commands/run-item.md (RULE_PATHS: these need the person's OK on merge), right after the UNSHALLOW sentence.
+5. Known gaps written in the docstrings, not fixed: a full refspec never fetched (needs ls-remote), remotes other than origin, and a `^` line of any kind over-reports "not checked" (fails closed, C7).
+6. Expected repo noise: `test_repo_pipeline_has_no_skipped_items` fails while 095/097/098 are in progress. The `INBOX: not checked (2026-11-24.md added in 9419d56; ...)` line comes from main's daily report, not 094, and does not set the exit code (`inbox_bad` is False; 06 round 2).
+7. RI status to copy on main (05 round 2): RI-014 guardrail extended by 094 (single-branch clone and both git config reads pinned; m1-m10, m9b fail), stays OPEN until 079/081/090/094 are merged and M11 and m1 fail on main. RI-009 unchanged (GUARDED). RI-001, RI-002, RI-010 unchanged by this item.
+A1 result: PASS (2026-11-24, logs/audit/2026-11-24-094.md: 873 passed, real single-branch/depth-1 clones refuse --next-id exit 2 with OPEN BRANCHES not checked, m1-m10 and m9b each fail named tests)

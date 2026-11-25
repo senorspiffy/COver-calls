@@ -1,0 +1,14 @@
+# 07 Audit task - 088
+Build commit: d6715d5 (I2: `_anchor_env` reads HEAD once and returns `(env, failed)`; `_rule_seen` head block removed; `or env_failed` exit term; 5 new tests, d1 ls-tree row, census). Files: scripts/check_pipeline.py, tests/test_pipeline_check.py. I3 result: PASS round 1 (06).
+
+What Audit should look at:
+1. The original bug (logs/audit/2026-11-21-084.md finding 1). On the merged tree, put back `if not sha: return False, ""` (M-a): (u) `test_rule_anchor_uncommitted_step_is_strict` and (u-s) `test_suite_gate_uncommitted_05_is_strict` must fail. The unborn-HEAD return moved into `_anchor_env`, so A1's second mutation is now M-b' / M-b'' (06 table); (h) `test_rule_anchor_unborn_head_is_strict` must fail under both.
+2. Re-run M-d, M-e, M-f, M-g, M-h, M-i and the census probe (06 table). Each must fail its named test.
+3. **E1 carried to 089 (05 Deviation 1, I3 accepted).** `"RULE NOT SEEN:"` is NOT in GIT_LINES at d6715d5, because with it (c) `test_non_utf8_shallow_line_no_traceback` reads `RULE NOT SEEN: none` until 089's `_shallow_boundaries` decode change lands. 089's 04 assumes E1 is already in (L10) and says "GIT_LINES unchanged" (L157). Check that 089's build adds E1 and that (a), (b) and (c) pass with it. If 089 does not do this, open a follow-up item. Until then, a bad shallow file can make RULE NOT SEEN read `none` (RI-014 near miss, owned by 089).
+4. Fixture choice in `test_anchor_env_failure_exits_1` (05 Deviation 2): a complete item 150, so exit 1 comes only from `env_failed` (M-f fails; with the plan's `_defective` fixture M-f survived). Confirm that this is acceptable.
+5. Known gap stated in the `_anchor_env` docstring: `--verify -q` exit 1 also covers an unresolvable HEAD ref, not only an unborn one. The output is strict, and UNCOMMITTED STEP's `ls-tree HEAD` then exits 1. Decide whether this needs anything.
+6. Call counts in the module docstring (3 wrapper calls = 6 git processes per full pair, +1 per run, early exits 0/1/2, at most 3 pairs per item; pre-088 4 = 8) against the code, and 083 on HEAD = 2 pairs → 7 wrapper calls (was 8). Request "Done looks like": git calls per pair are stated from code.
+7. Real repo: `RULE NOT SEEN: 083 (...)` is unchanged between before and after (05), and `INCOMPLETE: none` holds at 23:52 UTC (I3).
+8. Re-run the whole suite (I3: `678 passed, 1 skipped in 82.60s (0:01:22)` at d6715d5) and the python3.11 compile (python3.10 absent). Copy the guardrail status into recurring-issues.md on main (item 036): RI-014 stays OPEN, guardrail extended by 088 (failed verify → exit 1); RI-002 GUARDED, unchanged; 084's unknown-anchor near miss is closed by (u), (u-s) and (h).
+9. Scope lock: `incomplete`'s gate logic, the *_FROM constants, `write_log` and the agent/template text are untouched (`git diff d6715d5~1 d6715d5 --stat`: 2 code files).
+A1 result: PASS (2026-11-21, logs/audit/2026-11-21-088.md)
