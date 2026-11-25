@@ -8,3 +8,4 @@ What A1 should look at:
 4. Real output: check_pipeline output with base vs head script was IDENTICAL in 05 and 06 (023, 057 still `complete (RESEARCH ONLY ...)`); confirm on the merged branch.
 5. Suite at 6764567: 1 failed, 985 passed, 1 skipped; the failure is `I3 FAIL: 100, 104` only (item 071). After this 06, 100 should no longer be in I3 FAIL; confirm the repo test goes green once 104 also passes.
 6. RI status to copy on main: RI-012 GUARDED, holds (this item closes the 2026-11-24 near miss `_build_waived` quoted-person `.search`). RI-010 ESCALATED: near miss in r1 (non-mkdtemp `r1b` scratch name), caught by the 097 check before merge, not counted. RI-001 ESCALATED and RI-014 OPEN, unchanged.
+A1 result: PASS (2026-11-25, logs/audit/2026-11-25-100.md)
