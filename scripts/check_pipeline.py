@@ -215,6 +215,11 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   INCOMPLETE entry `<05|06> heading '<heading>' is a build-round heading LOG BATCH does
                   not read; put its runs under '## Test output (round N, pasted)' / '## Tests re-run
                   (round N)' (item 098)`, gated on that file like ROUND_HEADING_FROM.
+                  Item 103 (gap w, RI-010): a broad rule (any SUMMARY_LINE outside a read section
+                  of 05/06 is INCOMPLETE) was measured and is a documented no-go (item 103): in
+                  work/076-098, 30 of 152 summary lines sit outside, 14 of them correctly quoted
+                  (mutants, base-failure, audit evidence), 0 at 092-098; a `#{1,2} round N` wrapper
+                  variant also flags 6 quoted of 9. See work/103/03-handoff.md before proposing it.
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.

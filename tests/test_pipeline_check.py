@@ -5848,3 +5848,11 @@ def test_check_pipeline_docstring_names_094():
     cp = _cp()
     for doc in (cp.__doc__, cp.fetch_coverage.__doc__, cp.open_branches.__doc__, cp.next_id.__doc__):
         assert "(item 094)" in doc
+
+
+def test_check_pipeline_docstring_records_103_no_go():
+    """Item 103: the module docstring records the broad SUMMARY_LINE rule as a measured no-go and points to its 03."""
+    doc = " ".join(_cp().__doc__.split())
+    assert "documented no-go (item 103)" in doc
+    assert "30 of 152 summary lines" in doc and "14 of them correctly quoted" in doc
+    assert "See work/103/03-handoff.md" in doc and (REPO / "work/103/03-handoff.md").is_file()
