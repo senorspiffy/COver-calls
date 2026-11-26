@@ -5,3 +5,4 @@ Audit should look at:
 3. RULES BRANCH: from this branch's own checkout it reads `none` (it only lists `--no-merged HEAD` branches). From origin/main 1d0de33 it reads `origin/daily-fixes/2026-11-25 changes scripts/check_pipeline.py`. 05's reason ("not pushed") is wrong; 04 Tests 5's expectation was wrong. Decide whether 04/05 need a note or whether the plan template should say where RULES BRANCH is seen.
 4. Known gaps kept on purpose (docstrings): date not validated (2026-13-45, Unicode `\d`), `person` case-sensitive (fails safe), only the first Waived line read. `who` in parse_request now has no reader in scripts/ (kept for the 3-tuple; tests L1963 unpacks it).
 5. Guardrail status for recurring-issues.md on main (036): RI-012 GUARDED, unchanged; the 105 near miss (undated person 03/06 waiver accepted) is fixed here.
+A1 result: PASS (2026-11-26, logs/audit/2026-11-26-105.md)
