@@ -250,10 +250,21 @@ def test_repo_pipeline_has_no_skipped_items(tmp_path):
     assert ("LOG BATCH: none (not checked: 083: six lines written in one batch" in out), out   # item 086 (c)
 
 
+def _tracked_bytecode(paths):
+    """Item 107: paths that are bytecode, in a `__pycache__` dir or a sourceless `.pyc` anywhere."""
+    return [p for p in paths if "__pycache__" in p or p.endswith(".pyc")]
+
+
 def test_no_tracked_pycache():
-    """Item 030: compiled files are ignored, never committed."""
+    """Item 030: compiled files are ignored, never committed. Item 107: sourceless .pyc too."""
     files = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True).stdout
-    assert [f for f in files.splitlines() if "__pycache__" in f] == []
+    assert _tracked_bytecode(files.splitlines()) == []
+
+
+def test_tracked_bytecode_helper():
+    """Item 107 m4: a .pyc outside __pycache__ is caught; a .py or a name holding "pyc" is not."""
+    assert _tracked_bytecode(["ccbot/x.pyc", "ccbot/__pycache__/a.cpython-313.pyc", "ccbot/a.py", "docs/pyc.md"]) == [
+        "ccbot/x.pyc", "ccbot/__pycache__/a.cpython-313.pyc"]
 
 
 def test_complete_needs_a1_result(tmp_path):
@@ -5593,6 +5604,25 @@ def test_scratch_sentence_same_in_four_files():
         text = (REPO / f).read_text(encoding="utf-8")
         assert text.count(SCRATCH) == 1, f
         assert text.count(OLD_SCRATCH) == 0, f
+
+
+# Item 107 step 1 (RI-013): the bytecode-guard sentence, once in each of the 4 files, right after SCRATCH.
+BYTECODE = ("Every mutant or probe run (each `python3` or `python3 -m pytest` command on a mutated file) sets both "
+            "`PYTHONDONTWRITEBYTECODE=1` and `PYTHONPYCACHEPREFIX=<pyc dir>` on the command itself, where `<pyc dir>` "
+            "is a new dir made by the same mkdtemp command with prefix `pyc-` inside your scratch dir; child processes "
+            "inherit both, so no `.pyc` in the source tree is read or written. `python3 -B` or a deleted `__pycache__` "
+            "alone is not enough (`-B` stops writing, not reading, an existing `.pyc`), and `-p no:cacheprovider` only "
+            "keeps `.pytest_cache` out; it is not a bytecode guard. If any command ran without "
+            "`PYTHONDONTWRITEBYTECODE=1`, make a new `<pyc dir>`. Paste the output of `PYTHONDONTWRITEBYTECODE=1 "
+            "PYTHONPYCACHEPREFIX=<pyc dir> python3 -c 'import sys; print(sys.dont_write_bytecode, sys.pycache_prefix)'` "
+            "(must be `True <pyc dir>`) above the mutant results in 05, 06 or the audit file (item 107).")
+
+
+def test_bytecode_sentence_same_in_four_files():
+    """Item 107: BYTECODE once in each of SCRATCH_FILES; the constant keeps both variable names."""
+    assert "PYTHONPYCACHEPREFIX" in BYTECODE and "PYTHONDONTWRITEBYTECODE=1" in BYTECODE
+    for f in SCRATCH_FILES:
+        assert (REPO / f).read_text(encoding="utf-8").count(BYTECODE) == 1, f
 
 
 # Item 097 step 2 (RI-009): the end-of-item check names STASH; text pins, each exactly once.

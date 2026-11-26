@@ -279,6 +279,15 @@ def test_shipped_probes_well_formed():
         "tests/test_pipeline_check.py::test_suite_line_dropped_middle_is_incomplete"]
 
 
+def test_child_env_disables_bytecode_writes(monkeypatch):
+    """Item 107 m3: every probe child runs with PYTHONDONTWRITEBYTECODE=1 and no outer PYTEST_ADDOPTS (pure, no git)."""
+    monkeypatch.setenv("PYTEST_ADDOPTS", "x")
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    env = pg._child_env()
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert "PYTEST_ADDOPTS" not in env
+
+
 @NO_GIT
 def test_recorded_failed_count_differs_is_marked(tmp_path, capsys):
     """Item 082 X: the live failed count (1) is not the recorded one (2): `(live differs)`, still HOLDS."""
