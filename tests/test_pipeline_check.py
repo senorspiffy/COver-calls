@@ -142,15 +142,53 @@ def test_waived_steps_are_excused_and_printed(tmp_path):
 
 
 def test_fact_check_and_verification_waivable_only_by_person(tmp_path):
-    """Item 031: run-item says R3 and I3 are never skipped; an agent's waiver of 03 or 06 is SKIPPED."""
+    """Item 031: run-item says R3 and I3 are never skipped; an agent's waiver of 03 or 06 is SKIPPED; item 105:
+    and only in the dated form."""
     _item(tmp_path, "107", ["01-research.md", "02-improvements.md", "04-build-plan.md",
                             "05-build-report.md", "07-audit-task.md"], waived="03 06 (A1, 2026-11-01: test)")
     _item(tmp_path, "108", ALL[:5] + ALL[6:], waived="06 (I3, 2026-11-01: test)")
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-10-31")
     assert code == 1
-    assert "107: SKIPPED (FULL: 03 06 can be waived only by the person; Waived: 03 06 (A1, 2026-11-01: test))" in out
-    assert "108: SKIPPED (FULL: 06 can be waived only by the person;" in out
+    assert ("107: SKIPPED (FULL: 03 06 can be waived only by the person, as (person, <date>: <why>); "
+            "Waived: 03 06 (A1, 2026-11-01: test))") in out
+    assert "108: SKIPPED (FULL: 06 can be waived only by the person, as (person, <date>: <why>);" in out
     assert "SKIPPED: 107, 108" in out
+
+
+PERSON_ONLY_MSG = "can be waived only by the person, as (person, <date>: <why>)"
+SETUP_105 = {"A": ("01", "02", "04", "05"), "B": ("01", "02", "03", "04", "05"),
+             "C": ("01", "02", "04", "05"), "D": ("01", "03", "04", "05")}
+
+
+@pytest.mark.parametrize("setup, row, expected", [
+    ("A", "03 06 (person)", ("SKIPPED", f"FULL: 03 06 {PERSON_ONLY_MSG}; Waived: 03 06 (person)")),
+    ("A", "03 06 (person: x)", ("SKIPPED", f"FULL: 03 06 {PERSON_ONLY_MSG}; Waived: 03 06 (person: x)")),
+    ("A", '03 06 (person: x "(person, 2026-11-19: ok)")',
+     ("SKIPPED", f'FULL: 03 06 {PERSON_ONLY_MSG}; Waived: 03 06 (person: x "(person, 2026-11-19: ok)")')),
+    ("A", "03 06 (person) x (person, 2026-11-13: ok)",
+     ("SKIPPED", f"FULL: 03 06 {PERSON_ONLY_MSG}; Waived: 03 06 (person) x (person, 2026-11-13: ok)")),
+    ("B", "06 (Person, 2026-11-20: x)", ("SKIPPED", f"FULL: 06 {PERSON_ONLY_MSG}; Waived: 06 (Person, 2026-11-20: x)")),
+    ("B", "06 (person: x)", ("SKIPPED", f"FULL: 06 {PERSON_ONLY_MSG}; Waived: 06 (person: x)")),
+    ("C", "03 (person: x)", ("SKIPPED", f"FULL: 03 {PERSON_ONLY_MSG}; Waived: 03 (person: x)")),
+    ("A", "03 06 (person, 2026-11-20: ok)", ("in progress", "FULL: next 07; Waived: 03 06 (person, 2026-11-20: ok)")),
+    ("B", "06 (person, 2026-11-20: ok)", ("in progress", "FULL: next 07; Waived: 06 (person, 2026-11-20: ok)")),
+    ("C", "03 (person, 2026-11-20: ok)", ("in progress", "FULL: next 06; Waived: 03 (person, 2026-11-20: ok)")),
+    ("D", "02 (A1, 2026-11-01: x)", ("in progress", "FULL: next 06; Waived: 02 (A1, 2026-11-01: x)")),
+    ("A", "03 06", ("SKIPPED", f"FULL: 03 06 {PERSON_ONLY_MSG}; Waived: 03 06")),
+    ("A", "03 06 (person: x)\nWaived: 03 06 (person, 2026-11-20: ok)",
+     ("SKIPPED", f"FULL: 03 06 {PERSON_ONLY_MSG}; Waived: 03 06 (person: x)")),
+], ids=[f"R{i}" for i in range(1, 14)])
+def test_person_only_waiver_needs_dated_form(tmp_path, setup, row, expected):
+    """Item 105: classify accepts a 03/06 waiver only in the documented form `(person, YYYY-MM-DD:` anchored at
+    the text after the step numbers (RI-012). Rows R1-R7, R12 and R13 are negatives (in-text, case, one-step and
+    absent forms); R8-R11 are positives, one per setup."""
+    import datetime as dt
+    d = tmp_path / "work" / "998"
+    d.mkdir(parents=True)
+    (d / "request.md").write_text("Scope: FULL\nDate: 2026-11-25\nWaived: " + row + "\n", encoding="utf-8")
+    for s in SETUP_105[setup]:
+        (d / STEP_NAMES[s]).write_text("", encoding="utf-8")
+    assert _cp().classify(d, dt.date(2026, 11, 25)) == expected
 
 
 def test_stuck_after_one_day(tmp_path):
@@ -4637,16 +4675,17 @@ def test_person_waiver_helper_on_item_024():
 
 @pytest.mark.parametrize("waived, skipped, research", [
     ("Waived: 01 02 03 04 (A1, 2026-11-20: test)", True, ()),                                     # N-a
-    ("Waived: 01 02 03 04 (person: test)", False, ()),                                            # N-b
+    ("Waived: 01 02 03 04 (person: test)", True, ()),  # item 105: undated 03 waiver               # N-b
     ('Waived: 01 02 03 04 (I2, 2026-11-20: copied "(person, 2026-11-19: ok)")', True, ()),        # N-c
-    ('Waived: 01 02 03 04 (person: x "(person, 2026-11-19: ok)")', False, ()),                    # N-d
+    ('Waived: 01 02 03 04 (person: x "(person, 2026-11-19: ok)")', True, ()),  # item 105: undated 03 waiver  # N-d
     ("Waived: 01 02 04 (person, 2026-11-20: test)", True, ()),                                    # N-e
     ("Waived: 01 02 03 04 (person, 2026-11-20: test)", False,
      ((BATCH_DAY, "10:10", "R1", "brief written | 1"),)),                                         # N-f
 ], ids=["N-a", "N-b", "N-c", "N-d", "N-e", "N-f"])
 def test_batch_waiver_not_excused_stays_strict(tmp_path, waived, skipped, research):
     """093 N-a to N-f: any other waiver shape keeps the strict 090 entry. N-f keeps 01-research.md (its R1 line
-    at 10:10 is after I2 10:00, so there is still no line before I2)."""
+    at 10:10 is after I2 10:00, so there is still no line before I2). From item 105, an undated 03 waiver (N-b, N-d)
+    is also SKIPPED by classify."""
     drop = ("02", "03", "04") if research else ("01", "02", "03", "04")
     _waived_item(tmp_path, "990", f"Scope: FULL\n{waived}\n", drop=drop, research=research)
     code, out = _run(tmp_path, "check_pipeline.py", "--today", "2026-11-21")

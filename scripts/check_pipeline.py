@@ -15,7 +15,10 @@ FAST counts only as `Scope: FAST (person, YYYY-MM-DD)`: the person asked for it.
 FAST line (no who, or another who) makes the item SKIPPED (item 042).
 A `Waived: <steps> (<who>, <date>: <why>)` line in request.md excuses those steps; it is
 printed every run so it stays visible. 03 (fact check) and 06 (verification) can be waived
-only by the person: <who> must be `person`, otherwise the item is SKIPPED (item 031).
+only by the person, in the documented form: the line's text after the step numbers must start
+with `(person, YYYY-MM-DD:` (items 031, 105); otherwise the item is SKIPPED. This is a format
+check, not proof of who wrote it. `person` is case-sensitive (fails safe); the date is not
+validated; only the first Waived line is read.
 
 Each item is one of:
   SKIPPED      a later required step exists while an earlier one is missing, or another
@@ -549,9 +552,9 @@ WAIVE_BUILD = {"04", "05", "06"}
 WAIVE_BUILD_BY_PERSON = re.compile(r"\(\s*person\s*,\s*\d{4}-\d{2}-\d{2}\s*:")
 # Item 093: request.md's `Waived:` line (group 1 = step numbers, group 2 = the rest; parse_request reads
 # the first one), and the person-with-date prefix written once (from WAIVE_BUILD_BY_PERSON). PERSON_DATED
-# is used only with .match on WAIVED_LINE group 2 (by _person_waived_before_i2 and, from item 100,
-# _build_waived), so a quoted person form later in the text never counts (RI-012); re.match, not
-# prefixmatch (RI-008).
+# is used only through _person_dated (.match on WAIVED_LINE group 2; by _person_waived_before_i2 (093),
+# _build_waived (100) and, from item 105, classify), so a quoted person form later in the text never
+# counts (RI-012); re.match, not prefixmatch (RI-008).
 WAIVED_LINE = re.compile(r"^Waived:\s*([0-9 ,]+)(.*)$", re.M)
 PERSON_DATED = re.compile(r"\s*" + WAIVE_BUILD_BY_PERSON.pattern)
 STEP_FILE = re.compile(r"^work/(\d{3})/(01-research|02-improvements|03-handoff|04-build-plan|"
@@ -623,7 +626,8 @@ def _read(path, missing_ok=False):
 
 
 def parse_request(text):
-    """(scope, date, (waived steps, first Waived: line, who)) from request.md text."""
+    """(scope, date, (waived steps, first Waived: line, who)) from request.md text.
+    who: kept for the tuple shape; no gate reads it since 105."""
     scope = re.search(r"^Scope:\s*(FULL|RESEARCH ONLY|FAST)\b", text, re.M)
     date = re.search(r"^Date:\s*(\d{4}-\d{2}-\d{2})", text, re.M)
     waived = WAIVED_LINE.search(text)
@@ -634,30 +638,40 @@ def parse_request(text):
              who.group(1).strip().lower() if who else "") if waived else ([], "", ""))
 
 
+def _person_dated(text):
+    """Item 105: whether the text's first `Waived:` line is in the person's documented form: its text after
+    the step numbers starts with `(person, YYYY-MM-DD:` (PERSON_DATED.match on WAIVED_LINE group 2,
+    anchored, RI-012; re.match, not prefixmatch, RI-008). It reads only the first `Waived:` line; a later
+    Waived line is never read. This is a format check on the documented form, not proof of who wrote it.
+    Known gaps: `person` is case-sensitive (fails safe); the date is not validated (2026-13-45 matches, and
+    since PERSON_DATED is a str pattern, non-ASCII Unicode digits match \\d). The one check behind classify,
+    _build_waived and _person_waived_before_i2."""
+    m = WAIVED_LINE.search(text)
+    return bool(m and PERSON_DATED.match(m.group(2)))
+
+
 def _build_waived(text):
     """Item 062 and item 100: the item's first `Waived:` line excuses 04 05 06 only when its text after the
-    step numbers starts with `(person, YYYY-MM-DD:` (PERSON_DATED.match, anchored; RI-012), i.e.
+    step numbers starts with `(person, YYYY-MM-DD:` (_person_dated: PERSON_DATED.match, anchored; RI-012), i.e.
     `Waived: 04 05 06 (person, YYYY-MM-DD: <why>)`. A person form quoted later in the text never counts.
     This is a format check on the documented form, not proof of who wrote it. The anchor implies
     who == "person". Known gaps, unchanged: `person` is case-sensitive (fails safe), the date is not
     validated, and only the first Waived line is read."""
     _, _, (steps, _, _) = parse_request(text)
-    m = WAIVED_LINE.search(text)
-    return WAIVE_BUILD <= set(steps) and bool(m and PERSON_DATED.match(m.group(2)))
+    return WAIVE_BUILD <= set(steps) and _person_dated(text)
 
 
 def _person_waived_before_i2(req_text, item_dir):
     """Item 093: the steps before 05 of the item's Scope, when the person waived all of them with a date
     and none of their files exists; else None (the strict "no line before I2" reason stays).
     Reads only the first `Waived:` line (parse_request's rule; a later person-dated line never counts,
-    gap j). Its text after the step numbers must start with `(person, YYYY-MM-DD:` (PERSON_DATED.match,
+    gap j). Its text after the step numbers must start with `(person, YYYY-MM-DD:` (_person_dated,
     anchored; a person form quoted later in the text never counts). `person` is case-sensitive, so
     `(Person, ...)` stays strict (fails safe, same as FAST_BY_PERSON and WAIVE_BUILD_BY_PERSON); the date
     is not validated (2026-13-45 matches, the same known gap as those two patterns). No git."""
     scope, _, (waived, _, _) = parse_request(req_text)
-    m = WAIVED_LINE.search(req_text)
     pre = [s for s in REQUIRED[scope] if s < "05"]
-    if (m and PERSON_DATED.match(m.group(2)) and pre and set(pre) <= set(waived)
+    if (_person_dated(req_text) and pre and set(pre) <= set(waived)
             and not any((item_dir / STEPS[s]).exists() for s in pre)):
         return pre
     return None
@@ -764,13 +778,15 @@ def classify(item_dir, today):
     req_text, why = _read(item_dir / "request.md")
     if why:
         return "UNREADABLE", why
-    scope, opened, (waived, waived_line, who) = parse_request(req_text)
+    scope, opened, (waived, waived_line, _) = parse_request(req_text)
+    dated = _person_dated(req_text)   # item 105: 03/06 only in the documented (person, <date>: form
     extra = f"; {waived_line}" if waived_line else ""
     if scope == "FAST" and not FAST_BY_PERSON.search(req_text):
         return "SKIPPED", f"FAST needs (person, <date>): only the person may shorten the pipeline (item 042){extra}"
-    blocked = [s for s in waived if s in PERSON_ONLY and who != "person"]
+    blocked = [s for s in waived if s in PERSON_ONLY and not dated]
     if blocked:
-        return "SKIPPED", f"{scope}: {' '.join(blocked)} can be waived only by the person{extra}"
+        return "SKIPPED", (f"{scope}: {' '.join(blocked)} can be waived only by the person, "
+                           f"as (person, <date>: <why>){extra}")
     need = [s for s in REQUIRED[scope] if s not in waived]
     have = [s for s in need if (item_dir / STEPS[s]).exists()]
     if not have and not any(f.name != "request.md" for f in item_dir.iterdir()):
