@@ -5,7 +5,7 @@ Paper only, research, not financial advice. Lessons are notes only: no setting i
 
 ## 2026-11-25
 - **Earnings season shuts the screen for the next cycle.** All 3 names failed EARNINGS at once (on 11-11 the next earnings were an estimated ~56 days out). Likely the next call's window would now span earnings, so the bot won't sell into it. This means fewer setups from late Dec to Jan; check the exact rule and dates in the Sunday review. UNCONFIRMED.
-- **F's call won back half its value as the stock recovered.** 13C at 0.12 vs 0.035 on 11-23, so F is now net $0. Strengthens the 11-24 buy-back lesson (seen 2 days).
+- **F's call price rose again as the stock recovered.** 13C at 0.12 vs 0.035 on 11-23, so call P&L fell from +$19.50 to +$11; F is net $0 overall. Strengthens the 11-24 buy-back lesson (seen 2 days).
 
 ## 2026-11-24
 - **A cheap call can come back to life.** F rose 11.65 to 11.95 and its 13C went 0.035 to 0.08 (+129%), giving back $4.50 of earned premium. A buy-back at ~$0.04 on 11-23 would have locked that in. More support for testing a low-price buy-back (V1-style) in the Sunday review. UNCONFIRMED.
