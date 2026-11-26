@@ -14,3 +14,4 @@ Audit should look at:
 5. The stale case depends on Python/pytest behaviour. It reproduces on 3.13.18 with pytest 9.1.1. If a later Python moves imports to hash pycs, control (a) fails loudly with "stale case not reproduced on this Python (item 107)", and it is not skipped. It was not run on 3.11, because python3.11 has no pytest. It only compiles there.
 6. RULES BRANCH reads `none` from the branch's own checkout (05 Deviation 2). This is the same finding as 105/07 point 3.
 7. Guardrail status on main for recurring-issues.md: the RI-013 family. 101/103/085 each caught a stale-pyc false result by hand. The rule text and the deterministic stale test are now in place, so look at whether the A1 watch (Residual 1) needs an RI-013 note.
+A1 result: PASS (2026-11-26, logs/audit/2026-11-26-107.md)
