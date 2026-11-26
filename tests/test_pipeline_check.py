@@ -1,10 +1,12 @@
 """scripts/check_pipeline.py (items 026, 029; RI-007) and check_handoff.py --all (item 028)."""
+import ast
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -552,12 +554,14 @@ def test_malformed_log_line_is_incomplete(tmp_path):
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not on PATH")
 def test_log_line_after_its_commit_is_flagged(tmp_path):
     """045: the 2026-11-04 case. A line timed 23:10 in a commit made at 22:24:41 UTC is LOG TIME;
-    a line in the commit's own minute is fine; items before 045 are not checked."""
+    a line in the commit's own minute is fine; items before 045 are not checked.
+    Item 109: site LOG_CHECK@log_time (late_log_lines) is pinned at FROM (045 listed) and FROM-1 (044 not)."""
     _item(tmp_path, "150", ALL, logged=False)
     log = tmp_path / "logs" / "implementation" / "2026-11-04.md"
     log.parent.mkdir(parents=True)
     log.write_text("22:24 | I1 | 150 | FIT | 1 files planned\n23:10 | I2 | 150 | 1 files changed | tests 1 passed in 0.01s\n"
-                   "23:10 | I2 | 044 | see 05 | tests 182/184\n", encoding="utf-8")
+                   "23:10 | I2 | 044 | see 05 | tests 182/184\n"
+                   "23:10 | I2 | 045 | 1 files changed | tests 1 passed in 0.01s\n", encoding="utf-8")
     research = tmp_path / "logs" / "research" / "2026-11-04.md"
     research.parent.mkdir(parents=True)
     research.write_text("".join(f"22:00 | {a} | 150 | {FIELDS[a]}\n" for a in ("R1", "R2", "R3")), encoding="utf-8")
@@ -572,6 +576,7 @@ def test_log_line_after_its_commit_is_flagged(tmp_path):
     line = [l for l in out.splitlines() if l.startswith("LOG TIME:")][0]
     assert code == 1
     assert "150 I2 (2026-11-04 23:10 after commit 2026-11-04 22:24 UTC)" in line
+    assert "045 I2 (2026-11-04 23:10 after commit 2026-11-04 22:24 UTC)" in line     # item 109: LOG_CHECK@log_time-FROM
     assert "150 I3 (2026-11-05 09:00" in line
     assert "I1" not in line and "044" not in line and "R1" not in line
 
@@ -2791,7 +2796,7 @@ def _defective(root, item, i2="1 files changed | tests 9/9", date="2026-10-31"):
         fh.write("## Test output\n1 passed in 0.01s\n")     # item 090: a time, so LOG BATCH is computable
     log = root / "logs" / "implementation" / f"{date}.md"
     text = log.read_text(encoding="utf-8")
-    old = f"12:00 | I2 | {item} | {FIELDS['I2']}\n"
+    old = f"12:00 | I2 | {item} | {_field('I2', item)}\n"     # item 109: below 076 _item writes I2_BEFORE_FIELD
     assert old in text
     log.write_text(text.replace(old, f"12:00 | I2 | {item} | {i2}\n"), encoding="utf-8")
 
@@ -4519,14 +4524,15 @@ TIMED_RULES = "TESTS_FORMAT_FROM = 76\nVERDICT_FROM = 71\nSUITE_FROM = 87\n"
 TIMED_05 = "x\nSuite: 1 passed\n## Test output\n1 passed in 0.01s\n"   # a time, so LOG BATCH is computable
 
 
-def _timed_repo(tmp_path, rules, commit_05=True):
-    """S13-style: RULE_FILE `rules`, item 990 with every step, 05 TIMED_05 and one untimed I2 line."""
+def _timed_repo(tmp_path, rules, commit_05=True, item="990", i2="1 files changed | tests 1 passed"):
+    """S13-style: RULE_FILE `rules`, item `item` (default 990) with every step, 05 TIMED_05 and one I2 line `i2`
+    (default untimed). Item 109: item/i2 let the rule-gate rows sit at TIMED_FROM (090) and TESTS_FORMAT_FROM (076)."""
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
     _git(repo, "init", "-q", "-b", "main")
     _write(repo, "scripts/check_pipeline.py", rules)
     root = _commit(repo, "root")
-    _suite_item(repo, TIMED_05, i2=("1 files changed | tests 1 passed",), item="990")
+    _suite_item(repo, TIMED_05, i2=(i2,), item=item)
     if commit_05:
         root = _commit(repo, "990 built")
     _, out = _run(repo, "check_pipeline.py", "--untracked-from", root, "--today", SUITE_DAY)
@@ -4552,6 +4558,40 @@ def test_timed_gate(tmp_path):
 
 
 @NO_GIT
+@pytest.mark.parametrize("item, rules, i2, const", [
+    ("090", TIMED_RULES, "1 files changed | tests 1 passed", "TIMED_FROM (090): judged by untimed I2 form"),
+    ("076", "VERDICT_FROM = 71\nSUITE_FROM = 87\nTIMED_FROM = 90\n", "1 files changed | tests 9/9",
+     "TESTS_FORMAT_FROM (076): judged by I2_BEFORE"),
+], ids=["TIMED@incomplete_timed_gate-FROM", "TESTS_FORMAT@incomplete_tests_gate-FROM"])
+def test_rule_gate_cutoff_boundary(tmp_path, item, rules, i2, const):
+    """Item 109 (S7, S8): at the cutoff ID itself the item enters its rule gate (TIMED at 090, TESTS at 076), so an
+    anchor rule file without the constant gives RULE NOT SEEN and no INCOMPLETE entry. Under a `>` mutant of the
+    gate's site the item skips the gate and stays INCOMPLETE."""
+    sha, out = _timed_repo(tmp_path, rules, item=item, i2=i2)
+    assert _pick(out, "RULE NOT SEEN:") == f"RULE NOT SEEN: {item} (05 added in {sha[:7]} without {const}; item 084)", out
+    assert _pick(out, "INCOMPLETE:") == "INCOMPLETE: none", out
+
+
+@NO_GIT
+def test_tests_gate_not_entered_below_cutoff(tmp_path):
+    """Item 109 (S8 FROM-1, id TESTS_FORMAT@incomplete_tests_gate-FROM-1): 075 is below TESTS_FORMAT_FROM, so a bad
+    I2_BEFORE line never enters the TESTS gate and no 05 anchor is read. The anchor has no rule file: the 06 note
+    (VERDICT check) proves that state; a mutant entering the gate at 075 adds the 05 note."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _defective(repo, "075", i2="1 files changed | tests 10/9")
+    sha = _commit(repo, "no rule file")
+    _, out = _run(repo, "check_pipeline.py", "--untracked-from", sha, "--today", "2026-11-02")
+    inc = _pick(out, "INCOMPLETE:")
+    assert inc.startswith("INCOMPLETE: 075 ("), out
+    assert ('log line for I2 does not match its format (item 045): I2 wants '
+            '"<n> files changed | tests <pass>/<total> (pass <= total)"') in inc, out
+    assert f"06 anchor {sha[:7]} has no scripts/check_pipeline.py (item 084)" in inc, out
+    assert "05 anchor" not in inc, out
+
+
+@NO_GIT
 def test_timed_gate_not_seen_keeps_suite_check(tmp_path):
     """090: a RULE NOT SEEN TIMED_FROM item still gets its Suite check against its untimed field."""
     repo = tmp_path / "repo"
@@ -4566,7 +4606,8 @@ def test_timed_gate_not_seen_keeps_suite_check(tmp_path):
     assert _pick(out, "INCOMPLETE:") == f"INCOMPLETE: 990 ({_mismatch('2 passed', '1 passed')})", out
 
 
-@pytest.mark.parametrize("item, strict", [("990", True), ("089", False)])
+@pytest.mark.parametrize("item, strict", [("990", True), ("090", True), ("089", False)],
+                         ids=["990", "TIMED@batch_strict-FROM", "TIMED@batch_strict-FROM-1"])
 def test_batch_not_computable_strict_from_090(tmp_path, item, strict):
     """090 T4 (M4): an 083-shaped timed item with one more line timed 25:00 is not computable; from TIMED_FROM
     that is also INCOMPLETE `LOG BATCH not computable: log line with no valid time (item 090)` (exit 1); on
@@ -4578,7 +4619,7 @@ def test_batch_not_computable_strict_from_090(tmp_path, item, strict):
     assert f"; not computable: {item}: log line with no valid time" in _pick(out, "LOG BATCH:"), out
     inc = _pick(out, "INCOMPLETE:")
     if strict:
-        assert inc == "INCOMPLETE: 990 (LOG BATCH not computable: log line with no valid time (item 090))", out
+        assert inc == f"INCOMPLETE: {item} (LOG BATCH not computable: log line with no valid time (item 090))", out
         assert code == 1, out
     else:
         assert inc == "INCOMPLETE: none" and code == 0, out
@@ -5933,8 +5974,9 @@ def test_check_pipeline_docstring_records_110_no_go():
 
 # Item 102 (RI-001, RI-010): each ID cutoff that no behavior test pinned on both sides gets one row at FROM and
 # one at FROM-1, with literal IDs, so a shift of the constant by +1 or -1 fails a named row. No value asserts
-# here (test_from_values holds them), so a shift is killed by behavior, not by `== N`. Pinned against shifts
-# only, not against per-site operator mutants (03 Residual a).
+# here (test_from_values holds them), so a shift is killed by behavior, not by `== N`. The 7 constants are
+# pinned against shifts here; per-site operator and site-local FROM-1 mutants are pinned by
+# SITE_ROWS / test_from_site_census (item 109).
 FROM_ROWS = [
     ("CHECKLIST", "041", "041 (no log line for R1 R2 R3 I1 I2 I3)"),
     ("CHECKLIST", "040", None),
@@ -5993,3 +6035,119 @@ def test_from_values():
     cp = _cp()
     assert (cp.CHECKLIST_FROM, cp.LOG_CHECK_FROM, cp.TESTS_FORMAT_FROM, cp.SUITE_FROM, cp.TIMED_FROM,
             cp.WHOLE_DIFF_FROM, cp.VERDICT_FROM) == (41, 45, 76, 87, 90, 70, 71)
+
+
+@pytest.mark.parametrize("item, evaluated", [("045", True), ("044", False)],
+                         ids=["LOG_CHECK@log_batch-FROM", "LOG_CHECK@log_batch-FROM-1"])
+def test_batch_log_check_cutoff_boundary(tmp_path, item, evaluated):
+    """Item 109 (S16): batch_log_items checks an 083-shaped item from LOG_CHECK_FROM (045) on and skips 044."""
+    r, i = _six("10:15")
+    _batch_item(tmp_path, item, r, i, "344 passed, 1 skipped in 48.51s", "344 passed, 1 skipped in 47.57s", full=True)
+    res = _bl(tmp_path)
+    if evaluated:
+        assert res["flagged_ids"] == ["045"] and res["checked"] == 1, res
+    else:
+        assert res["flagged_ids"] == [] and res["checked"] == 0, res
+        assert res["not_computable"] == [] and res["in_progress"] == [], res
+
+
+# Item 109 (RI-001, RI-010): every `*_FROM` ID-cutoff comparison site in scripts/check_pipeline.py, with the test
+# that fails under its FROM-side operator mutant (`>=`->`>`, `<`->`<=`) and the one that fails under its
+# site-local FROM-1 mutant (`NAME - 1`). Kill ids are `<file>::<test>` or `<file>::<test>[<param id>]`; a site id
+# is `<CONSTANT minus _FROM>@<check>`. The census below fails when a site is added or removed with no row here.
+_PC = "test_pipeline_check.py"
+_RD = "test_real_data_field.py"
+SITE_ROWS = [
+    ("TESTS_FORMAT@log_fields_ok", "log_fields_ok", "TESTS_FORMAT_FROM",
+     f"{_PC}::test_i2_tests_field_cutoff", f"{_PC}::test_i2_tests_field_cutoff"),
+    ("TIMED@log_fields_ok", "log_fields_ok", "TIMED_FROM",
+     f"{_PC}::test_from_cutoff_boundary[TIMED-FROM]", f"{_PC}::test_from_cutoff_boundary[TIMED-FROM-1]"),
+    ("TESTS_FORMAT@log_hint", "log_hint", "TESTS_FORMAT_FROM",
+     f"{_PC}::test_old_i2_hint_fits_old_format", f"{_PC}::test_old_i2_hint_fits_old_format"),
+    ("TIMED@log_hint", "log_hint", "TIMED_FROM",
+     f"{_PC}::test_from_cutoff_boundary[TIMED-FROM]", f"{_PC}::test_timed_hint_fits_timed_format"),
+    ("CHECKLIST@incomplete", "incomplete", "CHECKLIST_FROM",
+     f"{_PC}::test_from_cutoff_boundary[CHECKLIST-FROM]", f"{_PC}::test_from_cutoff_boundary[CHECKLIST-FROM-1]"),
+    ("LOG_CHECK@incomplete", "incomplete", "LOG_CHECK_FROM",
+     f"{_PC}::test_from_cutoff_boundary[LOG_CHECK-FROM]", f"{_PC}::test_from_cutoff_boundary[LOG_CHECK-FROM-1]"),
+    ("TIMED@incomplete_timed_gate", "incomplete", "TIMED_FROM",
+     f"{_PC}::test_rule_gate_cutoff_boundary[TIMED@incomplete_timed_gate-FROM]",
+     'EQUIVALENT: at 089 "I2" in bad means an I2 line fails LOG_FORMAT, so all(timed=False) is False and the '
+     'gate is never entered'),
+    ("TESTS_FORMAT@incomplete_tests_gate", "incomplete", "TESTS_FORMAT_FROM",
+     f"{_PC}::test_rule_gate_cutoff_boundary[TESTS_FORMAT@incomplete_tests_gate-FROM]",
+     f"{_PC}::test_tests_gate_not_entered_below_cutoff"),
+    ("TIMED@batch_strict", "incomplete", "TIMED_FROM",
+     f"{_PC}::test_batch_not_computable_strict_from_090[TIMED@batch_strict-FROM]",
+     f"{_PC}::test_batch_not_computable_strict_from_090[TIMED@batch_strict-FROM-1]"),
+    ("SUITE@incomplete", "incomplete", "SUITE_FROM",
+     f"{_PC}::test_from_cutoff_boundary[SUITE-FROM]", f"{_PC}::test_from_cutoff_boundary[SUITE-FROM-1]"),
+    ("ROUND_HEADING@incomplete", "incomplete", "ROUND_HEADING_FROM",
+     f"{_PC}::test_stray_round_heading_is_incomplete[P1-at-cutoff-092]",
+     f"{_PC}::test_read_or_unnamed_heading_is_not_stray[N3-below-cutoff]"),
+    ("ROUND_BUILD@incomplete", "incomplete", "ROUND_BUILD_FROM",
+     f"{_PC}::test_round_build_heading_is_incomplete[099-at-cutoff]",
+     f"{_PC}::test_round_build_heading_is_incomplete[098-below-cutoff]"),
+    ("SCRATCH@incomplete", "incomplete", "SCRATCH_FROM",
+     f"{_PC}::test_scratch_dir_cutoff_boundary[FROM]", f"{_PC}::test_scratch_dir_cutoff_boundary[FROM-1]"),
+    ("VERDICT@incomplete", "incomplete", "VERDICT_FROM",
+     f"{_PC}::test_from_cutoff_boundary[VERDICT-FROM]", f"{_PC}::test_from_cutoff_boundary[VERDICT-FROM-1]"),
+    ("LOG_CHECK@log_time", "late_log_lines", "LOG_CHECK_FROM",
+     f"{_PC}::test_log_line_after_its_commit_is_flagged", f"{_PC}::test_log_line_after_its_commit_is_flagged"),
+    ("LOG_CHECK@log_batch", "batch_log_items", "LOG_CHECK_FROM",
+     f"{_PC}::test_batch_log_check_cutoff_boundary[LOG_CHECK@log_batch-FROM]",
+     f"{_PC}::test_batch_log_check_cutoff_boundary[LOG_CHECK@log_batch-FROM-1]"),
+    ("WHOLE_DIFF@real_data_field", "_item_triggers", "WHOLE_DIFF_FROM",
+     f"{_RD}::test_t7b_cutoff_edge_item_070_is_checked", f"{_RD}::test_t7_items_before_cutoff_are_not_checked"),
+]
+
+
+def _from_sites(source):
+    """Item 109: Counter of (owner, NAME) for each `*_FROM` Name (UNTRACKED_FROM excluded) in each ast.Compare.
+    Owner = the top-level function's name, or "<module>" for any other top-level statement. Names come from
+    ast.walk(compare), so `NAME - 1` inside a comparator still counts; the operator is not part of the key."""
+    got = Counter()
+    for node in ast.parse(source).body:
+        owner = node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "<module>"
+        for c in ast.walk(node):
+            if isinstance(c, ast.Compare):
+                names = {n.id for n in ast.walk(c) if isinstance(n, ast.Name) and n.id.endswith("_FROM")}
+                for name in names - {"UNTRACKED_FROM"}:
+                    got[(owner, name)] += 1
+    return got
+
+
+def _site_want():
+    return Counter((f, c) for _, f, c, _, _ in SITE_ROWS)
+
+
+def test_from_site_census():
+    """Item 109: the `*_FROM` comparison sites in scripts/check_pipeline.py are exactly SITE_ROWS, and every kill
+    names a top-level test function in its file; exactly one kill is a documented equivalent mutant (S7 FROM-1)."""
+    assert len(SITE_ROWS) == 17
+    got = _from_sites((REPO / "scripts/check_pipeline.py").read_text(encoding="utf-8"))
+    assert got == _site_want(), (got - _site_want(), _site_want() - got)
+    tests = {}
+    kills = [k for row in SITE_ROWS for k in row[3:]]
+    for kill in kills:
+        if kill.startswith("EQUIVALENT:"):
+            continue
+        file, test = kill.split("::", 1)
+        test = test.split("[", 1)[0]
+        if file not in tests:
+            tree = ast.parse((REPO / "tests" / file).read_text(encoding="utf-8"))
+            tests[file] = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        assert test in tests[file], kill
+    assert [k for k in kills if k.startswith("EQUIVALENT:")] == [SITE_ROWS[6][4]]
+    assert SITE_ROWS[6][0] == "TIMED@incomplete_timed_gate"
+
+
+def test_from_site_census_catches_new_site():
+    """Item 109 (04 C3, C2): an 18th site in a function, or one at module level, shows as exactly one new key;
+    an UNTRACKED_FROM comparison adds none."""
+    src = (REPO / "scripts/check_pipeline.py").read_text(encoding="utf-8")
+    want = _site_want()
+    assert _from_sites(src + "\n\ndef _probe(item):\n    return int(item) >= SUITE_FROM\n") - want == \
+        Counter({("_probe", "SUITE_FROM"): 1})
+    assert _from_sites(src + '\n\nX = int("1") >= SUITE_FROM\n') - want == Counter({("<module>", "SUITE_FROM"): 1})
+    assert _from_sites(src + "\n\ny = z != UNTRACKED_FROM\n") == _from_sites(src)
