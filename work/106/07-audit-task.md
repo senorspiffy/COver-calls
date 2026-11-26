@@ -8,3 +8,4 @@ What Audit should look at:
 4. Docstring "Not checked": D3 (`  a: v` / `  - x`) and 04 Extra research 1 (`  - x` / `  a: v`). Both pass the test, and PyYAML raises on the second (05 er1). Decide whether a follow-up item is needed. On `tools:`, `_field` refuses both.
 5. Re-run a sample of M69-M81 on a scratch worktree of main once merged (GUARDED probe for RI-002's near miss).
 6. The docstring says "measured on PyYAML 6.0.1 and 6.0.4". 05 and 06 measured 6.0.1 (pure) and 6.0.3 (libyaml). 6.0.4 comes from 104/06. Confirm that the wording is acceptable.
+A1 result: PASS (2026-11-26, logs/audit/2026-11-26-106.md)
