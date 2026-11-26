@@ -61,9 +61,29 @@ only. A key whose value is only a comment counts as empty-valued.
 `tools:`/`disallowedTools:` lines are left to `_field`. This says nothing
 about what Claude Code does with such a file. Known fail-closed false
 errors: `tools: # c` followed by a column-0 item (`_field`). Not checked
-(YAML's reading not checked): sibling indentation levels; text after a
-closed quote or flow value on a continuation line; a continuation that
-starts with `- `; plain values starting with `@`, `%` or the grave accent.
+(YAML's reading not checked): text after a closed quote or flow value on a
+continuation line; a continuation that starts with `- ` outside
+`tools:`/`disallowedTools:`; plain values starting with `@`, `%` or the
+grave accent.
+
+Item 106: a tab on a frontmatter line is an error unless it is inside the
+quoted value that starts the value, after the first ` #` (a space, then
+`#`) outside that quote or flow collection, on a block-scalar content line
+or on a comment line; the pure-Python and libyaml PyYAML loaders disagree
+on such tabs (measured on PyYAML 6.0.1 and 6.0.4). A structure line
+indented less than the line before must land on a level still open above
+it (an earlier line's indent, an item's dash column or a node column). In
+a `tools:`/`disallowedTools:` block list, every `- ` item has the first
+item's indent. Inside a `tools:`/`disallowedTools:` field (up to the line
+where `_field` stops), a continuation line is left to `_field`. This says
+nothing about what Claude Code does with such a file. Known fail-closed
+false errors: tabs that YAML 1.2 allows as separation white space
+(`a\tb`, a trailing tab, `|\t# c`, `tools: Read,\tWrite`, a tab
+in a key) and a tab inside a quoted item of a flow collection. Not checked
+(YAML's reading not checked): an indented `- ` item after a scalar-valued
+key at the same indent (`  a: v` / `  - x`); a key after an indented `- `
+item at the item's indent (`  - x` / `  a: v`); on
+`tools:`/`disallowedTools:` `_field` refuses it.
 """
 import re
 
@@ -90,6 +110,11 @@ def _is_item(s):
     return s == "-" or s.startswith("- ")
 
 
+def _ends_field(line):
+    """True if a frontmatter line ends a `tools:`/`disallowedTools:` field (item 106)."""
+    return line[:1] not in ("", " ", "\t") and not _is_item(line.strip())
+
+
 def _field(lines, key):
     """Return (found, entries, error) for `key:` in frontmatter lines.
 
@@ -109,12 +134,13 @@ def _field(lines, key):
     value = lines[i][len(key) + 1:].strip()
     items = []
     gap = False
+    first = None
     for line in lines[i + 1:]:
         s = line.strip()
         if not s or s.startswith("#"):
             gap = True
             continue
-        if line[0] not in " \t" and not _is_item(s):
+        if _ends_field(line):
             break
         if value:
             return False, [], f"unparsed {key}: line '{s}' (item 075)"
@@ -122,6 +148,11 @@ def _field(lines, key):
             return False, [], f"unparsed {key}: line '{s}' (item 075)"
         if gap:
             return False, [], f"blank or comment line inside {key}: list (item 075)"
+        lead = len(line) - len(line.lstrip(" "))
+        if first is None:
+            first = lead
+        elif lead != first:
+            return False, [], f"{key}: list items at different indents (item 106)"
         items.append(s[1:].strip())
     if value:
         if value.startswith("["):
@@ -248,10 +279,12 @@ def _node(line, n, check):
 
 
 def _frontmatter_error(front):
-    """Return the first frontmatter line the test cannot read on its own (items 080, 087, 096, 104)."""
+    """Return the first frontmatter line the test cannot read on its own (items 080, 087, 096, 104, 106)."""
     prev_open = False
     prev = None
     block = None
+    stack = []
+    in_flow = False
     for i, line in enumerate(front):
         n = i + 2
         if DOC_MARKER_RE.match(line):
@@ -259,6 +292,7 @@ def _frontmatter_error(front):
         lead = line[:len(line) - len(line.lstrip(" \t"))]
         if "\t" in lead:
             return f"tab in indentation on frontmatter line {n} (item 080)"
+        keep = cut = 0
         m = VALUE_START_RE.match(line)
         if m:
             s, c = m.start(1), m.group(1)
@@ -272,12 +306,14 @@ def _frontmatter_error(front):
                     return f"unclosed quoted value on frontmatter line {n} (item 080)"
                 if not AFTER_CLOSE_RE.fullmatch(line[end:]):
                     return f"text after closing quote on frontmatter line {n} (item 080)"
+                keep, cut = s, end
             elif c in "[{" and not line.startswith(FLOW_KEYS):
                 end = _flow_end(line, s)
                 if end is None:
                     return FLOW_OPEN.format(n)
                 if not AFTER_CLOSE_RE.fullmatch(line[end:]):
                     return FLOW_AFTER.format(n)
+                keep = cut = end
         if line[:1] not in ("", " ", "\t", "#") and not line.startswith(FLOW_KEYS):
             if _is_item(line):
                 if not prev_open:
@@ -290,14 +326,29 @@ def _frontmatter_error(front):
                 continue
             block = None
         if t and not t.startswith("#"):
+            if "\t" in line[:keep] + line[cut:].split(" #", 1)[0]:
+                return TAB_PLAIN.format(n)
+            if line.startswith(FLOW_KEYS):
+                in_flow = True
+            elif _ends_field(line):
+                in_flow = False
             ind = len(line) - len(line.lstrip(" "))
             if prev and not prev[1] and ind > prev[0]:
-                if _plain_colon(t):
+                if not in_flow and _plain_colon(t):
                     return VALUE.format(n)
             else:
                 error, col, op, sb = _node(line, n, not line.startswith(FLOW_KEYS))
                 if error:
                     return error
+                popped = False
+                while stack and stack[-1] > ind:
+                    stack.pop()
+                    popped = True
+                if popped and (not stack or stack[-1] != ind):
+                    return INDENT.format(n)
+                if stack and stack[-1] == ind:
+                    stack.pop()
+                stack.extend(sorted({ind, col} | {ind + j for j, ch in enumerate(line[ind:col]) if ch == "-"}))
                 prev = (col, op)
                 if sb:
                     block = col
@@ -379,6 +430,8 @@ NO_KEY = "no key on frontmatter line {} (item 096)"
 VALUE = "colon in unquoted value on frontmatter line {} (item 104; quote the value)"
 KEY_LONG = "key longer than 1024 characters on frontmatter line {} (item 104)"
 BLOCK = "unreadable block scalar header on frontmatter line {} (item 104)"
+TAB_PLAIN = "tab outside quotes and comments on frontmatter line {} (item 106)"
+INDENT = "indent matches no open level on frontmatter line {} (item 106)"
 TOOLS = "tools: Read, Write"
 
 CASES = {
@@ -564,6 +617,42 @@ CASES = {
     "v24_gt_inside_value": (_fm("description: a > b", TOOLS), {"Read", "Write"}, None),
     "v25_bar_inside_value": (_fm("description: a | b", TOOLS), {"Read", "Write"}, None),
     "v26_dash_key_continuation": (_fm("-a: b", " c: d", TOOLS), None, VALUE.format(3)),
+    "w1_tab_before_hash_colon": (_fm("description: a\t# see: b", TOOLS), None, TAB_PLAIN.format(2)),
+    "w2_tab_before_hash": (_fm("description: a\t# c", TOOLS), None, TAB_PLAIN.format(2)),
+    "w3_tab_in_plain": (_fm("description: a\tb", TOOLS), None, TAB_PLAIN.format(2)),
+    "w4_tab_in_continuation": (_fm("description: x", "  more\t# c", TOOLS), None, TAB_PLAIN.format(3)),
+    "w5_tab_in_item": (_fm("hooks:", "  - a\t# c", TOOLS), None, TAB_PLAIN.format(3)),
+    "w6_tab_in_block_header": (_fm("description: |\t# c", "  a", TOOLS), None, TAB_PLAIN.format(2)),
+    "w7_tab_in_quote": (_fm('description: "a\t# b"', TOOLS), {"Read", "Write"}, None),
+    "w8_tab_in_comment": (_fm("description: a # x\ty", TOOLS), {"Read", "Write"}, None),
+    "w9_tab_after_bare_hash": (_fm("description: a#\tb", TOOLS), None, TAB_PLAIN.format(2)),
+    "w10_tab_in_empty_key": (_fm("a\tb:", "  c: d", TOOLS), None, TAB_PLAIN.format(2)),
+    "w11_tab_in_block_content": (_fm("description: |", "  a\tb", TOOLS), {"Read", "Write"}, None),
+    "w12_tab_in_comment_line": (_fm("# a\tb", TOOLS), {"Read", "Write"}, None),
+    "w13_tab_in_flow_after_quoted_hash": (_fm('description: ["a #", b\tc]', TOOLS), None,
+                                          TAB_PLAIN.format(2)),
+    "tb1_tools_comma_tab": (_fm("tools: Read,\tWrite"), None, TAB_PLAIN.format(2)),
+    "tb2_tools_trailing_tab": (_fm("tools:\t", "  - Read"), None, TAB_PLAIN.format(2)),
+    "tb3_tools_flow_tab": (_fm("tools: [Read,\tWrite]"), None, TAB_PLAIN.format(2)),
+    "s1_map_dedent_between": (_fm("hooks:", "    a: b", "  c: d", TOOLS), None, INDENT.format(4)),
+    "s2_tools_list_dedent": (_fm("tools:", "    - Read", "  - Write"), None, INDENT.format(4)),
+    "s3_compact_map_in_list": (_fm("hooks:", "  - a: b", "    c: d", "  - e: f", TOOLS),
+                               {"Read", "Write"}, None),
+    "s4_dedent_off_level": (_fm("hooks:", "  - a: b", " c: d", TOOLS), None, INDENT.format(4)),
+    "s5_indented_first_line": (_fm("  name: x", TOOLS), None, INDENT.format(3)),
+    "s6_list_at_key_indent": (_fm("hooks:", "  a:", "  - x", "  b: c", TOOLS), {"Read", "Write"}, None),
+    "s7_nested_dash_levels": (_fm("hooks:", "  - - a", "    - b", TOOLS), {"Read", "Write"}, None),
+    "c1_tools_continuation_key": (_fm("tools: Read, Write", "  Bash: x"), None,
+                                  "unparsed tools: line 'Bash: x' (item 075)"),
+    "c2_tools_item_continuation_key": (_fm("tools:", "  - Read", "      Bash: x"), None,
+                                       "unparsed tools: line 'Bash: x' (item 075)"),
+    "c3_disallowed_continuation_key": (_fm("tools: Read, Bash", "disallowedTools: Bash", "  Read: x"),
+                                       None, "unparsed disallowedTools: line 'Read: x' (item 075)"),
+    "c4_flag_cleared_by_key": (_fm("tools: Read, Write", "name: x", "  foo: bar"), None, VALUE.format(4)),
+    "c5_tools_col0_item_continuation": (_fm("tools:", "- Read", "      Bash: x"), None,
+                                        "unparsed tools: line 'Bash: x' (item 075)"),
+    "f1_tools_item_indents": (_fm("tools:", "  - Read", "      - Bash"), None,
+                              "tools: list items at different indents (item 106)"),
 }
 
 
