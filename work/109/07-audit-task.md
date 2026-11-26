@@ -5,3 +5,4 @@ Audit should look at:
 3. Residual gap in the census: kill strings are checked by test function name only; the `[<param id>]` part is not checked, so a misspelled param id (or a param row later renamed) passes test_from_site_census. A possible follow-up: collect param ids too (e.g. `pytest --collect-only -q` or the parametrize `ids=` in the ast).
 4. S7(b) is kept as EQUIVALENT (at 089, `log_fields_ok` ignores `timed`). If TIMED_FROM or log_fields_ok ever changes, that equivalence must be re-traced; nothing pins it except the EQUIVALENT text.
 5. Rebase note from 04 (step 9): a later `*_FROM` comparison in scripts/check_pipeline.py fails test_from_site_census by design. 107 (a522c5d, 5cb48a9, built after 109) does not change scripts/check_pipeline.py (`git diff --stat a5b8edd HEAD -- scripts/check_pipeline.py` is empty), so the census still holds there; recheck after any later merge.
+A1 result: PASS (2026-11-26, logs/audit/2026-11-26-109.md)
