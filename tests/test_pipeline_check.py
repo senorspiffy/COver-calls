@@ -6000,6 +6000,46 @@ def test_check_pipeline_docstring_records_110_no_go():
     src = (REPO / "scripts/check_pipeline.py").read_text(encoding="utf-8")
     assert "measured to change nothing (item 110)" in src
     assert '"deselected" left out on purpose: a full-suite run has none.' not in src
+    assert "re-run the fenced script in work/110/01-research.md" in doc           # item 113: D-110
+    assert "don't copy these (item 113)" in doc
+    assert (REPO / "work/110/01-research.md").is_file()
+
+
+# Item 113 (RI-010): RULES BRANCH reads `--no-merged HEAD`, so on a branch's own checkout it normally says none.
+# The template line T-RB (03 Implementation map, word for word) and the docstring sentence D-RB are pinned here.
+RB_TEMPLATE_LINE = (
+    '`RULES BRANCH:` lists only remote branches not merged into HEAD (`git branch -r --no-merged '
+    "HEAD`), so on this branch's own checkout it normally reads `none` and does not name this "
+    "branch's or its base branch's rule change; if it does name this branch, the remote has commits "
+    'this checkout lacks (fetch and compare). To see the rule files this branch and its unmerged '
+    'base change, run `git diff --stat origin/main...HEAD -- .claude templates '
+    'scripts/check_pipeline.py scripts/check_handoff.py`; never switch this checkout to origin/main '
+    '(item 113).'
+)
+
+
+@pytest.mark.parametrize("f", ["templates/build-plan.md", "templates/build-report.md"])
+def test_rules_branch_template_line(f):
+    """T-RB once per template, never read as a stray round heading, a Suite: line or a Scratch dir: line."""
+    assert (REPO / f).read_text(encoding="utf-8").splitlines().count(RB_TEMPLATE_LINE) == 1, f
+    assert _cp().STRAY_RUN_HEADING.match(RB_TEMPLATE_LINE) is None
+    assert not RB_TEMPLATE_LINE.startswith(("Suite:", "Scratch dir:"))
+
+
+def test_rules_branch_docstring_names_no_merged():
+    """D-RB: the module docstring says which branches RULES BRANCH reads and why it normally reads none."""
+    doc = " ".join(_cp().__doc__.split())
+    assert ("so from a branch's own checkout that branch and its merged base are not listed and the line "
+            "normally reads none (item 113)") in doc
+    assert "(`git branch -r --no-merged HEAD`)" in doc
+
+
+def test_parse_request_docstring_defers_who_removal():
+    """Item 113 step 2-alt: step 0 found origin/main unpacking parse_request's inner value into 3 targets, so
+    `who` stays and the docstring says why."""
+    doc = " ".join(_cp().parse_request.__doc__.split())
+    assert "removal deferred (item 113" in doc
+    assert "test_inbox_quoted_scope_and_waiver_are_not_read" in doc
 
 
 # Item 102 (RI-001, RI-010): each ID cutoff that no behavior test pinned on both sides gets one row at FROM and

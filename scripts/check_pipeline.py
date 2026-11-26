@@ -229,9 +229,15 @@ From LOG_CHECK_FROM on, a log line not in its format is INCOMPLETE, and
                   mutants), 0 at 092 and later; (b) `N deselected` runs: 34 files would gain values, 0 per-file
                   maxes and 0 LOG BATCH results change over 59 checked items. If (b) is ever built, add
                   deselected to SUMMARY_LINE only, never to _STATS (the I2 field refuses it).
+                  These figures are as of 4404a28 and go stale as work/ grows; for current numbers re-run the
+                  fenced script in work/110/01-research.md from the repo root (drop the
+                  `cd /home/claude/cover-calls &&` on its first line), don't copy these (item 113).
   RULES BRANCH    an open branch that changes the rules (.claude/, templates/,
                   scripts/check_pipeline.py, scripts/check_handoff.py): build new items on top
                   of it, so its rules apply to them (item 049, RI-010). Listed, not an error.
+                  Only remote branches not merged into HEAD are read (`git branch -r --no-merged HEAD`), so
+                  from a branch's own checkout that branch and its merged base are not listed and the line
+                  normally reads none (item 113).
   ORPHAN LOG      a log line whose item has no work/<ID>/ folder (exit 1; item 047). --log
                   refuses an ID without work/<ID>/request.md (exit 2), so a typo'd ID is caught
                   when it is written.
@@ -627,7 +633,9 @@ def _read(path, missing_ok=False):
 
 def parse_request(text):
     """(scope, date, (waived steps, first Waived: line, who)) from request.md text.
-    who: kept for the tuple shape; no gate reads it since 105."""
+    who: kept for the tuple shape; no gate reads it since 105.
+    tests/test_pipeline_check.py::test_inbox_quoted_scope_and_waiver_are_not_read unpacks it;
+    removal deferred (item 113: origin/main unpacks 3)."""
     scope = re.search(r"^Scope:\s*(FULL|RESEARCH ONLY|FAST)\b", text, re.M)
     date = re.search(r"^Date:\s*(\d{4}-\d{2}-\d{2})", text, re.M)
     waived = WAIVED_LINE.search(text)
