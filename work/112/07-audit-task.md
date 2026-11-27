@@ -9,3 +9,4 @@ What A1 should look at:
 5. Child collection cost: about 2 s per suite run (`test_from_site_census_kill_ids` 1.82-1.96 s in 06); confirm on main and that `timeout=300` and the stripped env (`PYTEST_ADDOPTS`, `PYTHONSAFEPATH`, `PYTEST_PLUGINS`, autoload off, bytecode variables kept) hold.
 6. Suite at a1f04b6: `1 failed, 1101 passed, 1 skipped`; the failure is `I3 FAIL: 112` only (item 071). After this 06 PASS, confirm the repo test is green.
 7. RI status to copy on main: RI-001 ESCALATED, near miss in r1 (K7 expectation never computed before FIT), caught by I2/I3 before merge, not counted. RI-014 OPEN, unchanged. RI-002 GUARDED, holds (guard fails closed on 0 occurrences). RI-012, RI-015 GUARDED, hold.
+A1 result: PASS (2026-11-27, logs/audit/2026-11-27-112.md; full suite at f99822b 1102 passed, 1 skipped; K7 4 failed at :6335 guard only; K2/K3/K5 and A1-A4 killed)
