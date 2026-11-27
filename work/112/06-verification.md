@@ -1,8 +1,9 @@
 # 06 Verification - 112
-Verdict: FAIL (round 1; earlier rounds: none)
-Sent back to: I1
+Verdict: PASS (round 2; earlier rounds: FAIL r1)
+Sent back to: none
 <!-- On every round, FAIL too, update these two lines first. Verdict: its first word is PASS or FAIL (bold allowed), then the latest round. Sent back to: I1, I2 or I1 I2 on FAIL, none on PASS. check_pipeline.py reads the first Verdict and Sent back line outside code fences (item 071). -->
 Scratch dir: /tmp/claude-0/-home-claude/ae55004c-f800-58fc-9343-38198636732b/scratchpad/i3-112-r1-5ja97792
+Scratch dir: /tmp/claude-0/-home-claude/ae55004c-f800-58fc-9343-38198636732b/scratchpad/i3-112-r2-8f3dlg2j
 
 Verified commit: dbefc18 (I2 commit of 112, base 7b11624). HEAD at check time is 917f522, a merge of origin/main that adds logs only (`git diff --stat dbefc18 917f522`: logs/audit/2026-11-26.md, logs/efficiency/2026-11-26.md). `git diff --stat 7b11624 917f522 -- . ':!work' ':!logs'`: tests/test_pipeline_check.py only (163 insertions, 3 deletions). All my runs were in 10 detached worktrees of 917f522 (`git worktree add --detach`) inside my scratch dir: `wt-base` (unmutated two-file run), `wt-K1` ... `wt-K8` (one mutant each, applied by my own `tools/mutate.py`), and `wt-full` (full suite). Each had its own pyc dir made with the same mkdtemp command (prefix `pyc-`), listed with the guard output below. All 10 worktrees were removed afterwards (`git worktree list | grep -c i3-112` printed `0`). I ran no `git stash`, and nothing was edited in /home/claude/fix apart from this file and the commit.
 
@@ -112,3 +113,73 @@ For I1 (r2 of 04):
 1. P1: restate K7's expected result (and 03 step 7's "0 failures, any other result sends back") so it matches what the plan's own `count == 1` guard must do under K7, or change the Layer 2 design (05 Deviation 1 options (a)-(c)); say whether SITE_ROWS[6][4]'s EQUIVALENT text needs to name the guard. Measured: `4 failed, 604 passed`, all at the count guard; 0 behaviour tests fail.
 2. P2: change the SITE_ROWS[6][4] Layer 1 pin in the plan to `test_timed_flag_ignored_below_timed_from[089-U]` (I2's built text, which I confirm resolves and is checked by K5), and K4's Layer 1 names to `076-U`/`089-U`.
 Nothing for I2: the build matches 04 apart from these two plan defects; if I1's r2 keeps option (a) and `[089-U]`, the code needs no change.
+
+## Tests re-run (round 2)
+Round 2 verifies HEAD a1f04b6 (I2 r2 commit; 04 Round 2 at c9c8fd4). `git diff --stat dbefc18 a1f04b6 -- . ':!work' ':!logs' | wc -l` printed `0`: the code is the round 1 build audited above. My new dir `i3-112-r2-8f3dlg2j` (mkdtemp, prefix `i3-112-r2-`) holds 5 detached worktrees of a1f04b6 (`git worktree add --detach`): `wt-base` (two-file run, unmutated), `wt-full` (full suite), `wt-K4`, `wt-K5`, `wt-K7` (one mutant each, applied with `sed` in that worktree only), each with its own pyc dir from the same mkdtemp command (prefix `pyc-`). All 5 worktrees removed afterwards (`git worktree list | grep -c i3-112` printed `0`). No `git stash`; nothing edited in /home/claude/fix apart from this file, 07 and the log line.
+
+I1 audit, round 2: 04 Round 2 answers both round 1 problems. P1: option (a), K7 restated as exactly the 4 `test_s7_from1_same_output` ids failing at the `count == 1` guard, 0 behaviour tests failing, with an explicit send-back rule; (b) and (c) are dropped with reasons that hold (fail-open double shift; hidden guard). The overriding of 03 step 7's "0 failures" is stated and sourced (R2 research 1, arxiv 2408.01760 definition of an equivalent mutant: the guard reads source text, not behaviour). P2: pin `[089-U]`, K4 Layer 1 names `076-U`/`089-U`. No unsourced addition; no code planned. EQUIVALENT text left unchanged with three reasons; accepted.
+
+I2 audit, round 2: built SITE_ROWS[6][4] (tests/test_pipeline_check.py L6146-L6151) equals R2-2's text with `_PC = "test_pipeline_check.py"` (L6131). `L1_IDS` (L6303) gives `<item>-<shape>` + `090-untimed`. 05 round 2 states no code change and matches the diff (0 lines). 05's round 2 K7 (`5 failed, 603 passed`, the 5th being item 071) matches mine below.
+
+`python3 scripts/check_handoff.py 112` (in /home/claude/fix, exit 0):
+```
+sources count (unique URLs in 01-research.md): 10
+fact-check rows: 78
+totals line: 78 rows -> 69 as-is, 6 fixed, 3 removed
+PASS
+```
+Bytecode guard (first line of each output file, item 107):
+```
+base True /tmp/claude-0/-home-claude/ae55004c-f800-58fc-9343-38198636732b/scratchpad/i3-112-r2-8f3dlg2j/pyc-n13gknxa
+full True /tmp/claude-0/-home-claude/ae55004c-f800-58fc-9343-38198636732b/scratchpad/i3-112-r2-8f3dlg2j/pyc-7wxvch9f
+K4   True /tmp/claude-0/-home-claude/ae55004c-f800-58fc-9343-38198636732b/scratchpad/i3-112-r2-8f3dlg2j/pyc-1d143f28
+K5   True /tmp/claude-0/-home-claude/ae55004c-f800-58fc-9343-38198636732b/scratchpad/i3-112-r2-8f3dlg2j/pyc-vjqcsba7
+K7   True /tmp/claude-0/-home-claude/ae55004c-f800-58fc-9343-38198636732b/scratchpad/i3-112-r2-8f3dlg2j/pyc-0nf3rtbr
+```
+Two-file command in every worktree: `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=<pyc> python3 -B -m pytest -q -p no:cacheprovider -rs --durations=0 tests/test_pipeline_check.py tests/test_real_data_field.py`.
+
+Two-file run, unmutated (`wt-base`): no SKIPPED line, so the 4 Layer 2 rows ran.
+```
+1.96s call     tests/test_pipeline_check.py::test_from_site_census_kill_ids
+0.84s call     tests/test_pipeline_check.py::test_s7_from1_same_output[090-control]
+0.81s call     tests/test_pipeline_check.py::test_s7_from1_same_output[089-malformed]
+0.80s call     tests/test_pipeline_check.py::test_s7_from1_same_output[089-identity]
+0.78s call     tests/test_pipeline_check.py::test_s7_from1_same_output[089-untimed]
+1 failed, 607 passed in 176.23s (0:02:56)
+```
+608 ids, as in round 1. The one failure is `test_repo_pipeline_has_no_skipped_items` (:239); its only non-`none` line is `I3 FAIL: 112` (out-base.txt L155; `INCOMPLETE: none`, `SKIPPED: none`): the committed round 1 FAIL of this 06 (item 071), not a build defect.
+
+Full suite (`wt-full`, `PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX=<pyc> python3 -m pytest -q -rs`):
+```
+SKIPPED [1] tests/test_calendar.py:110: could not import 'exchange_calendars': No module named 'exchange_calendars'
+1 failed, 1101 passed, 1 skipped in 269.04s (0:04:29)
+```
+Matches 05 round 2 (`1 failed, 1101 passed, 1 skipped`); the failure is the same item-071 test (`I3 FAIL: 112`, out-full.txt L162). `test_every_py_compiles_on_oldest_python` did not skip (python3.11 on PATH, python3.10 not) and passed.
+
+Mutants (each = round 1's result plus the item-071 failure, which every run at a1f04b6 has):
+
+| Mutant | Change (sed, own worktree) | Summary line | Failing ids (failure headers) | 04 R2 expects | Result |
+|---|---|---|---|---|---|
+| K7 | scripts/check_pipeline.py L1097 `>= TIMED_FROM \` → `>= TIMED_FROM - 1 \` | `5 failed, 603 passed in 176.70s` | test_s7_from1_same_output[089-untimed], [089-malformed], [090-control], [089-identity], each at tests/test_pipeline_check.py:6335 (`assert src.count(S7_SITE) == 1`); plus test_repo_pipeline_has_no_skipped_items at :239 (`I3 FAIL: 112`, out-K7.txt L155) | exactly the 4 Layer 2 ids at the guard, 0 behaviour tests | as R2-1 (none of its 3 send-back conditions occurs; the 5th is item 071) |
+| K5 | L6307 Layer 1 test renamed `_x`, pin left | `2 failed, 606 passed in 176.86s` | test_from_site_census_kill_ids (:6297, `Left contains one more item: 'test_pipeline_check.py::test_timed_flag_ignored_below_timed_from[089-U]'`); plus item 071 | kill_ids names `[089-U]` | as R2 check 4 |
+| K4 | L856 `and int(item) >= TIMED_FROM` removed in `log_fields_ok` | `14 failed, 594 passed in 176.75s` | the same 12 ids as round 1 (incl. test_timed_flag_ignored_below_timed_from[076-U], [089-U], test_s7_from1_same_output[089-untimed]); plus item 071 | 3 named ids in the failing set | as R2-2 |
+
+K1-K3, K6, K8: code unchanged since round 1, results in the round 1 table stand (R2 check 5).
+
+Real-data effect, round 2: not required (no code change since dbefc18; tests/test_pipeline_check.py is not in TRIGGER / TRIGGER_DIRS).
+
+Recurring issues checked (round 2): RI-001, RI-014 (open/ESCALATED); also RI-002, RI-009, RI-012, RI-015.
+- RI-001 (ESCALATED): the round 1 defect was an uncomputed expectation (K7). The restated K7 is now measured three times (05 r1, 06 r1, 05 r2) and again here at a1f04b6; every count in 04 R2 re-measured (608 ids, 4 guard failures at :6335, K4/K5 ids). Near miss, caught before merge, not counted.
+- RI-014 (OPEN): no git-depth path; nothing in scripts/ changed.
+- RI-002: K7 shows the 0-occurrence guard fails closed on all 4 rows.
+- RI-009: own scratch dir and worktrees, removed; no `git stash`.
+- RI-012: anchored fullmatch for pins, exact id membership (unchanged, K5 named the exact id).
+- RI-015: every run had `PYTHONDONTWRITEBYTECODE=1` and its own pyc dir (guard lines above).
+
+## Pipeline line (round 2)
+check_pipeline line: `112: awaiting A1 (FULL)`
+
+Run in /home/claude/fix (HEAD a1f04b6) after this 06, 07 and the `--log` line `00:51 | I3 | 112 | PASS | sent to audit: yes` were written; exit 0 (`I3 FAIL: none`, `INCOMPLETE: none`, `SKIPPED: none`, `UNCOMMITTED STEP: none`).
+
+## Sent back / sent to Audit (round 2)
+PASS. Sent back to: none. Sent to Audit: yes, `work/112/07-audit-task.md`.
