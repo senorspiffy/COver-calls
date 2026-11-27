@@ -1,0 +1,11 @@
+# 07 Audit task - 113
+Audit should look at:
+1. **C1 defect (I1's plan, 04 Changes C1).** It counts a ref's 3-target hit as a "new caller" when its path plus line text is not in HEAD's set. A ref that is only *behind* HEAD keeps the old text of a site this branch already changed, so it is counted anyway.
+   - I3 evidence: merge-base(origin/main, HEAD) = 94a20a5 already holds L760 `(waived, waived_line, who)`, and `git diff --stat 94a20a5 origin/main` lists only logs/audit and logs/efficiency. So the real k was 0, and step 2 (remove `who`) was safe.
+   - I2 took the conservative 2-alt, as 04 allows, and request.md's Done accepts "kept with a comment". So no send-back.
+   - Decide whether to open a follow-up that removes `who` (once 8529267 is on main, the same rule gives k = 0) and whether to fix C1-style checks to compare against the merge base (only hits the ref *added* since merge-base count). The 2-alt docstring "removal deferred (item 113: origin/main unpacks 3)" is literally true but describes a stale copy, not a new reader.
+2. **Rule text for the person (RULE_PATHS).** T-RB in both templates, D-RB, D-110 and the 2-alt parse_request docstring. The PR body needs the "Rule text for your review (item 113)" section word for word, with step 0's result: n = 2 (origin/claude/project-thread-f64g3k, origin/main), k = 1 under C1, 0c exit 0.
+3. **Optional (03 step 5).** After the branch is pushed, from a scratch worktree of origin/main (never an in-repo checkout), RULES BRANCH should name origin/daily-fixes/2026-11-26 with templates/build-plan.md, templates/build-report.md and scripts/check_pipeline.py. I3 could not check this: the branch is not pushed.
+4. **Pins and mutants.** In 06, M-a1, M-3, M-4 and M-2alt are each killed by exactly one test. The full suite at 8529267 gives 1073 passed, 1 skipped. Base and head `check_pipeline.py` output is identical (exit 0/0).
+5. **Main checkout state.** While I3 ran, the main checkout held another item's uncommitted edit to tests/test_pipeline_check.py (item 112 SITE_ROWS). Make sure it is committed under 112, not mixed into 113.
+A1 result: PASS (2026-11-27, logs/audit/2026-11-27-113.md)

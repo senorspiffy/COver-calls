@@ -70,8 +70,8 @@ Item 106: a tab on a frontmatter line is an error unless it is inside the
 quoted value that starts the value, after the first ` #` (a space, then
 `#`) outside that quote or flow collection, on a block-scalar content line
 or on a comment line; the pure-Python and libyaml PyYAML loaders disagree
-on such tabs (measured on PyYAML 6.0.1 and 6.0.4). A structure line
-indented less than the line before must land on a level still open above
+on such tabs (measured on PyYAML 6.0.1, 6.0.3 and 6.0.4). A structure
+line indented less than the line before must land on a level still open above
 it (an earlier line's indent, an item's dash column or a node column). In
 a `tools:`/`disallowedTools:` block list, every `- ` item has the first
 item's indent. Inside a `tools:`/`disallowedTools:` field (up to the line
@@ -79,11 +79,24 @@ where `_field` stops), a continuation line is left to `_field`. This says
 nothing about what Claude Code does with such a file. Known fail-closed
 false errors: tabs that YAML 1.2 allows as separation white space
 (`a\tb`, a trailing tab, `|\t# c`, `tools: Read,\tWrite`, a tab
-in a key) and a tab inside a quoted item of a flow collection. Not checked
-(YAML's reading not checked): an indented `- ` item after a scalar-valued
-key at the same indent (`  a: v` / `  - x`); a key after an indented `- `
-item at the item's indent (`  - x` / `  a: v`); on
-`tools:`/`disallowedTools:` `_field` refuses it.
+in a key) and a tab inside a quoted item of a flow collection.
+
+Item 111: after a `- ` item whose value on its line is a closed scalar
+(plain, quoted or flow; no key, not empty, not a block header), a later line
+indented past the item's last dash is a continuation line and gets the item
+104 check. For a plain value not ended by ` #` this is how YAML reads the
+line. After a quoted, flow or ` #`-ended value YAML starts no continuation,
+and a colon there is refused all the same. A structure line that lands on an
+open level first opened by a `- ` dash must be a `- ` item. A `- ` item that
+lands on an open level first opened by a key must follow an empty-valued key
+or another item at that level. This says nothing about what Claude Code does
+with such a file. Known passes of files PyYAML rejects (both loaders raise,
+measured on PyYAML 6.0.1 and 6.0.3, item 111): a line with no `: ` indented
+past the dash of a quoted or ` #`-ended scalar item (`- "a"` / `  b`,
+`- a # c` / `  b`); a `- ` item at a key's indent after that key's indented
+value (`  a:` / `    b: c` / `  - x`); a key at the indent of a plain line
+under an empty-valued key (`a:` / `  b` / `  c: d`). Not checked (YAML's
+reading not checked): the same no-colon line after a flow scalar item.
 """
 import re
 
@@ -279,12 +292,14 @@ def _node(line, n, check):
 
 
 def _frontmatter_error(front):
-    """Return the first frontmatter line the test cannot read on its own (items 080, 087, 096, 104, 106)."""
+    """Return the first frontmatter line the test cannot read on its own (items 080, 087, 096, 104, 106, 111)."""
     prev_open = False
     prev = None
     block = None
     stack = []
     in_flow = False
+    kind = {}
+    last_open = {}
     for i, line in enumerate(front):
         n = i + 2
         if DOC_MARKER_RE.match(line):
@@ -346,10 +361,26 @@ def _frontmatter_error(front):
                     popped = True
                 if popped and (not stack or stack[-1] != ind):
                     return INDENT.format(n)
-                if stack and stack[-1] == ind:
+                dash = [ind + j for j, ch in enumerate(line[ind:col]) if ch == "-"]
+                is_key = bool(KEY_RE.match(line[col:]))
+                landed = bool(stack) and stack[-1] == ind
+                if landed and not dash and kind[ind] == "seq":
+                    return SEQ_LEVEL.format(n)
+                if landed and dash and kind[ind] == "map" and not last_open[ind]:
+                    return MAP_ITEM.format(n)
+                if landed:
                     stack.pop()
-                stack.extend(sorted({ind, col} | {ind + j for j, ch in enumerate(line[ind:col]) if ch == "-"}))
-                prev = (col, op)
+                    last_open[ind] = True if dash else op
+                levels = sorted({ind, col} | set(dash))
+                for lv in levels:
+                    if not (landed and lv == ind):
+                        kind[lv] = "seq" if lv in dash else ("map" if lv == col and is_key else None)
+                        last_open[lv] = op
+                stack.extend(levels)
+                if dash and not op and not sb and not is_key:
+                    prev = (dash[-1], False)
+                else:
+                    prev = (col, op)
                 if sb:
                     block = col
             k = KEY_RE.match(line)
@@ -432,6 +463,8 @@ KEY_LONG = "key longer than 1024 characters on frontmatter line {} (item 104)"
 BLOCK = "unreadable block scalar header on frontmatter line {} (item 104)"
 TAB_PLAIN = "tab outside quotes and comments on frontmatter line {} (item 106)"
 INDENT = "indent matches no open level on frontmatter line {} (item 106)"
+SEQ_LEVEL = "non-item line at a list's dash column on frontmatter line {} (item 111)"
+MAP_ITEM = "list item at the indent of a key with a value on frontmatter line {} (item 111)"
 TOOLS = "tools: Read, Write"
 
 CASES = {
@@ -653,6 +686,17 @@ CASES = {
                                         "unparsed tools: line 'Bash: x' (item 075)"),
     "f1_tools_item_indents": (_fm("tools:", "  - Read", "      - Bash"), None,
                               "tools: list items at different indents (item 106)"),
+    "g1_item_scalar_then_key": (_fm("hooks:", "- a", "  b: c", "tools: Read"), None, VALUE.format(4)),
+    "g2_indented_item_scalar_then_key": (_fm("hooks:", "  - a", "    b: c", "tools: Read"), None,
+                                         VALUE.format(4)),
+    "g3_item_scalar_continuation": (_fm("hooks:", "- a", "  b", TOOLS), {"Read", "Write"}, None),
+    "g4_quoted_item_then_key": (_fm("hooks:", '- "a"', "  b: c", TOOLS), None, VALUE.format(4)),
+    "er1_key_at_item_dash": (_fm("hooks:", "  - x", "  a: v", TOOLS), None, SEQ_LEVEL.format(4)),
+    "d3_item_after_scalar_key": (_fm("hooks:", "  a: v", "  - x", TOOLS), None, MAP_ITEM.format(4)),
+    "k2_item_after_reset_key": (_fm("hooks:", "  a:", "  - x", "  b: v", "  - y", TOOLS), None,
+                                MAP_ITEM.format(6)),
+    "k4_reopened_level_map": (_fm("hooks:", "  - x", "name:", "  a: b", "  c: d", TOOLS),
+                              {"Read", "Write"}, None),
 }
 
 
