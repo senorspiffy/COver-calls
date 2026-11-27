@@ -6125,6 +6125,9 @@ def test_batch_log_check_cutoff_boundary(tmp_path, item, evaluated):
 # that fails under its FROM-side operator mutant (`>=`->`>`, `<`->`<=`) and the one that fails under its
 # site-local FROM-1 mutant (`NAME - 1`). Kill ids are `<file>::<test>` or `<file>::<test>[<param id>]`; a site id
 # is `<CONSTANT minus _FROM>@<check>`. The census below fails when a site is added or removed with no row here.
+# Item 112: every kill (and each id pinned by the EQUIVALENT row) must be a collected pytest id
+# (test_from_site_census_kill_ids), and a `*_FROM` cutoff used outside a comparison, through an alias or an
+# attribute, fails test_from_names_only_in_compares, so no site can escape the census.
 _PC = "test_pipeline_check.py"
 _RD = "test_real_data_field.py"
 SITE_ROWS = [
@@ -6142,7 +6145,9 @@ SITE_ROWS = [
      f"{_PC}::test_from_cutoff_boundary[LOG_CHECK-FROM]", f"{_PC}::test_from_cutoff_boundary[LOG_CHECK-FROM-1]"),
     ("TIMED@incomplete_timed_gate", "incomplete", "TIMED_FROM",
      f"{_PC}::test_rule_gate_cutoff_boundary[TIMED@incomplete_timed_gate-FROM]",
-     'EQUIVALENT: at 089 "I2" in bad means an I2 line fails LOG_FORMAT, so all(timed=False) is False and the '
+     f"EQUIVALENT (pinned by {_PC}::test_timed_flag_ignored_below_timed_from[089-U], "
+     f"{_PC}::test_s7_from1_same_output[089-untimed]): "
+     'at 089 "I2" in bad means an I2 line fails LOG_FORMAT, so all(timed=False) is False and the '
      'gate is never entered'),
     ("TESTS_FORMAT@incomplete_tests_gate", "incomplete", "TESTS_FORMAT_FROM",
      f"{_PC}::test_rule_gate_cutoff_boundary[TESTS_FORMAT@incomplete_tests_gate-FROM]",
@@ -6200,7 +6205,7 @@ def test_from_site_census():
     tests = {}
     kills = [k for row in SITE_ROWS for k in row[3:]]
     for kill in kills:
-        if kill.startswith("EQUIVALENT:"):
+        if kill.startswith("EQUIVALENT"):
             continue
         file, test = kill.split("::", 1)
         test = test.split("[", 1)[0]
@@ -6208,7 +6213,9 @@ def test_from_site_census():
             tree = ast.parse((REPO / "tests" / file).read_text(encoding="utf-8"))
             tests[file] = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
         assert test in tests[file], kill
-    assert [k for k in kills if k.startswith("EQUIVALENT:")] == [SITE_ROWS[6][4]]
+    assert [k for k in kills if k.startswith("EQUIVALENT")] == [SITE_ROWS[6][4]]
+    pins = _pins(SITE_ROWS[6][4])
+    assert pins and len(pins) == 2, SITE_ROWS[6][4]
     assert SITE_ROWS[6][0] == "TIMED@incomplete_timed_gate"
 
 
@@ -6221,3 +6228,156 @@ def test_from_site_census_catches_new_site():
         Counter({("_probe", "SUITE_FROM"): 1})
     assert _from_sites(src + '\n\nX = int("1") >= SUITE_FROM\n') - want == Counter({("<module>", "SUITE_FROM"): 1})
     assert _from_sites(src + "\n\ny = z != UNTRACKED_FROM\n") == _from_sites(src)
+
+
+def _pins(text):
+    """Item 112: the test ids an `EQUIVALENT (pinned by <id>, <id>): <reason>` kill names (anchored fullmatch),
+    or None when the text has no pin."""
+    m = re.fullmatch(r"EQUIVALENT \(pinned by ([^()]+)\): .+", text)
+    return m[1].split(", ") if m else None
+
+
+def _kill_ids():
+    """Item 112: every non-EQUIVALENT kill in SITE_ROWS plus the ids pinned by the EQUIVALENT row. An EQUIVALENT
+    row with no pin fails here; it is never dropped."""
+    out = []
+    for row in SITE_ROWS:
+        for kill in row[3:]:
+            if kill.startswith("EQUIVALENT"):
+                pins = _pins(kill)
+                assert pins, f"EQUIVALENT kill without (pinned by ...): {kill}"
+                out += pins
+            else:
+                out.append(kill)
+    return out
+
+
+def _unresolved(kills, collected):
+    """Item 112 (RI-012): sorted kills whose `tests/<kill>` is not a collected id. Exact set membership."""
+    return sorted(k for k in kills if "tests/" + k not in collected)
+
+
+CENSUS_STRIP = ("PYTEST_ADDOPTS", "PYTHONSAFEPATH", "PYTEST_PLUGINS")
+
+
+def _collected_ids():
+    """Item 112: (collected ids, stdout) of a child `pytest --collect-only -q` of the two census files. The child
+    keeps the bytecode variables (RI-015), runs with -B, and drops options and plugins the parent run could add.
+    A nonzero exit fails; only `tests/...::...` lines are ids."""
+    env = {k: v for k, v in os.environ.items() if k not in CENSUS_STRIP}
+    env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+    r = subprocess.run([sys.executable, "-B", "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider",
+                        f"--rootdir={REPO}", "tests/test_pipeline_check.py", "tests/test_real_data_field.py"],
+                       cwd=REPO, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    ids = {l.strip() for l in r.stdout.splitlines() if l.strip().startswith("tests/") and "::" in l}
+    return ids, r.stdout
+
+
+def test_from_site_census_unresolved_kinds():
+    """Item 112 (step 1): a misspelled param id, a dropped param id and an added bracket are each unresolved;
+    the two real ids are not. A kill text with no pin gives None."""
+    collected = {"tests/test_pipeline_check.py::test_from_cutoff_boundary[TIMED-FROM]",
+                 "tests/test_pipeline_check.py::test_i2_tests_field_cutoff"}
+    bad = ["test_pipeline_check.py::test_from_cutoff_boundary[TIMED-FROM-l]",
+           "test_pipeline_check.py::test_from_cutoff_boundary",
+           "test_pipeline_check.py::test_i2_tests_field_cutoff[x]"]
+    good = ["test_pipeline_check.py::test_from_cutoff_boundary[TIMED-FROM]",
+            "test_pipeline_check.py::test_i2_tests_field_cutoff"]
+    assert _unresolved(bad + good, collected) == sorted(bad)
+    assert _pins("EQUIVALENT: x") is None
+
+
+def test_from_site_census_kill_ids():
+    """Item 112 (step 2): every SITE_ROWS kill and every EQUIVALENT pin is an id pytest itself collects."""
+    ids, out = _collected_ids()
+    assert "tests/test_pipeline_check.py::test_from_site_census" in ids, \
+        "census anchor not collected:\n" + "\n".join(out.splitlines()[:5])
+    assert _unresolved(_kill_ids(), ids) == []
+
+
+L1_FIELDS = {"T": "1 files changed | tests 1 passed in 0.01s", "U": "1 files changed | tests 1 passed",
+             "M": "see 05", "O": "1 files changed | tests 9/9"}
+L1_ROWS = [(item, shape, True) for item in ("075", "076", "089") for shape in "TUMO"] + [("090", "U", False)]
+L1_IDS = [f"{item}-{shape}" for item, shape, _ in L1_ROWS[:-1]] + ["090-untimed"]
+
+
+@pytest.mark.parametrize("item, shape, same", L1_ROWS, ids=L1_IDS)
+def test_timed_flag_ignored_below_timed_from(item, shape, same):
+    """Item 112 (step 3, S7 FROM-1 premise, no git): below TIMED_FROM log_fields_ok gives the same result with
+    timed=True and timed=False, so the S7 gate's `all(timed=False)` cannot differ at 089. 090 U is the control."""
+    cp = _cp()
+    assert cp.TIMED_FROM == 90
+    a = cp.log_fields_ok("I2", item, L1_FIELDS[shape])
+    b = cp.log_fields_ok("I2", item, L1_FIELDS[shape], timed=False)
+    assert (a == b) is same, (a, b)
+    if not same:
+        assert (a, b) == (False, True)
+
+
+S7_SITE = ">= TIMED_FROM \\\n"
+S7_FMT = "log line for I2 does not match its format (item 045)"
+
+
+@NO_GIT
+@pytest.mark.parametrize("item, i2, mutant, same", [
+    ("089", L1_FIELDS["U"], "- 1", True),
+    ("089", L1_FIELDS["M"], "- 1", True),
+    ("090", L1_FIELDS["U"], "+ 1", False),
+    ("089", L1_FIELDS["U"], None, True),
+], ids=["089-untimed", "089-malformed", "090-control", "089-identity"])
+def test_s7_from1_same_output(tmp_path, item, i2, mutant, same):
+    """Item 112 (step 4): a copy of check_pipeline.py with the S7 gate's site shifted (`- 1`) prints the same
+    output at 089 as the real script; the `+ 1` copy at 090 differs (control), and an unedited copy is the same."""
+    sha, real = _timed_repo(tmp_path, TIMED_RULES, item=item, i2=i2)
+    src = (REPO / "scripts/check_pipeline.py").read_text(encoding="utf-8")
+    assert src.count(S7_SITE) == 1
+    copy = tmp_path / "copy" / "check_pipeline.py"
+    copy.parent.mkdir()
+    copy.write_text(src if mutant is None else src.replace(S7_SITE, f">= TIMED_FROM {mutant} \\\n"),
+                    encoding="utf-8")
+    r = subprocess.run([sys.executable, "-B", str(copy), "--untracked-from", sha, "--today", SUITE_DAY],
+                       cwd=tmp_path / "repo", capture_output=True, text=True, encoding="utf-8")
+    assert (r.stdout == real) is same, (real, r.stdout, r.stderr)
+    inc, rns = _pick(real, "INCOMPLETE:"), _pick(real, "RULE NOT SEEN:")
+    if item == "090":
+        assert inc == "INCOMPLETE: none", real
+        assert rns.startswith("RULE NOT SEEN: 090 (") and "without TIMED_FROM (090)" in rns, real
+        cinc = _pick(r.stdout, "INCOMPLETE:")
+        assert cinc.startswith("INCOMPLETE: 090 (") and S7_FMT in cinc, r.stdout
+        assert _pick(r.stdout, "RULE NOT SEEN:") == "RULE NOT SEEN: none", r.stdout
+    elif i2 == L1_FIELDS["M"]:
+        assert inc.startswith("INCOMPLETE: 089 (") and S7_FMT in inc, real
+    else:
+        assert inc == "INCOMPLETE: none" and rns == "RULE NOT SEEN: none", real
+
+
+def _from_uses_outside_compare(source):
+    """Item 112 (step 6): Counter of ("name", NAME) for each loaded `*_FROM` Name (UNTRACKED_FROM excluded) outside
+    every ast.Compare, plus ("attr", NAME) for each `*_FROM` attribute anywhere. Such a use escapes _from_sites."""
+    tree = ast.parse(source)
+    inside = {id(n) for c in ast.walk(tree) if isinstance(c, ast.Compare) for n in ast.walk(c)}
+    got = Counter()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and n.id.endswith("_FROM") and n.id != "UNTRACKED_FROM" \
+                and isinstance(n.ctx, ast.Load) and id(n) not in inside:
+            got[("name", n.id)] += 1
+        elif isinstance(n, ast.Attribute) and n.attr.endswith("_FROM"):
+            got[("attr", n.attr)] += 1
+    return got
+
+
+def test_from_names_only_in_compares():
+    """Item 112 (step 6): scripts/check_pipeline.py uses every `*_FROM` cutoff only inside a comparison."""
+    got = _from_uses_outside_compare((REPO / "scripts/check_pipeline.py").read_text(encoding="utf-8"))
+    assert got == Counter(), ("a *_FROM cutoff used outside a comparison escapes test_from_site_census; compare it "
+                              "directly or add a census row", got)
+
+
+def test_from_names_only_in_compares_catches_alias():
+    """Item 112 (step 6): an alias and a call argument are reported, and so is an attribute; the Store definition,
+    the Compare use, a string and UNTRACKED_FROM are not."""
+    src = ("SUITE_FROM = 1\ndef f(n, cp):\n    c = SUITE_FROM\n    if n >= cp.SUITE_FROM:\n"
+           "        return max(n, SUITE_FROM)\n    return n >= SUITE_FROM and \"TIMED_FROM\" and UNTRACKED_FROM\n")
+    assert _from_uses_outside_compare(src) == Counter({("name", "SUITE_FROM"): 2, ("attr", "SUITE_FROM"): 1})
