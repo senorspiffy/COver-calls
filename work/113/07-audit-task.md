@@ -8,3 +8,4 @@ Audit should look at:
 3. **Optional (03 step 5).** After the branch is pushed, from a scratch worktree of origin/main (never an in-repo checkout), RULES BRANCH should name origin/daily-fixes/2026-11-26 with templates/build-plan.md, templates/build-report.md and scripts/check_pipeline.py. I3 could not check this: the branch is not pushed.
 4. **Pins and mutants.** In 06, M-a1, M-3, M-4 and M-2alt are each killed by exactly one test. The full suite at 8529267 gives 1073 passed, 1 skipped. Base and head `check_pipeline.py` output is identical (exit 0/0).
 5. **Main checkout state.** While I3 ran, the main checkout held another item's uncommitted edit to tests/test_pipeline_check.py (item 112 SITE_ROWS). Make sure it is committed under 112, not mixed into 113.
+A1 result: PASS (2026-11-27, logs/audit/2026-11-27-113.md)
