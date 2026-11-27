@@ -23,3 +23,4 @@ What A1 should look at:
 6. **Both PyYAML runs.** `-I` (6.0.1 pure, CSafeLoader not measured) and the user site (6.0.3, libyaml). I3's verdicts equal 04 Extra research 2 and 05's table. Check this once more on the head.
 7. **Suite and pipeline on the branch after 112/113 land.** I3 measured 1081 passed, 1 skipped at 7b11624, the same as 05. Re-run on the final branch head, and check that `check_pipeline.py` shows 111 with no SKIPPED, INCOMPLETE, LOG TIME or LOG BATCH entry.
 8. **RI-002 status for logs/recurring-issues.md (A1 copies it on main).** Near miss closed by 111: g1/g2/g4 → VALUE, er1 → SEQ_LEVEL, d3/k2 → MAP_ITEM, pinned by M82/M83/M84. The residuals are points 1 and 3.
+A1 result: PASS (2026-11-27, logs/audit/2026-11-27-111.md)
